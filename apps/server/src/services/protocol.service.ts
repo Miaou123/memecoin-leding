@@ -35,6 +35,9 @@ class ProtocolService {
     // Get on-chain protocol state
     const protocolState = await client.getProtocolState();
     
+    // Get treasury balance separately (no longer on ProtocolState)
+    const treasuryBalance = await this.getTreasuryBalance();
+    
     // Get 24h volume
     const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
     const volume24hResult = await prisma.loan.aggregate({
@@ -61,31 +64,31 @@ class ProtocolService {
       where: { id: 'current' },
       create: {
         id: 'current',
-        totalValueLocked: protocolState.treasuryBalance,
+        totalValueLocked: treasuryBalance,
         totalLoansActive,
         totalLoansCreated: parseInt(protocolState.totalLoansCreated),
         totalInterestEarned: protocolState.totalInterestEarned,
-        treasuryBalance: protocolState.treasuryBalance,
+        treasuryBalance: treasuryBalance,
         volume24h: volume24hResult._sum.solBorrowed || '0',
         liquidations24h,
       },
       update: {
-        totalValueLocked: protocolState.treasuryBalance,
+        totalValueLocked: treasuryBalance,
         totalLoansActive,
         totalLoansCreated: parseInt(protocolState.totalLoansCreated),
         totalInterestEarned: protocolState.totalInterestEarned,
-        treasuryBalance: protocolState.treasuryBalance,
+        treasuryBalance: treasuryBalance,
         volume24h: volume24hResult._sum.solBorrowed || '0',
         liquidations24h,
       },
     });
     
     return {
-      totalValueLocked: protocolState.treasuryBalance,
+      totalValueLocked: treasuryBalance,
       totalLoansActive,
       totalLoansCreated: parseInt(protocolState.totalLoansCreated),
       totalInterestEarned: protocolState.totalInterestEarned,
-      treasuryBalance: protocolState.treasuryBalance,
+      treasuryBalance: treasuryBalance,
       volume24h: volume24hResult._sum.solBorrowed || '0',
       liquidations24h,
     };
@@ -108,8 +111,10 @@ class ProtocolService {
       paused: protocolState.paused,
       programId: PROGRAM_ID.toString(),
       fees: {
-        protocolFeeBps: 100,
-        liquidationThresholdBps: 50,
+        protocolFeeBps: protocolState.protocolFeeBps,
+        treasuryFeeBps: protocolState.treasuryFeeBps,
+        buybackFeeBps: protocolState.buybackFeeBps,
+        operationsFeeBps: protocolState.operationsFeeBps,
       },
     };
   }
@@ -128,6 +133,9 @@ class ProtocolService {
     mint: string;
     tier: string;
     poolAddress: string;
+    poolType?: number;
+    minLoanAmount?: string;
+    maxLoanAmount?: string;
     symbol: string;
     name: string;
     decimals: number;
@@ -141,10 +149,20 @@ class ProtocolService {
       gold: 2,
     };
     
+    // Pool type: 0=Raydium, 1=Orca, 2=Pumpfun, 3=PumpSwap
+    const poolType = params.poolType ?? 0;
+    
+    // Default loan amounts (in lamports)
+    const minLoanAmount = new BN(params.minLoanAmount || String(0.1 * 1e9)); // 0.1 SOL
+    const maxLoanAmount = new BN(params.maxLoanAmount || String(100 * 1e9)); // 100 SOL
+    
     await client.whitelistToken({
       mint: new PublicKey(params.mint),
       tier: tierMap[params.tier as keyof typeof tierMap],
       poolAddress: new PublicKey(params.poolAddress),
+      poolType,
+      minLoanAmount,
+      maxLoanAmount,
     });
     
     // Save to database

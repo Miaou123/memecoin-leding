@@ -15,7 +15,7 @@ pub struct UpdateFees<'info> {
     pub admin: Signer<'info>,
 }
 
-pub fn handler(
+pub fn update_fees_handler(
     ctx: Context<UpdateFees>,
     protocol_fee_bps: Option<u16>,
     treasury_fee_bps: Option<u16>,

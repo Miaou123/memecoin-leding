@@ -14,6 +14,7 @@ import { loansRouter } from './api/loans.js';
 import { tokensRouter } from './api/tokens.js';
 import { protocolRouter } from './api/protocol.js';
 import { userRouter } from './api/user.js';
+import pricesRouter from './routes/prices.js';
 
 // Import services
 import { initializeJobs } from './jobs/index.js';
@@ -56,6 +57,7 @@ app.route('/api/loans', loansRouter);
 app.route('/api/tokens', tokensRouter);
 app.route('/api/protocol', protocolRouter);
 app.route('/api/user', userRouter);
+app.route('/api/prices', pricesRouter);
 
 // Error handler
 app.onError(errorHandler);
@@ -99,11 +101,69 @@ const server = createServer((req, res) => {
 // Initialize WebSocket server
 const wss = initializeWebSocket(server);
 
+// Environment validation
+const validateEnvironment = () => {
+  const warnings: string[] = [];
+  const errors: string[] = [];
+
+  // Check Jupiter API key
+  if (!process.env.JUPITER_API_KEY) {
+    warnings.push('⚠️  JUPITER_API_KEY not set - using public endpoints (rate limited)');
+    warnings.push('   Get your API key at: https://portal.jup.ag');
+  }
+
+  // Check database URL
+  if (!process.env.DATABASE_URL) {
+    errors.push('❌ DATABASE_URL is required');
+  }
+
+  // Check Redis URL
+  if (!process.env.REDIS_URL) {
+    warnings.push('⚠️  REDIS_URL not set - background jobs may not work properly');
+  }
+
+  // Print warnings
+  if (warnings.length > 0) {
+    console.log('\n🔶 Environment Warnings:');
+    warnings.forEach(warning => console.log(`  ${warning}`));
+  }
+
+  // Print errors and exit if any
+  if (errors.length > 0) {
+    console.log('\n🔴 Environment Errors:');
+    errors.forEach(error => console.log(`  ${error}`));
+    console.log('\n💡 Copy .env.example to .env and configure your environment variables');
+    process.exit(1);
+  }
+
+  if (warnings.length === 0 && errors.length === 0) {
+    console.log('✅ Environment configuration looks good');
+  }
+};
+
+// Validate environment before starting
+validateEnvironment();
+
 // Start server
 const port = parseInt(process.env.PORT || '3001');
 server.listen(port, () => {
   console.log(`🚀 Server running on http://localhost:${port}`);
   console.log(`🔌 WebSocket server running on ws://localhost:${port}/ws`);
+  
+  // Test Jupiter API connection if API key is configured
+  if (process.env.JUPITER_API_KEY) {
+    import('./services/price.js').then(({ priceService }) => {
+      priceService.testPriceSource().then((result: { working: boolean; source: string; latency: number }) => {
+        if (result.working) {
+          console.log(`✅ ${result.source} price source connection successful (${result.latency}ms)`);
+        } else {
+          console.log(`❌ ${result.source} price source connection failed`);
+        }
+      }).catch(error => {
+        console.log('⚠️  Could not test Jupiter API connection:', error.message);
+      });
+    });
+  }
   
   // Initialize background jobs
   initializeJobs().then(() => {

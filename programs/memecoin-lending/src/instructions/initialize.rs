@@ -28,7 +28,7 @@ pub struct Initialize<'info> {
     pub rent: Sysvar<'info, Rent>,
 }
 
-pub fn handler(
+pub fn initialize_handler(
     ctx: Context<Initialize>,
     admin: Pubkey,
     buyback_wallet: Pubkey,

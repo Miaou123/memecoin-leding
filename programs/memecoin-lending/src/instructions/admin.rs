@@ -1,5 +1,5 @@
 use anchor_lang::prelude::*;
-use anchor_spl::token::{self, Token, TokenAccount, Transfer};
+use anchor_spl::token::Token;
 use crate::state::*;
 use crate::error::LendingError;
 use crate::utils::*;
@@ -131,10 +131,40 @@ pub fn withdraw_treasury_handler(ctx: Context<WithdrawTreasury>, amount: u64) ->
     **ctx.accounts.treasury.to_account_info().try_borrow_mut_lamports()? -= amount;
     **ctx.accounts.admin.to_account_info().try_borrow_mut_lamports()? += amount;
 
-    // Update tracked treasury balance
-    protocol_state.treasury_balance = SafeMath::sub(protocol_state.treasury_balance, amount)?;
+    // Treasury balance is tracked by the actual lamport balance of the treasury account
+    // No need to track it separately in protocol_state
     
     msg!("Treasury withdrawal: {} SOL to admin {}", amount, ctx.accounts.admin.key());
+    
+    Ok(())
+}
+
+/// Update wallet addresses (admin only)
+pub fn update_wallets_handler(
+    ctx: Context<AdminControl>,
+    new_admin: Option<Pubkey>,
+    new_buyback_wallet: Option<Pubkey>,
+    new_operations_wallet: Option<Pubkey>,
+) -> Result<()> {
+    let protocol_state = &mut ctx.accounts.protocol_state;
+    
+    if let Some(admin) = new_admin {
+        if admin == Pubkey::default() {
+            return Err(LendingError::InvalidAdminAddress.into());
+        }
+        protocol_state.admin = admin;
+        msg!("Admin updated to: {}", admin);
+    }
+    
+    if let Some(buyback) = new_buyback_wallet {
+        protocol_state.buyback_wallet = buyback;
+        msg!("Buyback wallet updated to: {}", buyback);
+    }
+    
+    if let Some(operations) = new_operations_wallet {
+        protocol_state.operations_wallet = operations;
+        msg!("Operations wallet updated to: {}", operations);
+    }
     
     Ok(())
 }
@@ -151,10 +181,9 @@ pub fn update_liquidation_bonus_handler(
         return Err(LendingError::InvalidLiquidationBonus.into());
     }
     
-    let old_bonus = protocol_state.liquidation_bonus_bps;
     protocol_state.liquidation_bonus_bps = new_bonus_bps;
     
-    msg!("Liquidation bonus updated from {} to {} bps", old_bonus, new_bonus_bps);
+    msg!("Liquidation bonus updated to {} bps", new_bonus_bps);
     
     Ok(())
 }
@@ -176,7 +205,6 @@ pub fn emergency_drain_handler(ctx: Context<EmergencyDrain>) -> Result<()> {
     // Reset protocol state tracking
     protocol_state.total_sol_borrowed = 0;
     protocol_state.total_interest_earned = 0;
-    protocol_state.treasury_balance = 0;
     
     msg!("EMERGENCY DRAIN: {} SOL drained to admin {}", treasury_balance, ctx.accounts.admin.key());
     

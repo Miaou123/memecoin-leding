@@ -9,11 +9,12 @@ import {
   LoanTermsParams,
   LoanTerms,
 } from '@memecoin-lending/types';
-import { PROGRAM_ID } from '@memecoin-lending/config';
+import { PROGRAM_ID, API_ENDPOINTS } from '@memecoin-lending/config';
 import * as instructions from './instructions';
 import * as accounts from './accounts';
 import * as pda from './pda';
 import { calculateLoanTerms } from './utils';
+import { PriceClient, PriceData } from './price';
 
 export interface AnchorWallet {
   publicKey: PublicKey;
@@ -27,12 +28,14 @@ export class MemecoinLendingClient {
   readonly programId: PublicKey;
   readonly provider: AnchorProvider;
   readonly program: Program;
+  readonly priceClient: PriceClient;
 
   constructor(
     connection: Connection,
     wallet: AnchorWallet,
     programId: PublicKey = PROGRAM_ID,
-    idl?: Idl
+    idl?: Idl,
+    apiEndpoint?: string
   ) {
     this.connection = connection;
     this.wallet = wallet;
@@ -46,6 +49,7 @@ export class MemecoinLendingClient {
     }
     
     this.program = new Program(idl, this.provider);
+    this.priceClient = new PriceClient(apiEndpoint);
   }
 
   // PDA derivations
@@ -193,9 +197,49 @@ export class MemecoinLendingClient {
   }
 
   async getCurrentPrice(mint: PublicKey): Promise<BN> {
-    // This would fetch from the pool
-    // For now, return a placeholder
-    return new BN(1000000); // $1 with 6 decimals
+    const priceData = await this.priceClient.getPrice(mint.toString());
+    if (!priceData) {
+      throw new Error(`Price not available for token ${mint.toString()}`);
+    }
+    
+    // Return price in lamports (SOL price) or convert USD to lamports using SOL price
+    if (priceData.solPrice) {
+      // Convert SOL price to lamports (multiply by 1e9)
+      return new BN(Math.round(priceData.solPrice * 1e9));
+    } else {
+      // Convert USD price to SOL, then to lamports
+      const solToLamports = await this.priceClient.convertUsdToSol(priceData.usdPrice);
+      if (!solToLamports) {
+        throw new Error('Unable to convert USD price to SOL');
+      }
+      return new BN(Math.round(solToLamports * 1e9));
+    }
+  }
+
+  // Price-related methods
+  async getTokenPrice(mint: PublicKey): Promise<PriceData | null> {
+    return this.priceClient.getPrice(mint.toString());
+  }
+
+  async getTokenPrices(mints: PublicKey[]): Promise<Map<string, PriceData>> {
+    const mintStrings = mints.map(mint => mint.toString());
+    return this.priceClient.getPrices(mintStrings);
+  }
+
+  async getSolPrice(): Promise<number | null> {
+    return this.priceClient.getSolPrice();
+  }
+
+  async getAllTokenPrices(): Promise<Map<string, PriceData>> {
+    return this.priceClient.getAllTokenPrices();
+  }
+
+  async getTokenValueUsd(mint: PublicKey, amount: BN, decimals?: number): Promise<number | null> {
+    return this.priceClient.getTokenValueUsd(mint.toString(), amount, decimals);
+  }
+
+  async getTokenValueSol(mint: PublicKey, amount: BN, decimals?: number): Promise<number | null> {
+    return this.priceClient.getTokenValueSol(mint.toString(), amount, decimals);
   }
 
   async estimateLoan(params: CreateLoanParams): Promise<LoanTerms> {
@@ -218,22 +262,126 @@ export class MemecoinLendingClient {
   }
 
   // Helper to check if a loan is liquidatable
-  async isLoanLiquidatable(loanPubkey: PublicKey): Promise<boolean> {
+  async isLoanLiquidatable(loanPubkey: PublicKey): Promise<{
+    liquidatable: boolean;
+    reason?: 'time' | 'price';
+    currentPrice?: number;
+    liquidationPrice?: number;
+    timeRemaining?: number;
+  }> {
     const loan = await this.getLoan(loanPubkey);
     if (!loan || loan.status !== LoanStatus.Active) {
-      return false;
+      return { liquidatable: false };
     }
 
+    // Check time-based liquidation
     const currentTime = Math.floor(Date.now() / 1000);
     if (currentTime > loan.dueAt) {
-      return true;
+      return { 
+        liquidatable: true, 
+        reason: 'time',
+        timeRemaining: 0
+      };
     }
 
-    const currentPrice = await this.getCurrentPrice(new PublicKey(loan.tokenMint));
-    if (currentPrice.lte(new BN(loan.liquidationPrice))) {
-      return true;
+    // Check price-based liquidation
+    try {
+      const priceData = await this.getTokenPrice(new PublicKey(loan.tokenMint));
+      if (priceData?.solPrice) {
+        const currentPriceLamports = priceData.solPrice * 1e9; // Convert to lamports
+        const liquidationPriceLamports = parseFloat(loan.liquidationPrice);
+        
+        if (currentPriceLamports <= liquidationPriceLamports) {
+          return { 
+            liquidatable: true, 
+            reason: 'price',
+            currentPrice: currentPriceLamports,
+            liquidationPrice: liquidationPriceLamports,
+            timeRemaining: loan.dueAt - currentTime
+          };
+        }
+
+        return { 
+          liquidatable: false,
+          currentPrice: currentPriceLamports,
+          liquidationPrice: liquidationPriceLamports,
+          timeRemaining: loan.dueAt - currentTime
+        };
+      }
+    } catch (error) {
+      console.error('Error checking price liquidation:', error);
     }
 
-    return false;
+    return { 
+      liquidatable: false,
+      timeRemaining: loan.dueAt - currentTime
+    };
+  }
+
+  // Enhanced liquidation risk analysis
+  async analyzeLiquidationRisk(loanPubkey: PublicKey): Promise<{
+    riskLevel: 'low' | 'medium' | 'high' | 'critical';
+    currentLtv: number;
+    liquidationLtv: number;
+    priceDropToLiquidation: number;
+    timeToExpiry: number;
+    recommendations: string[];
+  } | null> {
+    const loan = await this.getLoan(loanPubkey);
+    if (!loan || loan.status !== LoanStatus.Active) {
+      return null;
+    }
+
+    const tokenConfig = await this.getTokenConfig(new PublicKey(loan.tokenMint));
+    if (!tokenConfig) {
+      return null;
+    }
+
+    const riskAnalysis = await this.priceClient.checkLiquidationRisk(
+      loan.tokenMint,
+      new BN(loan.collateralAmount),
+      new BN(loan.solBorrowed),
+      tokenConfig.ltvBps,
+      9 // Assuming 9 decimals for most tokens
+    );
+
+    if (!riskAnalysis) {
+      return null;
+    }
+
+    const timeToExpiry = loan.dueAt - Math.floor(Date.now() / 1000);
+    const priceDropToLiquidation = ((riskAnalysis.currentLtv - riskAnalysis.liquidationLtv) / riskAnalysis.currentLtv) * 100;
+
+    let riskLevel: 'low' | 'medium' | 'high' | 'critical';
+    const recommendations: string[] = [];
+
+    if (riskAnalysis.isAtRisk) {
+      riskLevel = 'critical';
+      recommendations.push('Immediate action required - loan is at liquidation risk');
+      recommendations.push('Add more collateral or repay loan immediately');
+    } else if (riskAnalysis.currentLtv > riskAnalysis.liquidationLtv * 0.9) {
+      riskLevel = 'high';
+      recommendations.push('High risk - consider adding collateral');
+      recommendations.push(`Price needs to drop only ${priceDropToLiquidation.toFixed(2)}% for liquidation`);
+    } else if (riskAnalysis.currentLtv > riskAnalysis.liquidationLtv * 0.75) {
+      riskLevel = 'medium';
+      recommendations.push('Monitor closely - moderate risk level');
+    } else {
+      riskLevel = 'low';
+      recommendations.push('Low risk - loan is healthy');
+    }
+
+    if (timeToExpiry < 24 * 60 * 60) { // Less than 24 hours
+      recommendations.push('Loan expires soon - consider repaying or extending');
+    }
+
+    return {
+      riskLevel,
+      currentLtv: riskAnalysis.currentLtv,
+      liquidationLtv: riskAnalysis.liquidationLtv,
+      priceDropToLiquidation,
+      timeToExpiry,
+      recommendations,
+    };
   }
 }

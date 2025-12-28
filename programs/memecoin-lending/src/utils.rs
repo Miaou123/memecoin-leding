@@ -1,5 +1,5 @@
 use anchor_lang::prelude::*;
-use anchor_spl::token::{Token, TokenAccount};
+use anchor_spl::token::TokenAccount;
 use crate::error::LendingError;
 use crate::state::*;
 
@@ -10,6 +10,17 @@ pub const MAX_LOAN_DURATION: u64 = 7 * 24 * 60 * 60; // 7 days
 pub const MIN_LOAN_DURATION: u64 = 12 * 60 * 60; // 12 hours
 pub const PRICE_STALENESS_THRESHOLD: i64 = 60; // 60 seconds
 pub const MAX_PRICE_DEVIATION_BPS: u64 = 500; // 5%
+
+/// TWAP configuration
+pub const TWAP_WINDOW_SECONDS: i64 = 300; // 5 minute window
+pub const MIN_TWAP_SAMPLES: u8 = 3;
+
+/// Price checkpoint for TWAP calculation
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Default)]
+pub struct PriceCheckpoint {
+    pub price: u64,
+    pub timestamp: i64,
+}
 
 /// Math utilities with overflow protection
 pub struct SafeMath;
@@ -105,6 +116,27 @@ impl LoanCalculator {
     ) -> Result<u64> {
         SafeMath::mul_div(collateral_amount, liquidation_bonus_bps as u64, BPS_DIVISOR)
     }
+
+    /// Calculate loan health factor (>1 = healthy, <1 = liquidatable)
+    /// Returns value in basis points (10000 = 1.0)
+    pub fn calculate_health_factor(
+        collateral_value: u64,  // in SOL
+        debt_value: u64,        // in SOL (principal + accrued interest)
+        ltv_bps: u16,
+    ) -> Result<u64> {
+        if debt_value == 0 {
+            return Ok(u64::MAX); // No debt = infinitely healthy
+        }
+        
+        // health = (collateral * ltv) / debt
+        let max_borrow = SafeMath::mul_div(collateral_value, ltv_bps as u64, BPS_DIVISOR)?;
+        SafeMath::mul_div(max_borrow, BPS_DIVISOR, debt_value)
+    }
+    
+    /// Check if loan is healthy
+    pub fn is_loan_healthy(health_factor: u64) -> bool {
+        health_factor >= BPS_DIVISOR // >= 1.0
+    }
 }
 
 /// Price feed utilities with real on-chain price reading
@@ -112,7 +144,7 @@ pub struct PriceFeedUtils;
 
 impl PriceFeedUtils {
     /// Read price from Raydium AMM pool
-    pub fn read_raydium_price(pool_data: &[u8], token_mint: &Pubkey, sol_mint: &Pubkey) -> Result<u64> {
+    pub fn read_raydium_price(pool_data: &[u8], _token_mint: &Pubkey, sol_mint: &Pubkey) -> Result<u64> {
         // Raydium AMM pool layout offsets
         const TOKEN_A_AMOUNT_OFFSET: usize = 128;
         const TOKEN_B_AMOUNT_OFFSET: usize = 136;
@@ -217,6 +249,63 @@ impl PriceFeedUtils {
 
         Ok(())
     }
+
+    /// Get token price - wrapper for read_price_from_pool
+    /// Used when you have the pool account info available
+    pub fn get_token_price(
+        pool_account: &AccountInfo,
+        pool_type: PoolType,
+        token_mint: &Pubkey,
+    ) -> Result<u64> {
+        Self::read_price_from_pool(pool_account, pool_type, token_mint)
+    }
+
+    /// Validate price against recent checkpoint (anti-manipulation)
+    pub fn validate_price_safety(
+        current_price: u64,
+        last_checkpoint_price: u64,
+        last_checkpoint_time: i64,
+        current_time: i64,
+    ) -> Result<()> {
+        // If checkpoint is recent (within TWAP window), check deviation
+        if current_time - last_checkpoint_time < TWAP_WINDOW_SECONDS {
+            Self::validate_price_deviation(last_checkpoint_price, current_price)?;
+        }
+        Ok(())
+    }
+    
+    /// Calculate simple moving average price
+    pub fn calculate_average_price(prices: &[u64]) -> Result<u64> {
+        if prices.is_empty() {
+            return Err(LendingError::InvalidPriceFeed.into());
+        }
+        
+        let sum: u128 = prices.iter().map(|&p| p as u128).sum();
+        let avg = sum / prices.len() as u128;
+        
+        if avg > u64::MAX as u128 {
+            return Err(LendingError::MathOverflow.into());
+        }
+        
+        Ok(avg as u64)
+    }
+
+    /// Read price from pool with validation
+    pub fn read_price_from_pool_with_validation(
+        pool_account: &AccountInfo,
+        pool_type: PoolType,
+        token_mint: &Pubkey,
+        current_timestamp: i64,
+        last_price_timestamp: i64,
+    ) -> Result<u64> {
+        // Check staleness
+        if !Self::is_price_fresh(last_price_timestamp, current_timestamp) {
+            return Err(LendingError::StalePriceFeed.into());
+        }
+        
+        Self::read_price_from_pool(pool_account, pool_type, token_mint)
+    }
+
 }
 
 /// Validation utilities

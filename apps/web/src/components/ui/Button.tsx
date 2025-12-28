@@ -3,22 +3,22 @@ import { cva, type VariantProps } from 'class-variance-authority';
 import { cn } from '@/lib/utils';
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none ring-offset-background",
+  "inline-flex items-center justify-center font-mono text-xs uppercase tracking-wider transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-green focus-visible:ring-offset-0 disabled:opacity-50 disabled:pointer-events-none border",
   {
     variants: {
       variant: {
-        primary: "bg-primary text-primary-foreground hover:bg-primary/90",
-        destructive: "bg-destructive text-destructive-foreground hover:bg-destructive/90",
-        outline: "border border-input hover:bg-accent hover:text-accent-foreground",
-        secondary: "bg-secondary text-secondary-foreground hover:bg-secondary/80",
-        ghost: "hover:bg-accent hover:text-accent-foreground",
-        link: "underline-offset-4 hover:underline text-primary",
+        primary: "bg-accent-green text-bg-primary border-accent-green hover:bg-accent-green/80",
+        destructive: "bg-accent-red text-bg-primary border-accent-red hover:bg-accent-red/80",
+        outline: "border-border bg-bg-secondary text-text-primary hover:bg-bg-tertiary hover:border-accent-green",
+        secondary: "bg-bg-tertiary text-text-primary border-border hover:bg-border",
+        ghost: "border-transparent bg-transparent text-text-secondary hover:bg-bg-tertiary hover:text-text-primary",
+        link: "border-transparent bg-transparent text-accent-green hover:text-accent-green/80",
       },
       size: {
-        default: "h-10 py-2 px-4",
-        sm: "h-9 px-3 rounded-md",
-        lg: "h-11 px-8 rounded-md",
-        icon: "h-10 w-10",
+        default: "h-8 px-3 py-1",
+        sm: "h-6 px-2 text-[10px]",
+        lg: "h-10 px-4 py-2",
+        icon: "h-8 w-8 p-0",
       },
     },
     defaultVariants: {
@@ -57,25 +57,9 @@ export const Button: ParentComponent<ButtonProps> = (props) => {
       {...others}
     >
       <Show when={local.loading}>
-        <svg
-          class="animate-spin -ml-1 mr-2 h-4 w-4"
-          fill="none"
-          viewBox="0 0 24 24"
-        >
-          <circle
-            class="opacity-25"
-            cx="12"
-            cy="12"
-            r="10"
-            stroke="currentColor"
-            stroke-width="4"
-          />
-          <path
-            class="opacity-75"
-            fill="currentColor"
-            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-          />
-        </svg>
+        <div class="mr-2 text-[10px]">
+          [...] 
+        </div>
       </Show>
       {local.children}
     </button>

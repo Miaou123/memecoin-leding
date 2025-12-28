@@ -15,6 +15,7 @@ pub struct Liquidate<'info> {
     pub protocol_state: Account<'info, ProtocolState>,
 
     #[account(
+        mut,
         seeds = [TOKEN_CONFIG_SEED, loan.token_mint.as_ref()],
         bump = token_config.bump
     )]
@@ -62,7 +63,7 @@ pub struct Liquidate<'info> {
 
     /// Vault authority PDA
     #[account(
-        seeds = [VAULT_SEED, loan.token_mint.as_ref()],
+        seeds = [VAULT_SEED, loan.key().as_ref()],
         bump
     )]
     pub vault_authority: SystemAccount<'info>,
@@ -72,10 +73,10 @@ pub struct Liquidate<'info> {
     )]
     pub token_mint: Account<'info, anchor_spl::token::Mint>,
 
-    /// Pool program for price verification (Raydium/Orca)
+    /// CHECK: Pool program for price verification - validated by pool_account constraint
     pub pool_program: AccountInfo<'info>,
 
-    /// Pool account for current price
+    /// CHECK: Pool account validated against token_config.pool_address
     #[account(
         constraint = pool_account.key() == token_config.pool_address @ LendingError::InvalidPoolAddress
     )]
@@ -85,14 +86,24 @@ pub struct Liquidate<'info> {
     pub system_program: Program<'info, System>,
 }
 
-pub fn handler(ctx: Context<Liquidate>) -> Result<()> {
+pub fn liquidate_handler(ctx: Context<Liquidate>) -> Result<()> {
     let protocol_state = &mut ctx.accounts.protocol_state;
     let token_config = &ctx.accounts.token_config;
-    let loan = &mut ctx.accounts.loan;
     let clock = Clock::get()?;
 
+    // Extract loan key and token_mint FIRST before any mutable borrow
+    let loan_key = ctx.accounts.loan.key();
+    let token_mint_key = ctx.accounts.loan.token_mint;
+    
+    // Now borrow loan mutably
+    let loan = &mut ctx.accounts.loan;
+
     // Get current token price
-    let current_price = PriceFeedUtils::get_token_price(&token_config.pool_address)?;
+    let current_price = PriceFeedUtils::read_price_from_pool(
+        &ctx.accounts.pool_account,
+        token_config.pool_type,
+        &token_mint_key,
+    )?;
 
     // Check if loan is liquidatable
     let liquidatable_by_time = ValidationUtils::is_loan_liquidatable_by_time(loan, clock.unix_timestamp);
@@ -112,22 +123,29 @@ pub fn handler(ctx: Context<Liquidate>) -> Result<()> {
         LoanStatus::LiquidatedPrice
     };
 
+    // Store values we need before updating loan status
+    let collateral_amount = loan.collateral_amount;
+    let sol_borrowed = loan.sol_borrowed;
+    
     // Calculate liquidation bonus
     let liquidation_bonus = LoanCalculator::calculate_liquidation_bonus(
-        loan.collateral_amount,
+        collateral_amount,
         token_config.liquidation_bonus_bps,
     )?;
 
     // Calculate amounts
-    let collateral_to_liquidator = SafeMath::add(loan.collateral_amount, liquidation_bonus)?;
-    let remaining_collateral = if collateral_to_liquidator <= loan.collateral_amount {
+    let collateral_to_liquidator = SafeMath::add(collateral_amount, liquidation_bonus)?;
+    let _remaining_collateral = if collateral_to_liquidator <= collateral_amount {
         0
     } else {
-        loan.collateral_amount - collateral_to_liquidator
+        collateral_amount - collateral_to_liquidator
     };
 
     // Liquidator must pay the loan debt in SOL
-    let liquidator_payment = loan.sol_borrowed;
+    let liquidator_payment = sol_borrowed;
+    
+    // Update loan status BEFORE CPI
+    loan.status = liquidation_reason;
     
     // Check liquidator has sufficient SOL
     let liquidator_balance = ctx.accounts.liquidator.lamports();
@@ -143,12 +161,12 @@ pub fn handler(ctx: Context<Liquidate>) -> Result<()> {
     let vault_authority_bump = ctx.bumps.vault_authority;
     let vault_seeds = &[
         VAULT_SEED,
-        loan.token_mint.as_ref(),
+        loan_key.as_ref(),  // Use pre-extracted key
         &[vault_authority_bump],
     ];
     let vault_signer = &[&vault_seeds[..]];
 
-    let transfer_amount = std::cmp::min(collateral_to_liquidator, loan.collateral_amount);
+    let transfer_amount = std::cmp::min(collateral_to_liquidator, collateral_amount);
     let transfer_ctx = CpiContext::new_with_signer(
         ctx.accounts.token_program.to_account_info(),
         Transfer {
@@ -163,11 +181,15 @@ pub fn handler(ctx: Context<Liquidate>) -> Result<()> {
     // If there's remaining collateral, it stays in the vault (could be claimed by borrower later)
     // In a production system, you might want to return it to the borrower immediately
 
-    // Update loan status
-    loan.status = liquidation_reason;
+    // Loan status already updated above
 
     // Update protocol state
-    protocol_state.total_sol_borrowed = SafeMath::sub(protocol_state.total_sol_borrowed, loan.sol_borrowed)?;
+    protocol_state.total_sol_borrowed = SafeMath::sub(protocol_state.total_sol_borrowed, sol_borrowed)?;
+    protocol_state.active_loans_count = SafeMath::sub(protocol_state.active_loans_count, 1)?;
+    
+    // Update token config counters
+    let token_config = &mut ctx.accounts.token_config;
+    token_config.active_loans_count = SafeMath::sub(token_config.active_loans_count, 1)?;
 
     // Calculate liquidation fee for protocol (small percentage)
     let liquidation_fee = SafeMath::mul_div(liquidator_payment, 100, BPS_DIVISOR)?; // 1% fee

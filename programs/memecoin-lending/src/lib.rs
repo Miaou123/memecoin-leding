@@ -20,7 +20,7 @@ pub mod memecoin_lending {
         buyback_wallet: Pubkey,
         operations_wallet: Pubkey,
     ) -> Result<()> {
-        instructions::initialize::handler(ctx, admin, buyback_wallet, operations_wallet)
+        instructions::initialize::initialize_handler(ctx, admin, buyback_wallet, operations_wallet)
     }
 
     /// Whitelist a new token for lending
@@ -32,7 +32,7 @@ pub mod memecoin_lending {
         min_loan_amount: u64,
         max_loan_amount: u64,
     ) -> Result<()> {
-        instructions::whitelist_token::handler(ctx, tier, pool_address, pool_type, min_loan_amount, max_loan_amount)
+        instructions::whitelist_token::whitelist_token_handler(ctx, tier, pool_address, pool_type, min_loan_amount, max_loan_amount)
     }
 
     /// Update token configuration parameters
@@ -42,7 +42,7 @@ pub mod memecoin_lending {
         ltv_bps: Option<u16>,
         interest_rate_bps: Option<u16>,
     ) -> Result<()> {
-        instructions::update_token_config::handler(ctx, enabled, ltv_bps, interest_rate_bps)
+        instructions::update_token_config::update_token_config_handler(ctx, enabled, ltv_bps, interest_rate_bps)
     }
 
     /// Create a new collateralized loan
@@ -51,17 +51,17 @@ pub mod memecoin_lending {
         collateral_amount: u64,
         duration_seconds: u64,
     ) -> Result<()> {
-        instructions::create_loan::handler(ctx, collateral_amount, duration_seconds)
+        instructions::create_loan::create_loan_handler(ctx, collateral_amount, duration_seconds)
     }
 
     /// Repay an active loan
     pub fn repay_loan(ctx: Context<RepayLoan>) -> Result<()> {
-        instructions::repay_loan::handler(ctx)
+        instructions::repay_loan::repay_loan_handler(ctx)
     }
 
     /// Liquidate a loan (time or price based)
     pub fn liquidate(ctx: Context<Liquidate>) -> Result<()> {
-        instructions::liquidate::handler(ctx)
+        instructions::liquidate::liquidate_handler(ctx)
     }
 
     /// Pause protocol operations (admin only)
@@ -99,7 +99,7 @@ pub mod memecoin_lending {
 
     /// Fund the treasury with SOL
     pub fn fund_treasury(ctx: Context<FundTreasury>, amount: u64) -> Result<()> {
-        instructions::fund_treasury::handler(ctx, amount)
+        instructions::fund_treasury::fund_treasury_handler(ctx, amount)
     }
 
     /// Update fee configuration (admin only)
@@ -110,7 +110,7 @@ pub mod memecoin_lending {
         buyback_fee_bps: Option<u16>,
         operations_fee_bps: Option<u16>,
     ) -> Result<()> {
-        instructions::update_fees::handler(ctx, protocol_fee_bps, treasury_fee_bps, buyback_fee_bps, operations_fee_bps)
+        instructions::update_fees::update_fees_handler(ctx, protocol_fee_bps, treasury_fee_bps, buyback_fee_bps, operations_fee_bps)
     }
 
     /// Update wallet addresses (admin only)

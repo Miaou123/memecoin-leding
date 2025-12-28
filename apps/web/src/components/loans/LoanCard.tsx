@@ -9,32 +9,32 @@ interface LoanCardProps {
 }
 
 export function LoanCard(props: LoanCardProps) {
-  const getStatusColor = (status: LoanStatus) => {
+  const getStatusStyle = (status: LoanStatus) => {
     switch (status) {
       case LoanStatus.Active:
-        return 'bg-green-100 text-green-800';
+        return 'text-accent-green';
       case LoanStatus.Repaid:
-        return 'bg-blue-100 text-blue-800';
+        return 'text-accent-blue';
       case LoanStatus.LiquidatedTime:
       case LoanStatus.LiquidatedPrice:
-        return 'bg-red-100 text-red-800';
+        return 'text-accent-red';
       default:
-        return 'bg-gray-100 text-gray-800';
+        return 'text-text-dim';
     }
   };
   
   const getStatusText = (status: LoanStatus) => {
     switch (status) {
       case LoanStatus.Active:
-        return 'Active';
+        return 'ACTIVE';
       case LoanStatus.Repaid:
-        return 'Repaid';
+        return 'REPAID';
       case LoanStatus.LiquidatedTime:
-        return 'Liquidated (Time)';
+        return 'LIQ_TIME';
       case LoanStatus.LiquidatedPrice:
-        return 'Liquidated (Price)';
+        return 'LIQ_PRICE';
       default:
-        return status;
+        return status.toString().toUpperCase();
     }
   };
   
@@ -44,8 +44,6 @@ export function LoanCard(props: LoanCardProps) {
   };
   
   const healthRatio = () => {
-    // Calculate how close the loan is to liquidation
-    // This is a simplified calculation
     const currentTime = Date.now() / 1000;
     const timeRemaining = props.loan.dueAt - currentTime;
     const totalDuration = props.loan.dueAt - props.loan.createdAt;
@@ -54,58 +52,70 @@ export function LoanCard(props: LoanCardProps) {
   };
   
   return (
-    <div class="bg-card p-6 rounded-lg border hover:border-primary/50 transition-colors">
-      <div class="flex items-start justify-between mb-4">
+    <div class="bg-bg-secondary border border-border font-mono p-4 hover:border-accent-green transition-colors">
+      {/* Header with ID and Status */}
+      <div class="flex items-center justify-between mb-4 border-b border-border pb-2">
+        <div class="text-xs text-text-dim">
+          LOAN_ID: {props.loan.pubkey.slice(0, 8)}...
+        </div>
+        <div class={`text-xs font-semibold ${getStatusStyle(props.loan.status)}`}>
+          [{getStatusText(props.loan.status)}]
+        </div>
+      </div>
+
+      {/* Core Loan Data */}
+      <div class="grid grid-cols-2 gap-4 mb-4">
         <div>
-          <div class="flex items-center gap-2 mb-1">
-            <h3 class="font-semibold">
-              {formatSOL(props.loan.solBorrowed)} SOL
-            </h3>
-            <span class={`px-2 py-1 text-xs rounded-full ${getStatusColor(props.loan.status)}`}>
-              {getStatusText(props.loan.status)}
-            </span>
-          </div>
-          <div class="text-sm text-muted-foreground">
-            Collateral: {formatSOL(props.loan.collateralAmount)} tokens
+          <div class="text-xs text-text-dim mb-1">SOL_BORROWED</div>
+          <div class="text-text-primary font-semibold">
+            {formatSOL(props.loan.solBorrowed)}
           </div>
         </div>
-        
-        <div class="text-right">
-          <div class="text-sm text-muted-foreground">Interest</div>
-          <div class="font-medium">
-            {formatPercentage(props.loan.interestRateBps / 100)} APR
+        <div>
+          <div class="text-xs text-text-dim mb-1">INTEREST_APR</div>
+          <div class="text-accent-yellow font-semibold">
+            {formatPercentage(props.loan.interestRateBps / 100)}%
           </div>
+        </div>
+      </div>
+
+      {/* Collateral Info */}
+      <div class="mb-4">
+        <div class="text-xs text-text-dim mb-1">COLLATERAL_AMOUNT</div>
+        <div class="text-text-primary">
+          {formatSOL(props.loan.collateralAmount)} tokens
         </div>
       </div>
       
       <Show when={props.loan.status === LoanStatus.Active}>
-        <div class="space-y-3 mb-4">
-          <div class="flex justify-between text-sm">
-            <span class="text-muted-foreground">Time Remaining</span>
-            <span class={isOverdue() ? 'text-red-600 font-medium' : ''}>
-              {formatTimeRemaining(props.loan.dueAt)}
-            </span>
+        <div class="space-y-3 mb-4 border-t border-border pt-3">
+          <div class="grid grid-cols-2 gap-4 text-xs">
+            <div>
+              <div class="text-text-dim">TIME_REMAINING</div>
+              <div class={isOverdue() ? 'text-accent-red font-semibold' : 'text-text-primary'}>
+                {formatTimeRemaining(props.loan.dueAt)}
+              </div>
+            </div>
+            <div>
+              <div class="text-text-dim">LIQ_PRICE</div>
+              <div class="text-accent-red">
+                ${parseFloat(props.loan.liquidationPrice).toFixed(6)}
+              </div>
+            </div>
           </div>
           
-          <div class="flex justify-between text-sm">
-            <span class="text-muted-foreground">Liquidation Price</span>
-            <span class="text-red-600">
-              ${parseFloat(props.loan.liquidationPrice).toFixed(6)}
-            </span>
-          </div>
-          
-          <div class="space-y-1">
-            <div class="flex justify-between text-sm">
-              <span class="text-muted-foreground">Health</span>
-              <span class={healthRatio() > 50 ? 'text-green-600' : 'text-yellow-600'}>
+          <div>
+            <div class="flex justify-between text-xs mb-1">
+              <span class="text-text-dim">HEALTH_RATIO</span>
+              <span class={healthRatio() > 50 ? 'text-accent-green' : 'text-accent-yellow'}>
                 {healthRatio().toFixed(1)}%
               </span>
             </div>
-            <div class="w-full bg-gray-200 rounded-full h-2">
+            <div class="w-full bg-bg-tertiary h-2">
               <div 
-                class={`h-2 rounded-full transition-all ${
-                  healthRatio() > 50 ? 'bg-green-500' : 
-                  healthRatio() > 25 ? 'bg-yellow-500' : 'bg-red-500'
+                class={`h-2 transition-all ${
+                  healthRatio() > 50 ? 'bg-accent-green' : 
+                  healthRatio() > 25 ? 'bg-accent-yellow' : 'bg-accent-red'
                 }`}
                 style={`width: ${Math.max(5, healthRatio())}%`}
               />
@@ -114,22 +124,24 @@ export function LoanCard(props: LoanCardProps) {
         </div>
       </Show>
       
-      <div class="grid grid-cols-2 gap-2 text-xs text-muted-foreground mb-4">
+      {/* Timestamps */}
+      <div class="grid grid-cols-2 gap-4 text-xs text-text-dim mb-4">
         <div>
-          <span>Created: </span>
+          <span>CREATED: </span>
           <span>{new Date(props.loan.createdAt * 1000).toLocaleDateString()}</span>
         </div>
         <div>
-          <span>Due: </span>
+          <span>DUE_DATE: </span>
           <span>{new Date(props.loan.dueAt * 1000).toLocaleDateString()}</span>
         </div>
       </div>
       
-      <div class="flex gap-2">
+      {/* Actions */}
+      <div class="flex gap-2 border-t border-border pt-3">
         <Show when={props.loan.status === LoanStatus.Active}>
           <A href={`/repay/${props.loan.pubkey}`} class="flex-1">
             <Button size="sm" class="w-full">
-              Repay Loan
+              [REPAY]
             </Button>
           </A>
           <Button 
@@ -142,7 +154,7 @@ export function LoanCard(props: LoanCardProps) {
               );
             }}
           >
-            View
+            [VIEW]
           </Button>
         </Show>
         
@@ -158,7 +170,7 @@ export function LoanCard(props: LoanCardProps) {
               );
             }}
           >
-            View Transaction
+            [VIEW_TRANSACTION]
           </Button>
         </Show>
       </div>

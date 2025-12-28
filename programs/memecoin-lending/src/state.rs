@@ -28,8 +28,18 @@ pub struct ProtocolState {
     pub buyback_fee_bps: u16,
     /// Operations fee split in basis points (default 500 = 5%)
     pub operations_fee_bps: u16,
+    /// Track SOL in treasury
+    pub treasury_balance: u64,
+    /// Global liquidation bonus (can be overridden per token)
+    pub liquidation_bonus_bps: u16,
+    /// Reentrancy protection guard
+    pub reentrancy_guard: bool,
+    /// Pending admin for two-step transfer
+    pub pending_admin: Option<Pubkey>,
     /// Bump seed for PDA
     pub bump: u8,
+    /// Reserved for future upgrades
+    pub _reserved: [u8; 32],
 }
 
 impl ProtocolState {
@@ -46,7 +56,12 @@ impl ProtocolState {
         2 + // treasury_fee_bps
         2 + // buyback_fee_bps
         2 + // operations_fee_bps
-        1; // bump
+        8 + // treasury_balance
+        2 + // liquidation_bonus_bps
+        1 + // reentrancy_guard
+        33 + // pending_admin (1 + 32)
+        1 + // bump
+        32; // _reserved
 }
 
 /// Token configuration for whitelisted tokens
@@ -79,6 +94,8 @@ pub struct TokenConfig {
     pub total_volume: u64,
     /// Bump seed for PDA
     pub bump: u8,
+    /// Reserved for future use
+    pub _reserved: [u8; 32],
 }
 
 impl TokenConfig {
@@ -95,7 +112,8 @@ impl TokenConfig {
         8 + // max_loan_amount
         8 + // active_loans_count
         8 + // total_volume
-        1; // bump
+        1 + // bump
+        32; // _reserved
 }
 
 /// Individual loan account
@@ -126,6 +144,8 @@ pub struct Loan {
     pub index: u64,
     /// Bump seed for PDA
     pub bump: u8,
+    /// Reserved for future use
+    pub _reserved: [u8; 32],
 }
 
 impl Loan {
@@ -141,11 +161,12 @@ impl Loan {
         8 + // due_at
         1 + // status
         8 + // index
-        1; // bump
+        1 + // bump
+        32; // _reserved
 }
 
 /// Pool type enum for different AMM protocols
-#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq)]
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, Debug)]
 pub enum PoolType {
     Raydium = 0,
     Orca = 1,
@@ -160,7 +181,7 @@ impl Default for PoolType {
 }
 
 /// Token tier enum
-#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq)]
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, Debug)]
 pub enum TokenTier {
     Bronze = 0,
     Silver = 1,
@@ -174,7 +195,7 @@ impl Default for TokenTier {
 }
 
 /// Loan status enum
-#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq)]
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, Debug)]
 pub enum LoanStatus {
     Active = 0,
     Repaid = 1,

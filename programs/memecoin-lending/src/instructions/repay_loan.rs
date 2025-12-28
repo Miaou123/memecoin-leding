@@ -16,6 +16,13 @@ pub struct RepayLoan<'info> {
 
     #[account(
         mut,
+        seeds = [TOKEN_CONFIG_SEED, loan.token_mint.as_ref()],
+        bump = token_config.bump
+    )]
+    pub token_config: Account<'info, TokenConfig>,
+
+    #[account(
+        mut,
         seeds = [
             LOAN_SEED,
             loan.borrower.as_ref(),
@@ -57,7 +64,7 @@ pub struct RepayLoan<'info> {
 
     /// Vault authority PDA
     #[account(
-        seeds = [VAULT_SEED, loan.token_mint.as_ref()],
+        seeds = [VAULT_SEED, loan.key().as_ref()],
         bump
     )]
     pub vault_authority: SystemAccount<'info>,
@@ -71,10 +78,15 @@ pub struct RepayLoan<'info> {
     pub system_program: Program<'info, System>,
 }
 
-pub fn handler(ctx: Context<RepayLoan>) -> Result<()> {
+pub fn repay_loan_handler(ctx: Context<RepayLoan>) -> Result<()> {
     let protocol_state = &mut ctx.accounts.protocol_state;
-    let loan = &mut ctx.accounts.loan;
     let clock = Clock::get()?;
+    
+    // Extract loan key FIRST before any mutable borrow
+    let loan_key = ctx.accounts.loan.key();
+    
+    // Now we can borrow loan mutably
+    let loan = &mut ctx.accounts.loan;
 
     // Calculate total amount owed
     let loan_duration = clock.unix_timestamp - loan.created_at;
@@ -99,15 +111,21 @@ pub fn handler(ctx: Context<RepayLoan>) -> Result<()> {
     )?;
     let protocol_fee = SafeMath::mul_div(loan.sol_borrowed, protocol_state.protocol_fee_bps as u64, BPS_DIVISOR)?;
 
+    // Store collateral amount before we need it
+    let collateral_amount = loan.collateral_amount;
+    
+    // Update loan status BEFORE the CPI call
+    loan.status = LoanStatus::Repaid;
+
     // Transfer SOL payment from borrower to treasury
     **ctx.accounts.borrower.to_account_info().try_borrow_mut_lamports()? -= total_owed;
     **ctx.accounts.treasury.to_account_info().try_borrow_mut_lamports()? += total_owed;
 
-    // Transfer collateral back to borrower
+    // Now use the pre-extracted loan_key for vault seeds
     let vault_authority_bump = ctx.bumps.vault_authority;
     let vault_seeds = &[
         VAULT_SEED,
-        loan.token_mint.as_ref(),
+        loan_key.as_ref(),  // Use the pre-extracted key
         &[vault_authority_bump],
     ];
     let vault_signer = &[&vault_seeds[..]];
@@ -121,15 +139,21 @@ pub fn handler(ctx: Context<RepayLoan>) -> Result<()> {
         },
         vault_signer,
     );
-    token::transfer(transfer_ctx, loan.collateral_amount)?;
+    token::transfer(transfer_ctx, collateral_amount)?;  // Use stored value
 
-    // Update loan status
-    loan.status = LoanStatus::Repaid;
+    // Loan status already updated above
 
     // Update protocol state
     protocol_state.total_sol_borrowed = SafeMath::sub(protocol_state.total_sol_borrowed, loan.sol_borrowed)?;
     protocol_state.total_interest_earned = SafeMath::add(protocol_state.total_interest_earned, interest)?;
-    protocol_state.treasury_balance = SafeMath::add(protocol_state.treasury_balance, protocol_fee)?;
+    protocol_state.active_loans_count = SafeMath::sub(protocol_state.active_loans_count, 1)?;
+    
+    // Update token config counters
+    let token_config = &mut ctx.accounts.token_config;
+    token_config.active_loans_count = SafeMath::sub(token_config.active_loans_count, 1)?;
+    
+    // Treasury balance is tracked by the actual lamport balance of the treasury account
+    // No need to track it separately in protocol_state
 
     msg!(
         "Loan repaid: {} SOL principal + {} SOL interest + {} SOL protocol fee",

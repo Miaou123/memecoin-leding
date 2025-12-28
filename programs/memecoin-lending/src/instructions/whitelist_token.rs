@@ -31,7 +31,7 @@ pub struct WhitelistToken<'info> {
     pub rent: Sysvar<'info, Rent>,
 }
 
-pub fn handler(
+pub fn whitelist_token_handler(
     ctx: Context<WhitelistToken>,
     tier: u8,
     pool_address: Pubkey,

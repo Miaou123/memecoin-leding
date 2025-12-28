@@ -30,6 +30,7 @@ pub struct CreateLoan<'info> {
     pub protocol_state: Account<'info, ProtocolState>,
 
     #[account(
+        mut,
         seeds = [TOKEN_CONFIG_SEED, token_mint.key().as_ref()],
         bump = token_config.bump,
         constraint = token_config.enabled @ LendingError::TokenDisabled
@@ -96,7 +97,7 @@ pub struct CreateLoan<'info> {
     pub rent: Sysvar<'info, Rent>,
 }
 
-pub fn handler(
+pub fn create_loan_handler(
     ctx: Context<CreateLoan>,
     collateral_amount: u64,
     duration_seconds: u64,
@@ -128,7 +129,7 @@ pub fn handler(
         collateral_amount,
         current_price,
         token_config.ltv_bps,
-    )?
+    )?;
 
     // Validate loan amount against limits
     if sol_loan_amount < token_config.min_loan_amount {
@@ -161,12 +162,12 @@ pub fn handler(
             authority: ctx.accounts.borrower.to_account_info(),
         },
     );
-    token::transfer(transfer_ctx, collateral_amount)?
+    token::transfer(transfer_ctx, collateral_amount)?;
 
     // Transfer SOL from treasury to borrower
-    let treasury_bump = ctx.bumps.vault_authority;
+    let treasury_bump = ctx.bumps.treasury;
     let treasury_seeds = &[TREASURY_SEED, &[treasury_bump]];
-    let treasury_signer = &[&treasury_seeds[..]];
+    let _treasury_signer = &[&treasury_seeds[..]];
 
     **ctx.accounts.treasury.to_account_info().try_borrow_mut_lamports()? -= sol_loan_amount;
     **ctx.accounts.borrower.to_account_info().try_borrow_mut_lamports()? += sol_loan_amount;
@@ -189,6 +190,11 @@ pub fn handler(
     protocol_state.total_loans_created = SafeMath::add(protocol_state.total_loans_created, 1)?;
     protocol_state.total_sol_borrowed = SafeMath::add(protocol_state.total_sol_borrowed, sol_loan_amount)?;
     protocol_state.active_loans_count = SafeMath::add(protocol_state.active_loans_count, 1)?;
+    
+    // Update token config counters
+    let token_config = &mut ctx.accounts.token_config;
+    token_config.active_loans_count = SafeMath::add(token_config.active_loans_count, 1)?;
+    token_config.total_volume = SafeMath::add(token_config.total_volume, sol_loan_amount)?;
 
     msg!(
         "Loan created: {} SOL borrowed against {} tokens (price: {})",

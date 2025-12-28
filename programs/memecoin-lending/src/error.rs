@@ -109,4 +109,25 @@ pub enum LendingError {
 
     #[msg("Invalid loan amount")]
     InvalidLoanAmount,
+
+    #[msg("Reentrancy detected")]
+    ReentrancyDetected,
+    
+    #[msg("Minimum deposit amount not met")]
+    BelowMinimumDeposit,
+    
+    #[msg("Loan not found")]
+    LoanNotFound,
+    
+    #[msg("Price too volatile for safe lending")]
+    PriceTooVolatile,
+    
+    #[msg("Cooldown period not elapsed")]
+    CooldownNotElapsed,
+    
+    #[msg("Maximum loans per user exceeded")]
+    MaxLoansExceeded,
+    
+    #[msg("Treasury utilization too high")]
+    TreasuryUtilizationTooHigh,
 }

@@ -17,102 +17,107 @@ export default function Home() {
   }));
   
   return (
-    <div class="space-y-8">
-      {/* Hero Section */}
-      <div class="text-center py-12">
-        <h1 class="text-4xl font-bold tracking-tight sm:text-6xl">
-          Borrow SOL Against Your 
-          <span class="text-primary"> Memecoins</span>
-        </h1>
-        <p class="mt-6 text-lg leading-8 text-muted-foreground max-w-2xl mx-auto">
-          Unlock liquidity from your memecoin portfolio without selling. 
-          Get instant SOL loans backed by your favorite tokens.
-        </p>
-        <div class="mt-10 flex items-center justify-center gap-x-6">
+    <div class="space-y-8 font-mono">
+      {/* Terminal Header */}
+      <div class="bg-bg-secondary border border-border p-6">
+        <div class="text-xs text-text-dim mb-2">TERMINAL_PRO v1.0.0</div>
+        <div class="text-xl font-bold text-accent-green mb-4">
+          > MEMECOIN_LENDING_PROTOCOL.init()
+        </div>
+        <div class="text-text-primary mb-4">
+          DEPLOY_MEMECOIN_COLLATERAL > RECEIVE_SOL_LIQUIDITY<br/>
+          RISK_MANAGED_LENDING > PRICE_ORACLE_SECURED
+        </div>
+        <div class="flex gap-4">
           <A href="/borrow">
-            <Button size="lg">Start Borrowing</Button>
+            <Button size="lg">[INITIATE_LOAN]</Button>
           </A>
           <A href="/loans">
-            <Button variant="outline" size="lg">View Loans</Button>
+            <Button variant="outline" size="lg">[VIEW_POSITIONS]</Button>
           </A>
         </div>
       </div>
       
-      {/* Protocol Stats */}
+      {/* Protocol Stats Grid */}
       <Show when={protocolStats.data}>
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-6">
-          <div class="bg-card p-6 rounded-lg border">
-            <div class="text-2xl font-bold">
-              {formatSOL(protocolStats.data?.totalValueLocked || '0')} SOL
+        <div class="space-y-4">
+          <div class="text-xs text-text-dim">PROTOCOL_METRICS_REAL_TIME:</div>
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div class="bg-bg-secondary border border-border p-4">
+              <div class="text-xs text-text-dim mb-1">TVL_LOCKED</div>
+              <div class="text-lg font-bold text-accent-green">
+                {formatSOL(protocolStats.data?.totalValueLocked || '0')}
+              </div>
+              <div class="text-xs text-text-secondary">SOL</div>
             </div>
-            <div class="text-sm text-muted-foreground">Total Value Locked</div>
-          </div>
-          <div class="bg-card p-6 rounded-lg border">
-            <div class="text-2xl font-bold">
-              {formatNumber(protocolStats.data?.totalLoansActive || 0)}
+            <div class="bg-bg-secondary border border-border p-4">
+              <div class="text-xs text-text-dim mb-1">ACTIVE_LOANS</div>
+              <div class="text-lg font-bold text-text-primary">
+                {formatNumber(protocolStats.data?.totalLoansActive || 0)}
+              </div>
+              <div class="text-xs text-text-secondary">COUNT</div>
             </div>
-            <div class="text-sm text-muted-foreground">Active Loans</div>
-          </div>
-          <div class="bg-card p-6 rounded-lg border">
-            <div class="text-2xl font-bold">
-              {formatSOL(protocolStats.data?.volume24h || '0')} SOL
+            <div class="bg-bg-secondary border border-border p-4">
+              <div class="text-xs text-text-dim mb-1">VOL_24H</div>
+              <div class="text-lg font-bold text-accent-blue">
+                {formatSOL(protocolStats.data?.volume24h || '0')}
+              </div>
+              <div class="text-xs text-text-secondary">SOL</div>
             </div>
-            <div class="text-sm text-muted-foreground">24h Volume</div>
-          </div>
-          <div class="bg-card p-6 rounded-lg border">
-            <div class="text-2xl font-bold">
-              {formatNumber(protocolStats.data?.liquidations24h || 0)}
+            <div class="bg-bg-secondary border border-border p-4">
+              <div class="text-xs text-text-dim mb-1">LIQ_24H</div>
+              <div class="text-lg font-bold text-accent-red">
+                {formatNumber(protocolStats.data?.liquidations24h || 0)}
+              </div>
+              <div class="text-xs text-text-secondary">COUNT</div>
             </div>
-            <div class="text-sm text-muted-foreground">24h Liquidations</div>
           </div>
         </div>
       </Show>
       
       {/* Supported Tokens */}
-      <div class="space-y-6">
-        <h2 class="text-2xl font-bold">Supported Tokens</h2>
+      <div class="space-y-4">
+        <div class="text-xs text-text-dim">SUPPORTED_COLLATERAL_TOKENS:</div>
         <Show when={tokens.data}>
           <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
             <For each={tokens.data}>
               {(token) => (
-                <div class="bg-card p-6 rounded-lg border hover:border-primary/50 transition-colors">
-                  <div class="flex items-center justify-between mb-4">
+                <div class="bg-bg-secondary border border-border p-4 hover:border-accent-green transition-colors">
+                  <div class="flex items-center justify-between mb-3 border-b border-border pb-2">
                     <div>
-                      <div class="font-semibold">{token.symbol}</div>
-                      <div class="text-sm text-muted-foreground">{token.name}</div>
+                      <div class="text-sm font-bold text-text-primary">{token.symbol}</div>
+                      <div class="text-xs text-text-dim">{token.name}</div>
                     </div>
                     <div class="text-right">
-                      <div class="font-medium">${formatNumber(token.currentPrice)}</div>
-                      <div class={`text-sm ${
-                        token.priceChange24h >= 0 ? 'text-green-600' : 'text-red-600'
+                      <div class="text-sm font-bold text-accent-yellow">${formatNumber(token.currentPrice)}</div>
+                      <div class={`text-xs ${
+                        token.priceChange24h >= 0 ? 'text-accent-green' : 'text-accent-red'
                       }`}>
-                        {formatPercentage(token.priceChange24h)}
+                        {token.priceChange24h >= 0 ? '+' : ''}{formatPercentage(token.priceChange24h)}%
                       </div>
                     </div>
                   </div>
                   
-                  <div class="space-y-2 text-sm">
+                  <div class="space-y-2 text-xs mb-3">
                     <div class="flex justify-between">
-                      <span class="text-muted-foreground">Active Loans</span>
-                      <span>{token.activeLoans}</span>
+                      <span class="text-text-dim">ACTIVE_LOANS:</span>
+                      <span class="text-text-primary">{token.activeLoans}</span>
                     </div>
                     <div class="flex justify-between">
-                      <span class="text-muted-foreground">Total Borrowed</span>
-                      <span>{formatSOL(token.totalBorrowed)} SOL</span>
+                      <span class="text-text-dim">BORROWED_SOL:</span>
+                      <span class="text-text-primary">{formatSOL(token.totalBorrowed)}</span>
                     </div>
                     <div class="flex justify-between">
-                      <span class="text-muted-foreground">Available</span>
-                      <span>{formatSOL(token.availableLiquidity)} SOL</span>
+                      <span class="text-text-dim">AVAILABLE_LIQ:</span>
+                      <span class="text-accent-green">{formatSOL(token.availableLiquidity)}</span>
                     </div>
                   </div>
                   
-                  <div class="mt-4">
-                    <A href={`/borrow?token=${token.mint}`}>
-                      <Button variant="outline" size="sm" class="w-full">
-                        Borrow Against {token.symbol}
-                      </Button>
-                    </A>
-                  </div>
+                  <A href={`/borrow?token=${token.mint}`}>
+                    <Button variant="outline" size="sm" class="w-full">
+                      [BORROW_{token.symbol}]
+                    </Button>
+                  </A>
                 </div>
               )}
             </For>
@@ -120,36 +125,36 @@ export default function Home() {
         </Show>
       </div>
       
-      {/* How it Works */}
-      <div class="space-y-6">
-        <h2 class="text-2xl font-bold">How It Works</h2>
-        <div class="grid md:grid-cols-3 gap-6">
-          <div class="text-center">
-            <div class="w-12 h-12 bg-primary/10 text-primary rounded-lg flex items-center justify-center mx-auto mb-4">
-              1
+      {/* Protocol Flow */}
+      <div class="space-y-4">
+        <div class="text-xs text-text-dim">PROTOCOL_EXECUTION_FLOW:</div>
+        <div class="grid md:grid-cols-3 gap-4">
+          <div class="bg-bg-secondary border border-border p-4 text-center">
+            <div class="w-8 h-8 bg-accent-green text-bg-primary flex items-center justify-center mx-auto mb-3 text-xs font-bold">
+              01
             </div>
-            <h3 class="font-semibold mb-2">Deposit Collateral</h3>
-            <p class="text-sm text-muted-foreground">
-              Choose your memecoin and deposit it as collateral
-            </p>
+            <div class="text-sm font-bold text-text-primary mb-2">DEPLOY_COLLATERAL</div>
+            <div class="text-xs text-text-secondary">
+              TRANSFER_TOKEN > LOCK_IN_VAULT > VERIFY_VALUE
+            </div>
           </div>
-          <div class="text-center">
-            <div class="w-12 h-12 bg-primary/10 text-primary rounded-lg flex items-center justify-center mx-auto mb-4">
-              2
+          <div class="bg-bg-secondary border border-border p-4 text-center">
+            <div class="w-8 h-8 bg-accent-blue text-bg-primary flex items-center justify-center mx-auto mb-3 text-xs font-bold">
+              02
             </div>
-            <h3 class="font-semibold mb-2">Get SOL</h3>
-            <p class="text-sm text-muted-foreground">
-              Receive SOL instantly based on your collateral value
-            </p>
+            <div class="text-sm font-bold text-text-primary mb-2">RECEIVE_SOL</div>
+            <div class="text-xs text-text-secondary">
+              CALCULATE_LTV > MINT_LOAN > TRANSFER_SOL
+            </div>
           </div>
-          <div class="text-center">
-            <div class="w-12 h-12 bg-primary/10 text-primary rounded-lg flex items-center justify-center mx-auto mb-4">
-              3
+          <div class="bg-bg-secondary border border-border p-4 text-center">
+            <div class="w-8 h-8 bg-accent-yellow text-bg-primary flex items-center justify-center mx-auto mb-3 text-xs font-bold">
+              03
             </div>
-            <h3 class="font-semibold mb-2">Repay & Reclaim</h3>
-            <p class="text-sm text-muted-foreground">
-              Repay the loan anytime to get your collateral back
-            </p>
+            <div class="text-sm font-bold text-text-primary mb-2">REPAY_UNLOCK</div>
+            <div class="text-xs text-text-secondary">
+              REPAY_SOL+INTEREST > BURN_LOAN > UNLOCK_COLLATERAL
+            </div>
           </div>
         </div>
       </div>

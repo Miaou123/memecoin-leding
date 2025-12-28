@@ -22,7 +22,7 @@ pub struct UpdateTokenConfig<'info> {
     pub admin: Signer<'info>,
 }
 
-pub fn handler(
+pub fn update_token_config_handler(
     ctx: Context<UpdateTokenConfig>,
     enabled: Option<bool>,
     ltv_bps: Option<u16>,
