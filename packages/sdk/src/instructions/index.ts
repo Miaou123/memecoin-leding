@@ -15,13 +15,15 @@ import { getCommonInstructionAccounts } from '../utils';
 
 export async function initializeProtocol(
   program: Program,
-  admin: PublicKey
+  admin: PublicKey,
+  buybackWallet: PublicKey,
+  operationsWallet: PublicKey
 ): Promise<TransactionSignature> {
   const [protocolState] = pda.getProtocolStatePDA(program.programId);
   const [treasury] = pda.getTreasuryPDA(program.programId);
 
   return program.methods
-    .initialize(admin)
+    .initialize(admin, buybackWallet, operationsWallet)
     .accounts({
       protocolState,
       treasury,
@@ -37,13 +39,22 @@ export async function whitelistToken(
     mint: PublicKey;
     tier: number;
     poolAddress: PublicKey;
+    poolType: number;
+    minLoanAmount: BN;
+    maxLoanAmount: BN;
   }
 ): Promise<TransactionSignature> {
   const [protocolState] = pda.getProtocolStatePDA(program.programId);
   const [tokenConfig] = pda.getTokenConfigPDA(params.mint, program.programId);
 
   return program.methods
-    .whitelistToken(params.tier, params.poolAddress)
+    .whitelistToken(
+      params.tier,
+      params.poolAddress,
+      params.poolType,
+      params.minLoanAmount,
+      params.maxLoanAmount
+    )
     .accounts({
       protocolState,
       tokenConfig,
@@ -251,6 +262,72 @@ export async function withdrawTreasury(
       treasury,
       admin: program.provider.publicKey!,
       systemProgram: SystemProgram.programId,
+    })
+    .rpc();
+}
+
+export async function fundTreasury(
+  program: Program,
+  amount: BN
+): Promise<TransactionSignature> {
+  const [protocolState] = pda.getProtocolStatePDA(program.programId);
+  const [treasury] = pda.getTreasuryPDA(program.programId);
+  
+  return program.methods
+    .fundTreasury(amount)
+    .accounts({
+      protocolState,
+      treasury,
+      funder: program.provider.publicKey!,
+      systemProgram: SystemProgram.programId,
+    })
+    .rpc();
+}
+
+export async function updateFees(
+  program: Program,
+  params: {
+    protocolFeeBps?: number;
+    treasuryFeeBps?: number;
+    buybackFeeBps?: number;
+    operationsFeeBps?: number;
+  }
+): Promise<TransactionSignature> {
+  const [protocolState] = pda.getProtocolStatePDA(program.programId);
+  
+  return program.methods
+    .updateFees(
+      params.protocolFeeBps ?? null,
+      params.treasuryFeeBps ?? null,
+      params.buybackFeeBps ?? null,
+      params.operationsFeeBps ?? null
+    )
+    .accounts({
+      protocolState,
+      admin: program.provider.publicKey!,
+    })
+    .rpc();
+}
+
+export async function updateWallets(
+  program: Program,
+  params: {
+    newAdmin?: PublicKey;
+    newBuybackWallet?: PublicKey;
+    newOperationsWallet?: PublicKey;
+  }
+): Promise<TransactionSignature> {
+  const [protocolState] = pda.getProtocolStatePDA(program.programId);
+  
+  return program.methods
+    .updateWallets(
+      params.newAdmin ?? null,
+      params.newBuybackWallet ?? null,
+      params.newOperationsWallet ?? null
+    )
+    .accounts({
+      protocolState,
+      admin: program.provider.publicKey!,
     })
     .rpc();
 }

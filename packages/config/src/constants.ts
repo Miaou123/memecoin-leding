@@ -8,10 +8,23 @@ export const TOKEN_CONFIG_SEED = Buffer.from('token_config');
 export const LOAN_SEED = Buffer.from('loan');
 
 // Protocol parameters
-export const MAX_LOAN_DURATION = 7 * 24 * 60 * 60; // 7 days in seconds
-export const MIN_LOAN_DURATION = 12 * 60 * 60; // 12 hours in seconds
+export const LOAN_DURATION = {
+  MIN_SECONDS: 12 * 60 * 60,      // 12 hours
+  MAX_SECONDS: 7 * 24 * 60 * 60,  // 7 days
+  DEFAULT_SECONDS: 24 * 60 * 60,  // 24 hours
+};
+
+export const MAX_LOAN_DURATION = LOAN_DURATION.MAX_SECONDS;
+export const MIN_LOAN_DURATION = LOAN_DURATION.MIN_SECONDS;
 export const PROTOCOL_FEE_BPS = 100; // 1%
 export const LIQUIDATION_THRESHOLD_BPS = 50; // 0.5% buffer for liquidations
+
+// Fee distribution (for liquidations)
+export const FEE_DISTRIBUTION = {
+  TREASURY_BPS: 9000, // 90%
+  BUYBACK_BPS: 500,   // 5%
+  OPERATIONS_BPS: 500, // 5%
+};
 
 // Interest rates by tier (in basis points)
 export const INTEREST_RATES = {

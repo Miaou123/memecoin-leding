@@ -66,10 +66,16 @@ export class MemecoinLendingClient {
   }
 
   // Instructions
-  async initializeProtocol(admin?: PublicKey): Promise<TransactionSignature> {
+  async initializeProtocol(
+    admin?: PublicKey,
+    buybackWallet?: PublicKey,
+    operationsWallet?: PublicKey
+  ): Promise<TransactionSignature> {
     return instructions.initializeProtocol(
       this.program,
-      admin || this.wallet.publicKey
+      admin || this.wallet.publicKey,
+      buybackWallet || this.wallet.publicKey,
+      operationsWallet || this.wallet.publicKey
     );
   }
 
@@ -77,6 +83,9 @@ export class MemecoinLendingClient {
     mint: PublicKey;
     tier: number;
     poolAddress: PublicKey;
+    poolType: number;
+    minLoanAmount: BN;
+    maxLoanAmount: BN;
   }): Promise<TransactionSignature> {
     return instructions.whitelistToken(this.program, params);
   }
@@ -122,6 +131,27 @@ export class MemecoinLendingClient {
 
   async withdrawTreasury(amount: BN): Promise<TransactionSignature> {
     return instructions.withdrawTreasury(this.program, amount);
+  }
+
+  async fundTreasury(amount: BN): Promise<TransactionSignature> {
+    return instructions.fundTreasury(this.program, amount);
+  }
+
+  async updateFees(params: {
+    protocolFeeBps?: number;
+    treasuryFeeBps?: number;
+    buybackFeeBps?: number;
+    operationsFeeBps?: number;
+  }): Promise<TransactionSignature> {
+    return instructions.updateFees(this.program, params);
+  }
+
+  async updateWallets(params: {
+    newAdmin?: PublicKey;
+    newBuybackWallet?: PublicKey;
+    newOperationsWallet?: PublicKey;
+  }): Promise<TransactionSignature> {
+    return instructions.updateWallets(this.program, params);
   }
 
   // Account fetchers

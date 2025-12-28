@@ -1,4 +1,15 @@
-import { TokenTier } from '@memecoin-lending/types';
+import { TokenTier, PoolType } from '@memecoin-lending/types';
+
+export interface TokenDefinition {
+  mint: string;
+  symbol: string;
+  name: string;
+  tier: TokenTier;
+  poolAddress: string;
+  poolType: PoolType;
+  decimals: number;
+  logoUrl?: string;
+}
 
 export interface TokenMetadata {
   mint: string;
@@ -7,11 +18,27 @@ export interface TokenMetadata {
   decimals: number;
   tier: TokenTier;
   poolAddress?: string;
+  poolType?: PoolType;
   coingeckoId?: string;
   logoURI?: string;
 }
 
-// Default whitelisted tokens (mainnet)
+// Token definitions with pool configuration
+export const TOKEN_DEFINITIONS: Record<string, TokenDefinition> = {
+  // Gold Tier - Established memecoins
+  'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263': {
+    mint: 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263',
+    symbol: 'BONK',
+    name: 'Bonk',
+    decimals: 5,
+    tier: TokenTier.Gold,
+    poolAddress: 'Aqk7F6BhrSJSKVAKKdBmHrFEUH3YnKUDWByJKHmfCLBn',
+    poolType: PoolType.Raydium,
+    logoUrl: 'https://arweave.net/hQiPZOsRZXGXBJd_82PhVdlM_hACsT_q6wqwf5cSY7I',
+  },
+};
+
+// Default whitelisted tokens (mainnet) - legacy format
 export const WHITELISTED_TOKENS: Record<string, TokenMetadata> = {
   // Gold Tier - Established memecoins
   'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263': {
@@ -20,6 +47,8 @@ export const WHITELISTED_TOKENS: Record<string, TokenMetadata> = {
     name: 'Bonk',
     decimals: 5,
     tier: TokenTier.Gold,
+    poolAddress: 'Aqk7F6BhrSJSKVAKKdBmHrFEUH3YnKUDWByJKHmfCLBn',
+    poolType: PoolType.Raydium,
     coingeckoId: 'bonk',
     logoURI: 'https://arweave.net/hQiPZOsRZXGXBJd_82PhVdlM_hACsT_q6wqwf5cSY7I',
   },
@@ -44,6 +73,7 @@ export const WHITELISTED_TOKENS: Record<string, TokenMetadata> = {
     name: 'Wen',
     decimals: 5,
     tier: TokenTier.Gold,
+    poolType: PoolType.Raydium,
     coingeckoId: 'wen-4',
   },
   
@@ -81,8 +111,24 @@ export const getAllTokens = (): TokenMetadata[] => {
 };
 
 // Pool addresses for price feeds (Raydium/Orca)
+// Pool addresses for price feeds (Raydium/Orca)
 export const TOKEN_POOL_ADDRESSES: Record<string, string> = {
   // BONK/SOL Raydium pool
   'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263': 'Aqk7F6BhrSJSKVAKKdBmHrFEUH3YnKUDWByJKHmfCLBn',
   // Add other pool addresses as needed
+};
+
+// Get token definition by mint
+export const getTokenDefinition = (mint: string): TokenDefinition | undefined => {
+  return TOKEN_DEFINITIONS[mint];
+};
+
+// Get all token definitions
+export const getAllTokenDefinitions = (): TokenDefinition[] => {
+  return Object.values(TOKEN_DEFINITIONS);
+};
+
+// Get token definitions by tier
+export const getTokenDefinitionsByTier = (tier: TokenTier): TokenDefinition[] => {
+  return Object.values(TOKEN_DEFINITIONS).filter(token => token.tier === tier);
 };

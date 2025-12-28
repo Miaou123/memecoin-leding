@@ -1,5 +1,12 @@
 import { PublicKey } from '@solana/web3.js';
 
+export enum PoolType {
+  Raydium = 'raydium',
+  Orca = 'orca',
+  Pumpfun = 'pumpfun',
+  PumpSwap = 'pumpswap',
+}
+
 export enum TokenTier {
   Bronze = 'bronze',
   Silver = 'silver',
@@ -15,11 +22,17 @@ export enum LoanStatus {
 
 export interface ProtocolState {
   admin: string;
+  buybackWallet: string;
+  operationsWallet: string;
   paused: boolean;
   totalLoansCreated: string;
   totalSolBorrowed: string;
   totalInterestEarned: string;
-  treasuryBalance: string;
+  activeLoansCount: string;
+  protocolFeeBps: number;
+  treasuryFeeBps: number;
+  buybackFeeBps: number;
+  operationsFeeBps: number;
 }
 
 export interface TokenConfig {
@@ -28,11 +41,14 @@ export interface TokenConfig {
   tier: TokenTier;
   enabled: boolean;
   poolAddress: string;
+  poolType: PoolType;
   ltvBps: number;
   interestRateBps: number;
   liquidationBonusBps: number;
   minLoanAmount: string;
   maxLoanAmount: string;
+  activeLoansCount: string;
+  totalVolume: string;
 }
 
 export interface Loan {

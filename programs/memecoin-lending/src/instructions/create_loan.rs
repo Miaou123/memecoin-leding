@@ -4,6 +4,20 @@ use crate::state::*;
 use crate::error::LendingError;
 use crate::utils::*;
 
+/// Get duration-based interest rate multiplier
+fn get_duration_multiplier(duration_seconds: u64) -> u16 {
+    const HOUR: u64 = 3600;
+    if duration_seconds <= 12 * HOUR {
+        150  // 1.5x for ≤12h
+    } else if duration_seconds <= 24 * HOUR {
+        125  // 1.25x for ≤24h
+    } else if duration_seconds <= 48 * HOUR {
+        100  // 1.0x for ≤48h
+    } else {
+        75   // 0.75x for >48h
+    }
+}
+
 #[derive(Accounts)]
 #[instruction(collateral_amount: u64)]
 pub struct CreateLoan<'info> {
@@ -56,21 +70,23 @@ pub struct CreateLoan<'info> {
     )]
     pub borrower_token_account: Account<'info, TokenAccount>,
 
-    /// Protocol vault token account for storing collateral
+    /// Vault token account for THIS loan's collateral
     #[account(
-        init_if_needed,
+        init,
         payer = borrower,
-        associated_token::mint = token_mint,
-        associated_token::authority = vault_authority
-    )]
-    pub vault_token_account: Account<'info, TokenAccount>,
-
-    /// Vault authority PDA
-    #[account(
-        seeds = [VAULT_SEED, token_mint.key().as_ref()],
+        token::mint = token_mint,
+        token::authority = loan, // Loan PDA is the authority
+        seeds = [b"vault", loan.key().as_ref()],
         bump
     )]
-    pub vault_authority: SystemAccount<'info>,
+    pub vault: Account<'info, TokenAccount>,
+
+    /// Pool account for price reading
+    /// CHECK: Validated by token_config.pool_address constraint
+    #[account(
+        constraint = pool_account.key() == token_config.pool_address @ LendingError::InvalidPoolAddress
+    )]
+    pub pool_account: UncheckedAccount<'info>,
 
     pub token_mint: Account<'info, anchor_spl::token::Mint>,
 
@@ -93,15 +109,26 @@ pub fn handler(
     // Validate loan duration
     ValidationUtils::validate_loan_duration(duration_seconds)?;
 
-    // Get current token price
-    let token_price = PriceFeedUtils::get_token_price(&token_config.pool_address)?;
+    // Get current token price from pool
+    let current_price = PriceFeedUtils::read_price_from_pool(
+        &ctx.accounts.pool_account,
+        token_config.pool_type,
+        &token_config.mint,
+    )?;
+    
+    require!(current_price > 0, LendingError::ZeroPrice);
+    
+    // Add duration-based interest multiplier
+    let duration_multiplier = get_duration_multiplier(duration_seconds);
+    let base_rate = token_config.interest_rate_bps;
+    let effective_rate = (base_rate as u64 * duration_multiplier as u64 / 100) as u16;
 
     // Calculate loan amount based on LTV
     let sol_loan_amount = LoanCalculator::calculate_loan_amount(
         collateral_amount,
-        token_price,
+        current_price,
         token_config.ltv_bps,
-    )?;
+    )?
 
     // Validate loan amount against limits
     if sol_loan_amount < token_config.min_loan_amount {
@@ -125,16 +152,16 @@ pub fn handler(
         300, // 3% liquidation buffer
     )?;
 
-    // Transfer collateral tokens to vault
+    // Transfer collateral tokens to loan's vault
     let transfer_ctx = CpiContext::new(
         ctx.accounts.token_program.to_account_info(),
         Transfer {
             from: ctx.accounts.borrower_token_account.to_account_info(),
-            to: ctx.accounts.vault_token_account.to_account_info(),
+            to: ctx.accounts.vault.to_account_info(),
             authority: ctx.accounts.borrower.to_account_info(),
         },
     );
-    token::transfer(transfer_ctx, collateral_amount)?;
+    token::transfer(transfer_ctx, collateral_amount)?
 
     // Transfer SOL from treasury to borrower
     let treasury_bump = ctx.bumps.vault_authority;
@@ -149,24 +176,25 @@ pub fn handler(
     loan.token_mint = ctx.accounts.token_mint.key();
     loan.collateral_amount = collateral_amount;
     loan.sol_borrowed = sol_loan_amount;
-    loan.entry_price = token_price;
+    loan.entry_price = current_price;
     loan.liquidation_price = liquidation_price;
-    loan.interest_rate_bps = token_config.interest_rate_bps;
+    loan.interest_rate_bps = effective_rate;
     loan.created_at = clock.unix_timestamp;
     loan.due_at = clock.unix_timestamp + duration_seconds as i64;
     loan.status = LoanStatus::Active;
     loan.index = protocol_state.total_loans_created;
     loan.bump = ctx.bumps.loan;
 
-    // Update protocol state
+    // Update protocol state and token config
     protocol_state.total_loans_created = SafeMath::add(protocol_state.total_loans_created, 1)?;
     protocol_state.total_sol_borrowed = SafeMath::add(protocol_state.total_sol_borrowed, sol_loan_amount)?;
+    protocol_state.active_loans_count = SafeMath::add(protocol_state.active_loans_count, 1)?;
 
     msg!(
         "Loan created: {} SOL borrowed against {} tokens (price: {})",
         sol_loan_amount,
         collateral_amount,
-        token_price
+        current_price
     );
     
     Ok(())

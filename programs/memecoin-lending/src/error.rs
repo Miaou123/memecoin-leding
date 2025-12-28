@@ -88,4 +88,25 @@ pub enum LendingError {
 
     #[msg("Insufficient token balance")]
     InsufficientTokenBalance,
+
+    #[msg("Invalid fee configuration - splits must sum to 10000")]
+    InvalidFeeConfiguration,
+    
+    #[msg("Pool type mismatch")]
+    PoolTypeMismatch,
+    
+    #[msg("Price is zero or invalid")]
+    ZeroPrice,
+    
+    #[msg("Loan duration too short (min 12 hours)")]
+    DurationTooShort,
+    
+    #[msg("Loan duration too long (max 7 days)")]
+    DurationTooLong,
+
+    #[msg("Invalid pool type")]
+    InvalidPoolType,
+
+    #[msg("Invalid loan amount")]
+    InvalidLoanAmount,
 }

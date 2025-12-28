@@ -31,7 +31,14 @@ pub struct WhitelistToken<'info> {
     pub rent: Sysvar<'info, Rent>,
 }
 
-pub fn handler(ctx: Context<WhitelistToken>, tier: u8, pool_address: Pubkey) -> Result<()> {
+pub fn handler(
+    ctx: Context<WhitelistToken>,
+    tier: u8,
+    pool_address: Pubkey,
+    pool_type: u8,
+    min_loan_amount: u64,
+    max_loan_amount: u64,
+) -> Result<()> {
     let token_config = &mut ctx.accounts.token_config;
     
     // Validate tier
@@ -42,16 +49,30 @@ pub fn handler(ctx: Context<WhitelistToken>, tier: u8, pool_address: Pubkey) -> 
         _ => return Err(LendingError::InvalidTokenTier.into()),
     };
 
+    // Validate pool type
+    let pool_type = match pool_type {
+        0 => PoolType::Raydium,
+        1 => PoolType::Orca,
+        2 => PoolType::Pumpfun,
+        3 => PoolType::PumpSwap,
+        _ => return Err(LendingError::InvalidPoolType.into()),
+    };
+
     // Validate pool address
     if pool_address == Pubkey::default() {
         return Err(LendingError::InvalidPoolAddress.into());
     }
 
-    // Set default parameters based on tier
-    let (ltv_bps, interest_rate_bps, liquidation_bonus_bps, min_loan, max_loan) = match token_tier {
-        TokenTier::Bronze => (6000, 1500, 800, 100_000_000, 5_000_000_000), // 60% LTV, 15% APR
-        TokenTier::Silver => (7000, 1200, 600, 50_000_000, 10_000_000_000),  // 70% LTV, 12% APR
-        TokenTier::Gold => (8000, 1000, 500, 10_000_000, 50_000_000_000),   // 80% LTV, 10% APR
+    // Validate loan amounts
+    if min_loan_amount == 0 || max_loan_amount == 0 || min_loan_amount >= max_loan_amount {
+        return Err(LendingError::InvalidLoanAmount.into());
+    }
+
+    // Set more conservative parameters based on tier
+    let (ltv_bps, interest_rate_bps, liquidation_bonus_bps) = match token_tier {
+        TokenTier::Bronze => (5000, 1000, 1000), // 50% LTV, 10% APR, 10% liq bonus
+        TokenTier::Silver => (6000, 700, 750),   // 60% LTV, 7% APR, 7.5% liq bonus
+        TokenTier::Gold => (7000, 500, 500),     // 70% LTV, 5% APR, 5% liq bonus
     };
 
     // Initialize token config
@@ -59,14 +80,17 @@ pub fn handler(ctx: Context<WhitelistToken>, tier: u8, pool_address: Pubkey) -> 
     token_config.tier = token_tier;
     token_config.enabled = true;
     token_config.pool_address = pool_address;
+    token_config.pool_type = pool_type;
     token_config.ltv_bps = ltv_bps;
     token_config.interest_rate_bps = interest_rate_bps;
     token_config.liquidation_bonus_bps = liquidation_bonus_bps;
-    token_config.min_loan_amount = min_loan;
-    token_config.max_loan_amount = max_loan;
+    token_config.min_loan_amount = min_loan_amount;
+    token_config.max_loan_amount = max_loan_amount;
+    token_config.active_loans_count = 0;
+    token_config.total_volume = 0;
     token_config.bump = ctx.bumps.token_config;
 
-    msg!("Token whitelisted: {} (tier: {:?})", ctx.accounts.token_mint.key(), token_tier);
+    msg!("Token whitelisted: {} (tier: {:?}, pool_type: {:?})", ctx.accounts.token_mint.key(), token_tier, pool_type);
     
     Ok(())
 }

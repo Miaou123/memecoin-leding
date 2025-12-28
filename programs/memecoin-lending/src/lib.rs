@@ -13,9 +13,14 @@ declare_id!("11111111111111111111111111111112");
 pub mod memecoin_lending {
     use super::*;
 
-    /// Initialize the protocol with admin
-    pub fn initialize(ctx: Context<Initialize>, admin: Pubkey) -> Result<()> {
-        instructions::initialize::handler(ctx, admin)
+    /// Initialize the protocol with admin and wallet addresses
+    pub fn initialize(
+        ctx: Context<Initialize>,
+        admin: Pubkey,
+        buyback_wallet: Pubkey,
+        operations_wallet: Pubkey,
+    ) -> Result<()> {
+        instructions::initialize::handler(ctx, admin, buyback_wallet, operations_wallet)
     }
 
     /// Whitelist a new token for lending
@@ -23,8 +28,11 @@ pub mod memecoin_lending {
         ctx: Context<WhitelistToken>,
         tier: u8,
         pool_address: Pubkey,
+        pool_type: u8,
+        min_loan_amount: u64,
+        max_loan_amount: u64,
     ) -> Result<()> {
-        instructions::whitelist_token::handler(ctx, tier, pool_address)
+        instructions::whitelist_token::handler(ctx, tier, pool_address, pool_type, min_loan_amount, max_loan_amount)
     }
 
     /// Update token configuration parameters
@@ -87,5 +95,31 @@ pub mod memecoin_lending {
     /// Emergency drain (admin only)
     pub fn emergency_drain(ctx: Context<EmergencyDrain>) -> Result<()> {
         instructions::admin::emergency_drain_handler(ctx)
+    }
+
+    /// Fund the treasury with SOL
+    pub fn fund_treasury(ctx: Context<FundTreasury>, amount: u64) -> Result<()> {
+        instructions::fund_treasury::handler(ctx, amount)
+    }
+
+    /// Update fee configuration (admin only)
+    pub fn update_fees(
+        ctx: Context<UpdateFees>,
+        protocol_fee_bps: Option<u16>,
+        treasury_fee_bps: Option<u16>,
+        buyback_fee_bps: Option<u16>,
+        operations_fee_bps: Option<u16>,
+    ) -> Result<()> {
+        instructions::update_fees::handler(ctx, protocol_fee_bps, treasury_fee_bps, buyback_fee_bps, operations_fee_bps)
+    }
+
+    /// Update wallet addresses (admin only)
+    pub fn update_wallets(
+        ctx: Context<AdminControl>,
+        new_admin: Option<Pubkey>,
+        new_buyback_wallet: Option<Pubkey>,
+        new_operations_wallet: Option<Pubkey>,
+    ) -> Result<()> {
+        instructions::admin::update_wallets_handler(ctx, new_admin, new_buyback_wallet, new_operations_wallet)
     }
 }

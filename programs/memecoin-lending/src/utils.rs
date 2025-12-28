@@ -6,8 +6,8 @@ use crate::state::*;
 /// Constants
 pub const BPS_DIVISOR: u64 = 10_000;
 pub const SECONDS_PER_YEAR: u64 = 365 * 24 * 60 * 60;
-pub const MAX_LOAN_DURATION: u64 = 90 * 24 * 60 * 60; // 90 days
-pub const MIN_LOAN_DURATION: u64 = 1 * 24 * 60 * 60; // 1 day
+pub const MAX_LOAN_DURATION: u64 = 7 * 24 * 60 * 60; // 7 days
+pub const MIN_LOAN_DURATION: u64 = 12 * 60 * 60; // 12 hours
 pub const PRICE_STALENESS_THRESHOLD: i64 = 60; // 60 seconds
 pub const MAX_PRICE_DEVIATION_BPS: u64 = 500; // 5%
 
@@ -107,16 +107,89 @@ impl LoanCalculator {
     }
 }
 
-/// Price feed utilities
+/// Price feed utilities with real on-chain price reading
 pub struct PriceFeedUtils;
 
 impl PriceFeedUtils {
-    /// Get token price from pool (mock implementation)
-    /// In production, this would integrate with Raydium/Orca pools or Pyth
-    pub fn get_token_price(_pool_address: &Pubkey) -> Result<u64> {
-        // Mock price: 1 token = 0.001 SOL (1 SOL = 1000 tokens)
-        // In real implementation, fetch from DEX pools or price feeds
-        Ok(1_000_000) // 0.001 SOL in lamports
+    /// Read price from Raydium AMM pool
+    pub fn read_raydium_price(pool_data: &[u8], token_mint: &Pubkey, sol_mint: &Pubkey) -> Result<u64> {
+        // Raydium AMM pool layout offsets
+        const TOKEN_A_AMOUNT_OFFSET: usize = 128;
+        const TOKEN_B_AMOUNT_OFFSET: usize = 136;
+        const TOKEN_A_MINT_OFFSET: usize = 400;
+        const TOKEN_B_MINT_OFFSET: usize = 432;
+        
+        require!(pool_data.len() >= 464, LendingError::InvalidPriceFeed);
+        
+        let token_a_amount = u64::from_le_bytes(
+            pool_data[TOKEN_A_AMOUNT_OFFSET..TOKEN_A_AMOUNT_OFFSET + 8].try_into().unwrap()
+        );
+        let token_b_amount = u64::from_le_bytes(
+            pool_data[TOKEN_B_AMOUNT_OFFSET..TOKEN_B_AMOUNT_OFFSET + 8].try_into().unwrap()
+        );
+        
+        let token_a_mint = Pubkey::try_from(&pool_data[TOKEN_A_MINT_OFFSET..TOKEN_A_MINT_OFFSET + 32]).unwrap();
+        let token_b_mint = Pubkey::try_from(&pool_data[TOKEN_B_MINT_OFFSET..TOKEN_B_MINT_OFFSET + 32]).unwrap();
+        
+        // Determine which token is SOL and calculate price
+        let (sol_amount, token_amount) = if token_a_mint == *sol_mint {
+            (token_a_amount, token_b_amount)
+        } else if token_b_mint == *sol_mint {
+            (token_b_amount, token_a_amount)
+        } else {
+            return Err(LendingError::InvalidPriceFeed.into());
+        };
+        
+        require!(token_amount > 0, LendingError::InvalidPriceFeed);
+        
+        // Price in lamports per token (with 9 decimal precision)
+        let price = (sol_amount as u128)
+            .checked_mul(1_000_000_000)
+            .ok_or(LendingError::MathOverflow)?
+            .checked_div(token_amount as u128)
+            .ok_or(LendingError::DivisionByZero)? as u64;
+        
+        Ok(price)
+    }
+
+    /// Read price from Pumpfun bonding curve
+    pub fn read_pumpfun_price(pool_data: &[u8]) -> Result<u64> {
+        const VIRTUAL_SOL_OFFSET: usize = 8;
+        const VIRTUAL_TOKEN_OFFSET: usize = 16;
+        
+        require!(pool_data.len() >= 24, LendingError::InvalidPriceFeed);
+        
+        let virtual_sol = u64::from_le_bytes(
+            pool_data[VIRTUAL_SOL_OFFSET..VIRTUAL_SOL_OFFSET + 8].try_into().unwrap()
+        );
+        let virtual_token = u64::from_le_bytes(
+            pool_data[VIRTUAL_TOKEN_OFFSET..VIRTUAL_TOKEN_OFFSET + 8].try_into().unwrap()
+        );
+        
+        require!(virtual_token > 0, LendingError::InvalidPriceFeed);
+        
+        let price = (virtual_sol as u128)
+            .checked_mul(1_000_000_000)
+            .ok_or(LendingError::MathOverflow)?
+            .checked_div(virtual_token as u128)
+            .ok_or(LendingError::DivisionByZero)? as u64;
+        
+        Ok(price)
+    }
+
+    /// Unified price reader based on pool type
+    pub fn read_price_from_pool(
+        pool_account: &AccountInfo,
+        pool_type: PoolType,
+        token_mint: &Pubkey,
+    ) -> Result<u64> {
+        let pool_data = pool_account.try_borrow_data()?;
+        let sol_mint = pubkey!("So11111111111111111111111111111111111111112");
+        
+        match pool_type {
+            PoolType::Raydium | PoolType::Orca => Self::read_raydium_price(&pool_data, token_mint, &sol_mint),
+            PoolType::Pumpfun | PoolType::PumpSwap => Self::read_pumpfun_price(&pool_data),
+        }
     }
 
     /// Validate price freshness
@@ -227,7 +300,7 @@ impl PdaUtils {
         )
     }
 
-    pub fn derive_vault_token_account(token_mint: &Pubkey, program_id: &Pubkey) -> (Pubkey, u8) {
-        Pubkey::find_program_address(&[VAULT_SEED, token_mint.as_ref()], program_id)
+    pub fn derive_vault_token_account(loan_pubkey: &Pubkey, program_id: &Pubkey) -> (Pubkey, u8) {
+        Pubkey::find_program_address(&[VAULT_SEED, loan_pubkey.as_ref()], program_id)
     }
 }
