@@ -1,0 +1,119 @@
+import { PublicKey } from '@solana/web3.js';
+import { BN } from '@coral-xyz/anchor';
+import { TokenStats, TokenTier } from '@memecoin-lending/types';
+import { prisma } from '../db/client.js';
+import { priceService } from './price.service.js';
+
+class TokenService {
+  async getTokenStats(mint: string): Promise<TokenStats> {
+    const token = await prisma.token.findUnique({
+      where: { id: mint },
+    });
+    
+    if (!token) {
+      throw new Error('Token not found');
+    }
+    
+    // Get current price and 24h change
+    const currentPrice = await priceService.getCurrentPrice(mint);
+    const price24hAgo = await priceService.getPrice24hAgo(mint);
+    const priceChange24h = price24hAgo 
+      ? ((parseFloat(currentPrice.price) - parseFloat(price24hAgo.price)) / parseFloat(price24hAgo.price)) * 100
+      : 0;
+    
+    // Get loan statistics
+    const [totalLoans, activeLoans, totalBorrowedResult] = await Promise.all([
+      prisma.loan.count({
+        where: { tokenMint: mint },
+      }),
+      prisma.loan.count({
+        where: { 
+          tokenMint: mint,
+          status: 'active',
+        },
+      }),
+      prisma.loan.aggregate({
+        where: { tokenMint: mint },
+        _sum: { solBorrowed: true },
+      }),
+    ]);
+    
+    const totalBorrowed = totalBorrowedResult._sum.solBorrowed || '0';
+    
+    // Calculate available liquidity (this would come from treasury in reality)
+    // For now, use a placeholder
+    const availableLiquidity = '1000000000000'; // 1000 SOL
+    
+    return {
+      mint: token.id,
+      symbol: token.symbol,
+      name: token.name,
+      currentPrice: currentPrice.price,
+      priceChange24h,
+      totalLoans,
+      activeLoans,
+      totalBorrowed,
+      availableLiquidity,
+    };
+  }
+  
+  async getTokenLiquidity(mint: string): Promise<any> {
+    const token = await prisma.token.findUnique({
+      where: { id: mint },
+    });
+    
+    if (!token) {
+      throw new Error('Token not found');
+    }
+    
+    // In a real implementation, this would fetch from the AMM pool
+    // For now, return mock data
+    return {
+      poolAddress: token.poolAddress,
+      tokenAmount: '1000000000', // Mock amount
+      solAmount: '50000000000', // Mock SOL amount
+      totalSupply: '1000000000000', // Mock LP supply
+    };
+  }
+  
+  async updateTokenTier(mint: string, tier: TokenTier): Promise<void> {
+    await prisma.token.update({
+      where: { id: mint },
+      data: { tier },
+    });
+  }
+  
+  async getWhitelistedTokens(): Promise<TokenStats[]> {
+    const tokens = await prisma.token.findMany({
+      where: { enabled: true },
+      orderBy: { tier: 'asc' },
+    });
+    
+    const stats = await Promise.all(
+      tokens.map(token => this.getTokenStats(token.id))
+    );
+    
+    return stats;
+  }
+  
+  async isTokenWhitelisted(mint: string): Promise<boolean> {
+    const token = await prisma.token.findUnique({
+      where: { id: mint },
+    });
+    
+    return token?.enabled || false;
+  }
+  
+  async getTokenBySymbol(symbol: string): Promise<any> {
+    return prisma.token.findFirst({
+      where: { 
+        symbol: {
+          equals: symbol,
+          mode: 'insensitive',
+        },
+      },
+    });
+  }
+}
+
+export const tokenService = new TokenService();

@@ -1,0 +1,248 @@
+import { Program, BN } from '@coral-xyz/anchor';
+import {
+  PublicKey,
+  TransactionSignature,
+  SystemProgram,
+  SYSVAR_RENT_PUBKEY,
+} from '@solana/web3.js';
+import {
+  TOKEN_PROGRAM_ID,
+  ASSOCIATED_TOKEN_PROGRAM_ID,
+  getAssociatedTokenAddress,
+} from '@solana/spl-token';
+import * as pda from '../pda';
+import { getCommonInstructionAccounts } from '../utils';
+
+export async function initializeProtocol(
+  program: Program,
+  admin: PublicKey
+): Promise<TransactionSignature> {
+  const [protocolState] = pda.getProtocolStatePDA(program.programId);
+  const [treasury] = pda.getTreasuryPDA(program.programId);
+
+  return program.methods
+    .initialize(admin)
+    .accounts({
+      protocolState,
+      treasury,
+      payer: program.provider.publicKey,
+      ...getCommonInstructionAccounts(),
+    })
+    .rpc();
+}
+
+export async function whitelistToken(
+  program: Program,
+  params: {
+    mint: PublicKey;
+    tier: number;
+    poolAddress: PublicKey;
+  }
+): Promise<TransactionSignature> {
+  const [protocolState] = pda.getProtocolStatePDA(program.programId);
+  const [tokenConfig] = pda.getTokenConfigPDA(params.mint, program.programId);
+
+  return program.methods
+    .whitelistToken(params.tier, params.poolAddress)
+    .accounts({
+      protocolState,
+      tokenConfig,
+      tokenMint: params.mint,
+      admin: program.provider.publicKey,
+      ...getCommonInstructionAccounts(),
+    })
+    .rpc();
+}
+
+export async function createLoan(
+  program: Program,
+  params: {
+    tokenMint: PublicKey;
+    collateralAmount: BN;
+    durationSeconds: BN;
+    borrower: PublicKey;
+  }
+): Promise<TransactionSignature> {
+  const [protocolState] = pda.getProtocolStatePDA(program.programId);
+  const [tokenConfig] = pda.getTokenConfigPDA(params.tokenMint, program.programId);
+  const [treasury] = pda.getTreasuryPDA(program.programId);
+  
+  // Get the loan index from protocol state
+  const state = await program.account.protocolState.fetch(protocolState);
+  const loanIndex = state.totalLoansCreated as BN;
+  
+  const [loan] = pda.getLoanPDA(
+    params.borrower,
+    params.tokenMint,
+    loanIndex,
+    program.programId
+  );
+  
+  const [vaultTokenAccount] = pda.getVaultTokenAccount(
+    params.tokenMint,
+    program.programId
+  );
+  
+  const borrowerTokenAccount = await getAssociatedTokenAddress(
+    params.tokenMint,
+    params.borrower
+  );
+
+  return program.methods
+    .createLoan(params.collateralAmount, params.durationSeconds)
+    .accounts({
+      loan,
+      protocolState,
+      tokenConfig,
+      treasury,
+      borrower: params.borrower,
+      borrowerTokenAccount,
+      vaultTokenAccount,
+      tokenMint: params.tokenMint,
+      ...getCommonInstructionAccounts(),
+    })
+    .rpc();
+}
+
+export async function repayLoan(
+  program: Program,
+  loanPubkey: PublicKey
+): Promise<TransactionSignature> {
+  const loanAccount = await program.account.loan.fetch(loanPubkey);
+  const [protocolState] = pda.getProtocolStatePDA(program.programId);
+  const [treasury] = pda.getTreasuryPDA(program.programId);
+  const [vaultTokenAccount] = pda.getVaultTokenAccount(
+    loanAccount.tokenMint,
+    program.programId
+  );
+  
+  const borrowerTokenAccount = await getAssociatedTokenAddress(
+    loanAccount.tokenMint,
+    loanAccount.borrower
+  );
+
+  return program.methods
+    .repayLoan()
+    .accounts({
+      loan: loanPubkey,
+      protocolState,
+      treasury,
+      borrower: loanAccount.borrower,
+      borrowerTokenAccount,
+      vaultTokenAccount,
+      tokenMint: loanAccount.tokenMint,
+      ...getCommonInstructionAccounts(),
+    })
+    .rpc();
+}
+
+export async function liquidate(
+  program: Program,
+  loanPubkey: PublicKey
+): Promise<TransactionSignature> {
+  const loanAccount = await program.account.loan.fetch(loanPubkey);
+  const [protocolState] = pda.getProtocolStatePDA(program.programId);
+  const [tokenConfig] = pda.getTokenConfigPDA(
+    loanAccount.tokenMint,
+    program.programId
+  );
+  const [treasury] = pda.getTreasuryPDA(program.programId);
+  const [vaultTokenAccount] = pda.getVaultTokenAccount(
+    loanAccount.tokenMint,
+    program.programId
+  );
+  
+  const liquidatorTokenAccount = await getAssociatedTokenAddress(
+    loanAccount.tokenMint,
+    program.provider.publicKey
+  );
+
+  return program.methods
+    .liquidate()
+    .accounts({
+      loan: loanPubkey,
+      protocolState,
+      tokenConfig,
+      treasury,
+      liquidator: program.provider.publicKey,
+      liquidatorTokenAccount,
+      vaultTokenAccount,
+      tokenMint: loanAccount.tokenMint,
+      poolProgram: new PublicKey('675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8'), // Raydium
+      poolAccount: tokenConfig.poolAddress,
+      ...getCommonInstructionAccounts(),
+    })
+    .rpc();
+}
+
+export async function updateTokenConfig(
+  program: Program,
+  params: {
+    mint: PublicKey;
+    enabled?: boolean;
+    ltvBps?: number;
+    interestRateBps?: number;
+  }
+): Promise<TransactionSignature> {
+  const [protocolState] = pda.getProtocolStatePDA(program.programId);
+  const [tokenConfig] = pda.getTokenConfigPDA(params.mint, program.programId);
+
+  return program.methods
+    .updateTokenConfig(
+      params.enabled ?? null,
+      params.ltvBps ?? null,
+      params.interestRateBps ?? null
+    )
+    .accounts({
+      protocolState,
+      tokenConfig,
+      admin: program.provider.publicKey,
+    })
+    .rpc();
+}
+
+export async function pauseProtocol(
+  program: Program
+): Promise<TransactionSignature> {
+  const [protocolState] = pda.getProtocolStatePDA(program.programId);
+
+  return program.methods
+    .pauseProtocol()
+    .accounts({
+      protocolState,
+      admin: program.provider.publicKey,
+    })
+    .rpc();
+}
+
+export async function resumeProtocol(
+  program: Program
+): Promise<TransactionSignature> {
+  const [protocolState] = pda.getProtocolStatePDA(program.programId);
+
+  return program.methods
+    .resumeProtocol()
+    .accounts({
+      protocolState,
+      admin: program.provider.publicKey,
+    })
+    .rpc();
+}
+
+export async function withdrawTreasury(
+  program: Program,
+  amount: BN
+): Promise<TransactionSignature> {
+  const [protocolState] = pda.getProtocolStatePDA(program.programId);
+  const [treasury] = pda.getTreasuryPDA(program.programId);
+
+  return program.methods
+    .withdrawTreasury(amount)
+    .accounts({
+      protocolState,
+      treasury,
+      admin: program.provider.publicKey,
+      systemProgram: SystemProgram.programId,
+    })
+    .rpc();
+}

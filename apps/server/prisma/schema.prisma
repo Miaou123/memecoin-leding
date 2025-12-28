@@ -1,0 +1,122 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Token {
+  id                   String   @id // mint address
+  symbol               String
+  name                 String
+  decimals             Int
+  tier                 String
+  poolAddress          String
+  enabled              Boolean  @default(true)
+  logoUri              String?
+  coingeckoId          String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  
+  loans                Loan[]
+  priceHistory         PriceHistory[]
+  
+  @@index([symbol])
+}
+
+model Loan {
+  id                   String   @id // loan PDA
+  borrower             String
+  tokenMint            String
+  token                Token    @relation(fields: [tokenMint], references: [id])
+  collateralAmount     String
+  solBorrowed          String
+  entryPrice           String
+  liquidationPrice     String
+  interestRateBps      Int
+  status               String
+  createdAt            DateTime
+  dueAt                DateTime
+  repaidAt             DateTime?
+  liquidatedAt         DateTime?
+  liquidationReason    String?
+  txSignature          String?
+  
+  notifications        Notification[]
+  
+  @@index([borrower])
+  @@index([status])
+  @@index([dueAt])
+  @@index([createdAt])
+}
+
+model PriceHistory {
+  id                   String   @id @default(uuid())
+  tokenMint            String
+  token                Token    @relation(fields: [tokenMint], references: [id])
+  price                String
+  source               String   // 'raydium', 'orca', 'jupiter'
+  timestamp            DateTime @default(now())
+  
+  @@index([tokenMint, timestamp])
+}
+
+model User {
+  id                   String   @id // wallet address
+  telegramId           String?  @unique
+  telegramUsername     String?
+  notificationsEnabled Boolean  @default(true)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  
+  notificationPrefs    NotificationPreference?
+  notifications        Notification[]
+  
+  @@index([telegramId])
+}
+
+model NotificationPreference {
+  id                   String   @id @default(uuid())
+  userId               String   @unique
+  user                 User     @relation(fields: [userId], references: [id])
+  loanCreated          Boolean  @default(true)
+  loanDueSoon          Boolean  @default(true)
+  loanLiquidated       Boolean  @default(true)
+  priceAlerts          Boolean  @default(true)
+  priceThresholdPct    Int      @default(10) // Alert when price drops by this %
+  
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+}
+
+model Notification {
+  id                   String   @id @default(uuid())
+  userId               String
+  user                 User     @relation(fields: [userId], references: [id])
+  loanId               String?
+  loan                 Loan?    @relation(fields: [loanId], references: [id])
+  type                 String   // 'loan_created', 'loan_due_soon', 'loan_liquidated', 'price_alert'
+  title                String
+  message              String
+  data                 Json?
+  read                 Boolean  @default(false)
+  sentToTelegram       Boolean  @default(false)
+  createdAt            DateTime @default(now())
+  
+  @@index([userId, read])
+  @@index([type])
+}
+
+model ProtocolStats {
+  id                   String   @id @default("current")
+  totalValueLocked     String
+  totalLoansActive     Int
+  totalLoansCreated    Int
+  totalInterestEarned  String
+  treasuryBalance      String
+  volume24h            String
+  liquidations24h      Int
+  updatedAt            DateTime @updatedAt
+}
