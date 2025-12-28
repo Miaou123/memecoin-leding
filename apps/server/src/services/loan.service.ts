@@ -5,6 +5,7 @@ import {
   LoanEstimate,
   CreateLoanRequest,
   LoanStatus,
+  WebSocketEvent,
 } from '@memecoin-lending/types';
 import { MemecoinLendingClient } from '@memecoin-lending/sdk';
 import { prisma } from '../db/client.js';
@@ -146,7 +147,7 @@ class LoanService {
     });
     
     // Emit websocket event
-    websocketService.emit('loan:created', {
+    websocketService.emit(WebSocketEvent.LOAN_CREATED, {
       loan: this.formatLoan(dbLoan),
       txSignature,
     });
@@ -197,7 +198,7 @@ class LoanService {
     });
     
     // Emit websocket event
-    websocketService.emit('loan:repaid', {
+    websocketService.emit(WebSocketEvent.LOAN_REPAID, {
       loanPubkey,
       borrower: dbLoan.borrower,
       totalRepaid: dbLoan.solBorrowed, // TODO: Calculate with interest
@@ -255,7 +256,7 @@ class LoanService {
     });
     
     // Emit websocket event
-    websocketService.emit('loan:liquidated', {
+    websocketService.emit(WebSocketEvent.LOAN_LIQUIDATED, {
       loanPubkey,
       borrower: dbLoan.borrower,
       liquidator,

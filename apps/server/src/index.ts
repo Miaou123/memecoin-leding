@@ -73,11 +73,13 @@ app.notFound((c) => {
 const server = createServer((req, res) => {
   // Handle regular HTTP requests with Hono
   if (!req.url?.startsWith('/ws')) {
-    return app.fetch(req, { 
+    const result = app.fetch(req as any, { 
       env: process.env,
-    }).then(response => {
+    });
+    
+    return Promise.resolve(result).then((response: any) => {
       res.statusCode = response.status;
-      response.headers.forEach((value, key) => {
+      response.headers.forEach((value: any, key: any) => {
         res.setHeader(key, value);
       });
       response.body?.pipeTo(

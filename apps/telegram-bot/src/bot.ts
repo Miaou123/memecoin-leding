@@ -39,7 +39,7 @@ export const bot = new Bot<BotContext>(token);
 
 // Install plugins
 bot.use(hydrate());
-bot.use(parseMode('HTML'));
+bot.api.config.use(parseMode('HTML'));
 
 // Install session middleware
 bot.use(session({

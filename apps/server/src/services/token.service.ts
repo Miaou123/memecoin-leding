@@ -90,7 +90,7 @@ class TokenService {
     });
     
     const stats = await Promise.all(
-      tokens.map(token => this.getTokenStats(token.id))
+      tokens.map((token: any) => this.getTokenStats(token.id))
     );
     
     return stats;

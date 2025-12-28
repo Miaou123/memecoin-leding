@@ -23,7 +23,7 @@ class TelegramApiClient {
       throw new Error(`API request failed: ${response.status} ${response.statusText}`);
     }
     
-    const data = await response.json();
+    const data = await response.json() as { success: boolean; data: T; error?: string };
     
     if (!data.success) {
       throw new Error(data.error || 'API request failed');
@@ -86,7 +86,7 @@ class TelegramApiClient {
   
   async updateNotificationPreferences(
     walletAddress: string,
-    preferences: any
+    preferences: Record<string, unknown>
   ): Promise<void> {
     return this.fetch(`/user/${walletAddress}/preferences/notifications`, {
       method: 'PUT',

@@ -16,7 +16,7 @@ if (process.env.NODE_ENV !== 'production') {
 
 // Middleware to log query execution time in development
 if (process.env.NODE_ENV === 'development') {
-  prisma.$use(async (params, next) => {
+  prisma.$use(async (params: any, next: any) => {
     const before = Date.now();
     const result = await next(params);
     const after = Date.now();

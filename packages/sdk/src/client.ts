@@ -45,7 +45,7 @@ export class MemecoinLendingClient {
       throw new Error('IDL is required for SDK initialization');
     }
     
-    this.program = new Program(idl, programId, this.provider);
+    this.program = new Program(idl, this.provider);
   }
 
   // PDA derivations

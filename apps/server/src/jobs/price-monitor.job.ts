@@ -1,4 +1,5 @@
 import { Job } from 'bullmq';
+import { WebSocketEvent } from '@memecoin-lending/types';
 import { priceService } from '../services/price.service.js';
 import { websocketService } from '../websocket/index.js';
 
@@ -13,7 +14,7 @@ export async function priceMonitorJob(job: Job) {
       
       // Emit price updates via WebSocket
       // In a real implementation, you'd track which prices changed
-      websocketService.broadcast('price:update', {
+      websocketService.broadcast(WebSocketEvent.PRICE_UPDATE, {
         timestamp: Date.now(),
         message: 'Prices updated',
       });

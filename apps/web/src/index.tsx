@@ -1,7 +1,11 @@
+import { Buffer } from 'buffer';
 import { render } from 'solid-js/web';
 import { Router } from '@solidjs/router';
 import App from './App';
 import './styles/globals.css';
+
+// Make Buffer available globally
+(globalThis as any).Buffer = Buffer;
 
 const root = document.getElementById('root');
 

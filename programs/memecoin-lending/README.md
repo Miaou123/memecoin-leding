@@ -1,0 +1,253 @@
+# Memecoin Lending Protocol - Solana Program
+
+A collateralized lending protocol built on Solana that allows memecoin holders to borrow SOL against their tokens without selling.
+
+## 🏗️ Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                      Protocol State (PDA)                        │
+│  - Admin authority                                               │
+│  - Treasury (SOL pool)                                           │
+│  - Fee configuration (protocol, liquidation splits)             │
+│  - Buyback & Operations wallet addresses                        │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+        ┌─────────────────────┼─────────────────────┐
+        ▼                     ▼                     ▼
+┌───────────────┐    ┌───────────────┐    ┌───────────────┐
+│ Token Config  │    │ Token Config  │    │ Token Config  │
+│    (PDA)      │    │    (PDA)      │    │    (PDA)      │
+│               │    │               │    │               │
+│ - Mint        │    │ - Mint        │    │ - Mint        │
+│ - Tier        │    │ - Tier        │    │ - Tier        │
+│ - LTV         │    │ - LTV         │    │ - LTV         │
+│ - Pool addr   │    │ - Pool addr   │    │ - Pool addr   │
+└───────────────┘    └───────────────┘    └───────────────┘
+        │                     │                     │
+        ▼                     ▼                     ▼
+┌───────────────┐    ┌───────────────┐    ┌───────────────┐
+│   Loan (PDA)  │    │   Loan (PDA)  │    │   Loan (PDA)  │
+│   + Vault     │    │   + Vault     │    │   + Vault     │
+└───────────────┘    └───────────────┘    └───────────────┘
+```
+
+## 🎯 Features
+
+### Token Tiers
+| Tier | LTV | Base Interest | Liquidation Bonus |
+|------|-----|--------------|-------------------|
+| Gold | 70% | 5% APR | 5% |
+| Silver | 60% | 7% APR | 7.5% |
+| Bronze | 50% | 10% APR | 10% |
+
+### Duration-Based Interest Multipliers
+| Duration | Multiplier |
+|----------|------------|
+| ≤12 hours | 1.5x |
+| ≤24 hours | 1.25x |
+| ≤48 hours | 1.0x |
+| >48 hours | 0.75x |
+
+### Liquidation Triggers
+1. **Time-based**: Loan expires (past due date)
+2. **Price-based**: Token price falls below liquidation threshold
+
+### Fee Distribution (Liquidations)
+- 90% → Treasury (protocol reserves)
+- 5% → Buyback wallet (for token buyback and burn)
+- 5% → Operations wallet (team/costs)
+
+## 📦 Program Structure
+
+```
+programs/memecoin-lending/
+├── Cargo.toml
+├── Xargo.toml
+└── src/
+    ├── lib.rs              # Program entry point
+    ├── state.rs            # Account structures
+    ├── error.rs            # Custom errors
+    ├── utils.rs            # Price reading, math utilities
+    └── instructions/
+        ├── mod.rs
+        ├── initialize.rs       # Initialize protocol
+        ├── whitelist_token.rs  # Whitelist tokens
+        ├── update_token_config.rs
+        ├── create_loan.rs      # Core lending logic
+        ├── repay_loan.rs       # Repayment logic
+        ├── liquidate.rs        # Liquidation logic
+        └── admin.rs            # Admin functions
+```
+
+## 🔧 Instructions
+
+### Protocol Management
+- `initialize` - Set up the protocol with admin and fee wallets
+- `pause_protocol` / `resume_protocol` - Emergency controls
+- `fund_treasury` - Add SOL liquidity
+- `withdraw_treasury` - Admin withdrawal
+- `update_fees` - Modify fee configuration
+- `update_wallets` - Change admin/fee wallets
+
+### Token Management
+- `whitelist_token` - Add a token with tier and pool config
+- `update_token_config` - Modify LTV, rates, etc.
+
+### Loan Operations
+- `create_loan` - Deposit collateral, receive SOL
+- `repay_loan` - Return SOL + interest, get collateral back
+- `liquidate` - Claim collateral from expired/underwater loans
+
+## 🔑 PDAs (Program Derived Addresses)
+
+| Account | Seeds |
+|---------|-------|
+| Protocol State | `["protocol_state"]` |
+| Treasury | `["treasury"]` |
+| Token Config | `["token_config", mint]` |
+| Loan | `["loan", borrower, mint, index]` |
+| Vault | `["vault", loan_pda]` |
+
+## 💰 Loan Flow
+
+### Creating a Loan
+1. User deposits memecoin collateral
+2. Protocol reads price from AMM pool (Raydium/Pumpfun)
+3. Calculates SOL amount based on LTV
+4. Calculates interest based on tier + duration
+5. Transfers SOL from treasury to borrower
+6. Creates loan account with liquidation parameters
+
+### Repaying a Loan
+1. User sends SOL (principal + interest + fee)
+2. Protocol transfers collateral back to user
+3. Updates loan status to `Repaid`
+4. Closes vault account (rent returned)
+
+### Liquidating a Loan
+1. Anyone can liquidate expired OR underwater loans
+2. Collateral transferred to liquidator
+3. Loan marked as `LiquidatedTime` or `LiquidatedPrice`
+4. (Future: Jupiter swap for SOL distribution)
+
+## 🧮 Math Formulas
+
+### SOL to Lend
+```
+sol_amount = (collateral_amount × price × LTV) / 10000
+```
+
+### Interest Calculation
+```
+interest = (principal × rate × duration_seconds) / (365_days × 10000)
+```
+
+### Liquidation Price
+```
+liquidation_price = (total_owed × (1 + bonus_bps)) / collateral_amount
+```
+
+## 🛡️ Security Considerations
+
+1. **Price Oracle**: Currently reads from AMM pools on-chain
+   - Risk: Flash loan manipulation
+   - Mitigation: Use TWAP or signed price checkpoints
+
+2. **Admin Keys**: Single admin can pause/modify protocol
+   - Consider: Multisig or timelock for mainnet
+
+3. **Integer Overflow**: All math uses checked operations
+   - Returns errors instead of wrapping
+
+## 🚀 Deployment
+
+### Build
+```bash
+anchor build
+```
+
+### Test
+```bash
+anchor test
+```
+
+### Deploy
+```bash
+# Devnet
+anchor deploy --provider.cluster devnet
+
+# Mainnet
+anchor deploy --provider.cluster mainnet-beta
+```
+
+### Initialize Protocol
+```typescript
+await program.methods
+  .initialize(adminPubkey, buybackWallet, operationsWallet)
+  .accounts({
+    protocolState: protocolStatePda,
+    treasury: treasuryPda,
+    payer: adminPubkey,
+    systemProgram: SystemProgram.programId,
+  })
+  .signers([adminKeypair])
+  .rpc();
+```
+
+### Whitelist Token
+```typescript
+await program.methods
+  .whitelistToken(
+    { gold: {} },           // tier
+    poolAddress,            // AMM pool
+    { raydium: {} },        // pool type
+    new BN(0.1 * LAMPORTS_PER_SOL),  // min loan
+    new BN(100 * LAMPORTS_PER_SOL)   // max loan
+  )
+  .accounts({
+    protocolState: protocolStatePda,
+    tokenConfig: tokenConfigPda,
+    tokenMint: mintAddress,
+    poolAccount: poolAddress,
+    admin: adminPubkey,
+    systemProgram: SystemProgram.programId,
+  })
+  .signers([adminKeypair])
+  .rpc();
+```
+
+## 📝 Environment Variables
+
+```bash
+# .env
+ANCHOR_PROVIDER_URL=https://api.devnet.solana.com
+ANCHOR_WALLET=~/.config/solana/id.json
+PROGRAM_ID=MCLend1111111111111111111111111111111111111
+```
+
+## 🗺️ Roadmap
+
+- [x] Core lending/borrowing logic
+- [x] Time-based liquidation
+- [x] Price-based liquidation
+- [x] Admin controls
+- [ ] Jupiter swap integration for liquidations
+- [ ] TWAP oracle for price manipulation protection
+- [ ] Governance token integration
+- [ ] LP yield distribution
+
+## 📄 License
+
+MIT
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Write tests for new functionality
+4. Submit a pull request
+
+## ⚠️ Disclaimer
+
+This protocol is experimental and unaudited. Use at your own risk. Always start with small amounts on devnet before mainnet deployment.

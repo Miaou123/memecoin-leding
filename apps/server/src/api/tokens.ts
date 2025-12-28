@@ -20,7 +20,7 @@ tokensRouter.get('/', async (c) => {
   });
   
   const tokenStats = await Promise.all(
-    tokens.map(token => tokenService.getTokenStats(token.id))
+    tokens.map((token: any) => tokenService.getTokenStats(token.id))
   );
   
   return c.json<ApiResponse<TokenStats[]>>({

@@ -1,4 +1,4 @@
-import { Route, Routes } from '@solidjs/router';
+import { Route } from '@solidjs/router';
 import { QueryClient, QueryClientProvider } from '@tanstack/solid-query';
 import { WalletProvider } from './components/wallet/WalletProvider';
 import { Layout } from './components/layout/Layout';
@@ -21,12 +21,10 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <WalletProvider>
         <Layout>
-          <Routes>
-            <Route path="/" component={Home} />
-            <Route path="/borrow" component={Borrow} />
-            <Route path="/loans" component={Loans} />
-            <Route path="/repay/:id" component={Repay} />
-          </Routes>
+          <Route path="/" component={Home} />
+          <Route path="/borrow" component={Borrow} />
+          <Route path="/loans" component={Loans} />
+          <Route path="/repay/:id" component={Repay} />
         </Layout>
       </WalletProvider>
     </QueryClientProvider>
