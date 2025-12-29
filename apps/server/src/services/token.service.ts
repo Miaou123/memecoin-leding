@@ -22,7 +22,7 @@ class TokenService {
       : 0;
     
     // Get loan statistics
-    const [totalLoans, activeLoans, totalBorrowedResult] = await Promise.all([
+    const [totalLoans, activeLoans, loans] = await Promise.all([
       prisma.loan.count({
         where: { tokenMint: mint },
       }),
@@ -32,13 +32,16 @@ class TokenService {
           status: 'active',
         },
       }),
-      prisma.loan.aggregate({
+      prisma.loan.findMany({
         where: { tokenMint: mint },
-        _sum: { solBorrowed: true },
+        select: { solBorrowed: true },
       }),
     ]);
-    
-    const totalBorrowed = totalBorrowedResult._sum.solBorrowed || '0';
+
+    // Manually sum string values
+    const totalBorrowed = loans.reduce((sum, loan) => {
+      return sum + BigInt(loan.solBorrowed || '0');
+    }, BigInt(0)).toString();
     
     // Calculate available liquidity (this would come from treasury in reality)
     // For now, use a placeholder

@@ -23,23 +23,10 @@ interface ExtendedPriceData {
 // Jupiter Price API V3 response type
 interface JupiterPriceResponse {
   [mint: string]: {
-    id: string;
-    type: string;
-    price: string;
-    extraInfo?: {
-      lastSwappedPrice?: {
-        lastJupiterSellAt: number;
-        lastJupiterSellPrice: string;
-        lastJupiterBuyAt: number;
-        lastJupiterBuyPrice: string;
-      };
-      quotedPrice?: {
-        buyPrice: string;
-        buyAt: number;
-        sellPrice: string;
-        sellAt: number;
-      };
-    };
+    blockId: number | null;
+    decimals: number;
+    usdPrice: number;
+    priceChange24h: number | null;
   } | null;
 }
 
@@ -310,11 +297,12 @@ class PriceService {
       if (response.ok) {
         const data = await response.json() as JupiterPriceResponse;
         if (data[solMint]) {
-          const price = parseFloat(data[solMint]!.price);
+          const price = data[solMint]!.usdPrice;
           
           const priceData: ExtendedPriceData = {
             mint: solMint,
             usdPrice: price,
+            priceChange24h: data[solMint]!.priceChange24h || undefined,
             source: 'jupiter',
             timestamp: Date.now(),
           };
@@ -358,7 +346,9 @@ class PriceService {
       if (priceData) {
         results.set(mint, {
           mint,
-          usdPrice: parseFloat(priceData.price),
+          usdPrice: priceData.usdPrice,
+          priceChange24h: priceData.priceChange24h || undefined,
+          decimals: priceData.decimals,
           source: 'jupiter',
           timestamp: Date.now(),
         });

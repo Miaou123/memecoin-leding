@@ -8,6 +8,8 @@ import TokenInputSolid from '@/components/TokenVerification/TokenInputSolid';
 import { createTokenVerification, createCanCreateLoan } from '@/hooks/useTokenVerificationSolid';
 import { formatSOL, formatNumber, formatPercentage } from '@/lib/utils';
 import { api } from '@/lib/api';
+import { useTokenBalance } from '@/hooks/useTokenBalance';
+import { Connection, Transaction } from '@solana/web3.js';
 
 export default function Borrow() {
   const [searchParams] = useSearchParams();
@@ -21,6 +23,9 @@ export default function Borrow() {
   // Token verification hooks
   const tokenVerification = createTokenVerification(() => selectedToken());
   const loanEligibility = createCanCreateLoan(() => selectedToken());
+  
+  // Token balance hook
+  const tokenBalance = useTokenBalance(() => selectedToken() || null);
   
   const tokens = createQuery(() => ({
     queryKey: ['tokens'],
@@ -75,19 +80,35 @@ export default function Borrow() {
       const timestamp = Date.now();
       const message = `Sign in to Memecoin Lending Protocol\nTimestamp: ${timestamp}`;
       const messageBytes = new TextEncoder().encode(message);
-      const signature = await wallet.signMessage(messageBytes);
+      const authSignature = await wallet.signMessage(messageBytes);
       
       const authHeaders = {
-        'X-Signature': btoa(String.fromCharCode(...signature)),
+        'X-Signature': btoa(String.fromCharCode(...authSignature)),
         'X-Public-Key': wallet.publicKey()!.toString(),
         'X-Timestamp': timestamp.toString(),
       };
       
-      return api.createLoan({
+      // 1. Get unsigned transaction from server
+      const response = await api.createLoan({
         tokenMint: selectedToken()!,
         collateralAmount: collateralAmount(),
         durationSeconds: duration(),
       }, authHeaders);
+      
+      // 2. Deserialize transaction
+      const tx = Transaction.from(Buffer.from(response.transaction, 'base64'));
+      
+      // 3. Sign with user's wallet
+      const signedTx = await wallet.signTransaction!(tx);
+      
+      // 4. Send to Solana
+      const connection = new Connection(import.meta.env.VITE_SOLANA_RPC_URL || 'https://api.devnet.solana.com');
+      const signature = await connection.sendRawTransaction(signedTx.serialize());
+      
+      // 5. Confirm
+      await connection.confirmTransaction(signature);
+      
+      return { signature };
     },
   }));
   
@@ -149,7 +170,14 @@ export default function Borrow() {
         
         {/* Amount Input */}
         <div>
-          <label class="block text-sm font-medium mb-2">Collateral Amount</label>
+          <div class="flex justify-between items-center mb-2">
+            <label class="block text-sm font-medium">Collateral Amount</label>
+            <Show when={selectedToken() && wallet.connected()}>
+              <div class="text-xs text-muted-foreground">
+                Balance: {tokenBalance.isLoading() ? '...' : tokenBalance.uiBalance() || '0'} {selectedTokenData()?.symbol || 'tokens'}
+              </div>
+            </Show>
+          </div>
           <div class="relative">
             <input
               type="number"
@@ -158,8 +186,20 @@ export default function Borrow() {
               placeholder="Enter amount"
               class="w-full p-3 border rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent"
             />
-            <div class="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
-              {selectedTokenData()?.symbol}
+            <div class="absolute right-3 top-1/2 -translate-y-1/2 flex items-center space-x-2">
+              <Show when={selectedToken() && wallet.connected() && tokenBalance.uiBalance()}>
+                <button
+                  type="button"
+                  onClick={() => setCollateralAmount(tokenBalance.uiBalance() || '0')}
+                  class="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+                  disabled={tokenBalance.isLoading()}
+                >
+                  MAX
+                </button>
+              </Show>
+              <div class="text-sm text-muted-foreground">
+                {selectedTokenData()?.symbol}
+              </div>
             </div>
           </div>
           <Show when={selectedTokenData()}>
@@ -168,6 +208,11 @@ export default function Borrow() {
                 parseFloat(collateralAmount() || '0') * 
                 parseFloat(selectedTokenData()?.currentPrice || '0')
               )}
+            </div>
+          </Show>
+          <Show when={tokenBalance.error()}>
+            <div class="text-xs text-red-500 mt-1">
+              Error loading balance: {tokenBalance.error()}
             </div>
           </Show>
         </div>

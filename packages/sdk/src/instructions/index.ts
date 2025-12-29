@@ -3,6 +3,7 @@ import BN from 'bn.js';
 import {
   PublicKey,
   TransactionSignature,
+  Transaction,
   SystemProgram,
   SYSVAR_RENT_PUBKEY,
 } from '@solana/web3.js';
@@ -13,6 +14,7 @@ import {
 } from '@solana/spl-token';
 import * as pda from '../pda';
 import { getCommonInstructionAccounts } from '../utils';
+import { PUMPFUN_PROGRAM_ID, RAYDIUM_PROGRAM_ID, ORCA_PROGRAM_ID } from '@memecoin-lending/config';
 
 export async function initializeProtocol(
   program: Program,
@@ -39,19 +41,31 @@ export async function whitelistToken(
   params: {
     mint: PublicKey;
     tier: number;
-    poolAddress: PublicKey;
     poolType: number;
+    poolAddress?: PublicKey; // Optional - will be derived if not provided
     minLoanAmount: BN;
     maxLoanAmount: BN;
   }
 ): Promise<TransactionSignature> {
+  // Derive pool address based on pool type if not provided
+  let poolAddress = params.poolAddress;
+  
+  if (!poolAddress) {
+    if (params.poolType === 2) { // PumpFun pool type
+      const [bondingCurve] = pda.getPumpFunBondingCurvePDA(params.mint);
+      poolAddress = bondingCurve;
+    } else {
+      throw new Error('Pool address required for non-PumpFun tokens');
+    }
+  }
+  
   const [protocolState] = pda.getProtocolStatePDA(program.programId);
   const [tokenConfig] = pda.getTokenConfigPDA(params.mint, program.programId);
 
   return program.methods
     .whitelistToken(
       params.tier,
-      params.poolAddress,
+      poolAddress,
       params.poolType,
       params.minLoanAmount,
       params.maxLoanAmount
@@ -66,7 +80,7 @@ export async function whitelistToken(
     .rpc();
 }
 
-export async function createLoan(
+export async function buildCreateLoanTransaction(
   program: Program,
   params: {
     tokenMint: PublicKey;
@@ -74,14 +88,23 @@ export async function createLoan(
     durationSeconds: BN;
     borrower: PublicKey;
   }
-): Promise<TransactionSignature> {
+): Promise<Transaction> {
   const [protocolState] = pda.getProtocolStatePDA(program.programId);
   const [tokenConfig] = pda.getTokenConfigPDA(params.tokenMint, program.programId);
   const [treasury] = pda.getTreasuryPDA(program.programId);
   
-  // Get the loan index from protocol state (mock implementation)
-  // In real implementation, this would fetch from the actual account
-  const loanIndex = new BN(0); // Mock value for now
+  // Fetch token config to get pool address
+  const tokenConfigAccount = await (program.account as any).tokenConfig.fetch(tokenConfig);
+  if (!tokenConfigAccount) {
+    throw new Error('Token not whitelisted');
+  }
+  
+  // Get the pool account from token config
+  const poolAccount = tokenConfigAccount.poolAddress;
+  
+  // Get loan index from protocol state
+  // TODO: Fetch actual loan count for this borrower+mint combination
+  const loanIndex = new BN(0);
   
   const [loan] = pda.getLoanPDA(
     params.borrower,
@@ -100,6 +123,90 @@ export async function createLoan(
     params.borrower
   );
 
+  // Determine pool program based on pool type
+  let poolProgram: PublicKey;
+  if (tokenConfigAccount.poolType.pumpfun) {
+    poolProgram = PUMPFUN_PROGRAM_ID;
+  } else if (tokenConfigAccount.poolType.raydium) {
+    poolProgram = RAYDIUM_PROGRAM_ID;
+  } else {
+    poolProgram = ORCA_PROGRAM_ID;
+  }
+
+  // Build transaction without sending
+  const tx = await program.methods
+    .createLoan(params.collateralAmount, params.durationSeconds)
+    .accounts({
+      loan,
+      protocolState,
+      tokenConfig,
+      treasury,
+      borrower: params.borrower,
+      borrowerTokenAccount,
+      vaultTokenAccount,
+      tokenMint: params.tokenMint,
+      poolAccount,        // Now properly set!
+      poolProgram,        // Pool program for CPI if needed
+      ...getCommonInstructionAccounts(),
+    })
+    .transaction();  // Returns Transaction instead of sending
+  
+  return tx;
+}
+
+export async function createLoan(
+  program: Program,
+  params: {
+    tokenMint: PublicKey;
+    collateralAmount: BN;
+    durationSeconds: BN;
+    borrower: PublicKey;
+  }
+): Promise<TransactionSignature> {
+  const [protocolState] = pda.getProtocolStatePDA(program.programId);
+  const [tokenConfig] = pda.getTokenConfigPDA(params.tokenMint, program.programId);
+  const [treasury] = pda.getTreasuryPDA(program.programId);
+  
+  // Fetch token config to get pool address
+  const tokenConfigAccount = await (program.account as any).tokenConfig.fetch(tokenConfig);
+  if (!tokenConfigAccount) {
+    throw new Error('Token not whitelisted');
+  }
+  
+  // Get the pool account from token config
+  const poolAccount = tokenConfigAccount.poolAddress;
+  
+  // Get loan index from protocol state
+  // TODO: Fetch actual loan count for this borrower+mint combination
+  const loanIndex = new BN(0);
+  
+  const [loan] = pda.getLoanPDA(
+    params.borrower,
+    params.tokenMint,
+    loanIndex,
+    program.programId
+  );
+  
+  const [vaultTokenAccount] = pda.getVaultTokenAccount(
+    params.tokenMint,
+    program.programId
+  );
+  
+  const borrowerTokenAccount = await getAssociatedTokenAddress(
+    params.tokenMint,
+    params.borrower
+  );
+
+  // Determine pool program based on pool type
+  let poolProgram: PublicKey;
+  if (tokenConfigAccount.poolType.pumpfun) {
+    poolProgram = PUMPFUN_PROGRAM_ID;
+  } else if (tokenConfigAccount.poolType.raydium) {
+    poolProgram = RAYDIUM_PROGRAM_ID;
+  } else {
+    poolProgram = ORCA_PROGRAM_ID;
+  }
+
   return program.methods
     .createLoan(params.collateralAmount, params.durationSeconds)
     .accounts({
@@ -111,6 +218,8 @@ export async function createLoan(
       borrowerTokenAccount,
       vaultTokenAccount,
       tokenMint: params.tokenMint,
+      poolAccount,        // Now properly set!
+      poolProgram,        // Pool program for CPI if needed
       ...getCommonInstructionAccounts(),
     })
     .rpc();
@@ -156,40 +265,53 @@ export async function liquidate(
   program: Program,
   loanPubkey: PublicKey
 ): Promise<TransactionSignature> {
-  // Mock loan account data (in real implementation, this would fetch from blockchain)
-  const loanAccount = {
-    tokenMint: new PublicKey('So11111111111111111111111111111111111111112'), // Mock SOL mint
-    borrower: new PublicKey('11111111111111111111111111111111'), // Mock borrower
-  };
+  // Fetch loan to get token mint
+  const loanAccount = await (program.account as any).loan.fetch(loanPubkey);
+  if (!loanAccount) {
+    throw new Error('Loan not found');
+  }
+  
+  const tokenMint = loanAccount.tokenMint;
+  const borrower = loanAccount.borrower;
+  
+  // Fetch token config for pool address
+  const [tokenConfigPDA] = pda.getTokenConfigPDA(tokenMint, program.programId);
+  const tokenConfigAccount = await (program.account as any).tokenConfig.fetch(tokenConfigPDA);
+  
+  const poolAccount = tokenConfigAccount.poolAddress;
+  
   const [protocolState] = pda.getProtocolStatePDA(program.programId);
-  const [tokenConfig] = pda.getTokenConfigPDA(
-    loanAccount.tokenMint,
-    program.programId
-  );
   const [treasury] = pda.getTreasuryPDA(program.programId);
-  const [vaultTokenAccount] = pda.getVaultTokenAccount(
-    loanAccount.tokenMint,
-    program.programId
-  );
+  const [vaultTokenAccount] = pda.getVaultTokenAccount(tokenMint, program.programId);
   
   const liquidatorTokenAccount = await getAssociatedTokenAddress(
-    loanAccount.tokenMint,
+    tokenMint,
     program.provider.publicKey!
   );
+
+  // Determine pool program
+  let poolProgram: PublicKey;
+  if (tokenConfigAccount.poolType.pumpfun) {
+    poolProgram = PUMPFUN_PROGRAM_ID;
+  } else if (tokenConfigAccount.poolType.raydium) {
+    poolProgram = RAYDIUM_PROGRAM_ID;
+  } else {
+    poolProgram = ORCA_PROGRAM_ID;
+  }
 
   return program.methods
     .liquidate()
     .accounts({
       loan: loanPubkey,
       protocolState,
-      tokenConfig,
+      tokenConfig: tokenConfigPDA,
       treasury,
       liquidator: program.provider.publicKey!,
       liquidatorTokenAccount,
       vaultTokenAccount,
-      tokenMint: loanAccount.tokenMint,
-      poolProgram: new PublicKey('675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8'), // Raydium
-      poolAccount: new PublicKey('11111111111111111111111111111111'), // Mock pool address
+      tokenMint,
+      poolAccount,
+      poolProgram,
       ...getCommonInstructionAccounts(),
     })
     .rpc();

@@ -71,6 +71,14 @@ export const WS_ENDPOINTS = {
   LOCALNET: 'ws://localhost:3001/ws',
 };
 
+// PumpFun Program IDs
+export const PUMPFUN_PROGRAM_ID = new PublicKey('6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P');
+export const PUMPSWAP_PROGRAM_ID = new PublicKey('PSwapMdSai8tjrEXcxFeQth87xC4rRsa4VA5mhGhXkP'); // If needed
+
+// DEX Program IDs (for reference)
+export const RAYDIUM_PROGRAM_ID = new PublicKey('675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8');
+export const ORCA_PROGRAM_ID = new PublicKey('whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc');
+
 // Cache TTLs (in seconds)
 export const CACHE_TTL = {
   PRICE: 10,

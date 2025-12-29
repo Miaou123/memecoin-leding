@@ -145,14 +145,16 @@ loansRouter.post(
     const user = c.user!;
     
     try {
-      const loan = await loanService.createLoan({
+      const result = await loanService.createLoan({
         ...body,
         borrower: user.wallet,
       });
       
-      return c.json<ApiResponse<Loan>>({
+      return c.json<ApiResponse<{ transaction: string }>>({
         success: true,
-        data: loan,
+        data: {
+          transaction: result.transaction,  // Base64 encoded unsigned TX
+        },
       }, 201);
     } catch (error: any) {
       return c.json<ApiResponse<null>>({

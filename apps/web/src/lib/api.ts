@@ -94,7 +94,7 @@ class ApiClient {
   async createLoan(
     params: CreateLoanRequest,
     authHeaders: Record<string, string>
-  ): Promise<Loan> {
+  ): Promise<{ transaction: string }> {
     return this.fetch('/loans', {
       method: 'POST',
       headers: authHeaders,

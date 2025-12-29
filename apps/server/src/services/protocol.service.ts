@@ -1,9 +1,10 @@
 import { PublicKey, Connection, Keypair } from '@solana/web3.js';
 import BN from 'bn.js';
-import BN from 'bn.js';
+import fs from 'fs';
+import path from 'path';
 import { ProtocolStats } from '@memecoin-lending/types';
 import { MemecoinLendingClient } from '@memecoin-lending/sdk';
-import { PROGRAM_ID, getNetworkConfig } from '@memecoin-lending/config';
+import { PROGRAM_ID, getNetworkConfig, getCurrentNetwork, NetworkType } from '@memecoin-lending/config';
 import { prisma } from '../db/client.js';
 
 class ProtocolService {
@@ -11,20 +12,27 @@ class ProtocolService {
   
   private async getClient(): Promise<MemecoinLendingClient> {
     if (!this.client) {
-      const networkConfig = getNetworkConfig();
+      const networkConfig = getNetworkConfig(getCurrentNetwork());
       const connection = new Connection(networkConfig.rpcUrl, 'confirmed');
-      const wallet = Keypair.fromSecretKey(
-        Buffer.from(JSON.parse(process.env.ADMIN_WALLET_PRIVATE_KEY || '[]'))
-      );
       
-      // TODO: Load IDL from file
-      const idl = {}; // Load from file
+      // Load wallet from file
+      const keypairPath = path.resolve(process.env.ADMIN_KEYPAIR_PATH || '../../scripts/keys/admin.json');
+      const keyData = JSON.parse(fs.readFileSync(keypairPath, 'utf8'));
+      const wallet = Keypair.fromSecretKey(Uint8Array.from(keyData));
+      
+      // Load IDL from target folder
+      const idlPath = path.resolve('../../target/idl/memecoin_lending.json');
+      const idl = JSON.parse(fs.readFileSync(idlPath, 'utf8'));
+      
+      const programId = typeof PROGRAM_ID === 'string' 
+        ? new PublicKey(PROGRAM_ID) 
+        : PROGRAM_ID;
       
       this.client = new MemecoinLendingClient(
         connection,
         wallet as any,
-        PROGRAM_ID,
-        idl as any
+        programId,
+        idl
       );
     }
     return this.client;
@@ -41,12 +49,17 @@ class ProtocolService {
     
     // Get 24h volume
     const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    const volume24hResult = await prisma.loan.aggregate({
+    const loans24h = await prisma.loan.findMany({
       where: {
         createdAt: { gte: yesterday },
       },
-      _sum: { solBorrowed: true },
+      select: { solBorrowed: true },
     });
+
+    // Manually sum string values
+    const volume24h = loans24h.reduce((sum, loan) => {
+      return sum + BigInt(loan.solBorrowed || '0');
+    }, BigInt(0)).toString();
     
     // Get 24h liquidations
     const liquidations24h = await prisma.loan.count({
@@ -70,7 +83,7 @@ class ProtocolService {
         totalLoansCreated: parseInt(protocolState.totalLoansCreated),
         totalInterestEarned: protocolState.totalInterestEarned,
         treasuryBalance: treasuryBalance,
-        volume24h: volume24hResult._sum.solBorrowed || '0',
+        volume24h: volume24h,
         liquidations24h,
       },
       update: {
@@ -79,7 +92,7 @@ class ProtocolService {
         totalLoansCreated: parseInt(protocolState.totalLoansCreated),
         totalInterestEarned: protocolState.totalInterestEarned,
         treasuryBalance: treasuryBalance,
-        volume24h: volume24hResult._sum.solBorrowed || '0',
+        volume24h: volume24h,
         liquidations24h,
       },
     });
@@ -90,7 +103,7 @@ class ProtocolService {
       totalLoansCreated: parseInt(protocolState.totalLoansCreated),
       totalInterestEarned: protocolState.totalInterestEarned,
       treasuryBalance: treasuryBalance,
-      volume24h: volume24hResult._sum.solBorrowed || '0',
+      volume24h: volume24h,
       liquidations24h,
     };
   }

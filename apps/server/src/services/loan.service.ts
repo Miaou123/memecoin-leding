@@ -1,4 +1,4 @@
-import { PublicKey, Connection, Keypair } from '@solana/web3.js';
+import { PublicKey, Connection, Keypair, Transaction } from '@solana/web3.js';
 import BN from 'bn.js';
 import fs from 'fs';
 import path from 'path';
@@ -8,20 +8,25 @@ import {
   CreateLoanRequest,
   LoanStatus,
   WebSocketEvent,
+  TokenTier,
+  TokenConfig,
+  PoolType,
 } from '@memecoin-lending/types';
-import { MemecoinLendingClient } from '@memecoin-lending/sdk';
+import { MemecoinLendingClient, buildCreateLoanTransaction } from '@memecoin-lending/sdk';
 import { prisma } from '../db/client.js';
 import { priceService } from './price.service.js';
 import { notificationService } from './notification.service.js';
 import { websocketService } from '../websocket/index.js';
-import { PROGRAM_ID, getNetworkConfig } from '@memecoin-lending/config';
+import { PROGRAM_ID, getNetworkConfig, getCurrentNetwork } from '@memecoin-lending/config';
+
+
 
 class LoanService {
   private client: MemecoinLendingClient | null = null;
   
   private async getClient(): Promise<MemecoinLendingClient> {
     if (!this.client) {
-      const networkConfig = getNetworkConfig();
+      const networkConfig = getNetworkConfig(getCurrentNetwork());
       const connection = new Connection(networkConfig.rpcUrl, 'confirmed');
       
       // Load wallet from file
@@ -67,7 +72,9 @@ class LoanService {
   async estimateLoan(params: CreateLoanRequest): Promise<LoanEstimate> {
     const client = await this.getClient();
     
-    // Check if token is whitelisted
+    console.log('[LoanService] Program ID:', client.program.programId.toString());
+    
+    // Check if token is whitelisted in DB
     const token = await prisma.token.findUnique({
       where: { id: params.tokenMint },
     });
@@ -77,18 +84,63 @@ class LoanService {
     }
     
     // Get token config from chain
-    const tokenConfig = await client.getTokenConfig(new PublicKey(params.tokenMint));
-    if (!tokenConfig) {
+    const mint = new PublicKey(params.tokenMint);
+    const [tokenConfigPDA] = PublicKey.findProgramAddressSync(
+      [Buffer.from('token_config'), mint.toBuffer()],
+      client.program.programId
+    );
+    
+    console.log('[LoanService] TokenConfig PDA:', tokenConfigPDA.toString());
+    
+    let tokenConfig: TokenConfig;
+    try {
+      const account = await (client.program.account as any).tokenConfig.fetch(tokenConfigPDA);
+      console.log('[LoanService] Account fetched:', account);
+      
+      // Convert to TokenConfig format
+      tokenConfig = {
+        pubkey: tokenConfigPDA.toString(),
+        mint: account.mint.toString(),
+        tier: account.tier.bronze ? TokenTier.Bronze : account.tier.silver ? TokenTier.Silver : TokenTier.Gold,
+        enabled: account.enabled,
+        poolAddress: account.poolAddress.toString(),
+        poolType: account.poolType.pumpfun ? PoolType.Pumpfun : account.poolType.raydium ? PoolType.Raydium : PoolType.Orca,
+        ltvBps: account.ltvBps,
+        interestRateBps: account.interestRateBps,
+        liquidationBonusBps: account.liquidationBonusBps,
+        minLoanAmount: account.minLoanAmount.toString(),
+        maxLoanAmount: account.maxLoanAmount.toString(),
+        activeLoansCount: account.activeLoansCount.toString(),
+        totalVolume: account.totalVolume.toString(),
+      };
+    } catch (error: any) {
+      console.error('[LoanService] Fetch error:', error.message);
       throw new Error('Token config not found on-chain');
     }
     
     // Calculate loan terms
     const currentPrice = await priceService.getCurrentPrice(params.tokenMint);
+
+    // Convert price to lamports (BN can only handle integers)
+    // Price from service is in USD, we need to convert to lamports
+    // First get the SOL price, then convert token price to SOL, then to lamports
+    const solUsdPrice = await priceService.getSolPrice();
+    const tokenUsdPrice = parseFloat(currentPrice.price);
+    const tokenSolPrice = tokenUsdPrice / solUsdPrice; // Price in SOL
+    const priceInLamports = Math.round(tokenSolPrice * 1e9).toString(); // Convert to lamports
+
+    console.log('[LoanService] Price conversion:', {
+      tokenUsdPrice,
+      solUsdPrice,
+      tokenSolPrice,
+      priceInLamports,
+    });
+
     const loanTerms = client.calculateLoanTerms({
       tokenMint: params.tokenMint,
       collateralAmount: params.collateralAmount,
       durationSeconds: params.durationSeconds,
-      currentPrice: currentPrice.price,
+      currentPrice: priceInLamports,
       tokenConfig,
     });
     
@@ -99,69 +151,38 @@ class LoanService {
       liquidationPrice: loanTerms.liquidationPrice,
       ltv: loanTerms.ltv,
       fees: {
-        protocolFee: '0', // TODO: Calculate
-        interest: '0', // TODO: Calculate
+        protocolFee: '0',
+        interest: '0',
       },
     };
   }
   
-  async createLoan(params: CreateLoanRequest & { borrower: string }): Promise<Loan> {
+  async createLoan(params: CreateLoanRequest & { borrower: string }): Promise<{ transaction: string }> {
     const client = await this.getClient();
     
-    // Estimate loan first
-    const estimate = await this.estimateLoan(params);
+    // Estimate loan first to validate parameters
+    await this.estimateLoan(params);
     
-    // Create loan on-chain
-    const txSignature = await client.createLoan({
-      tokenMint: params.tokenMint,
-      collateralAmount: params.collateralAmount,
-      durationSeconds: params.durationSeconds,
-      borrower: params.borrower,
+    // Build unsigned transaction
+    const tx = await buildCreateLoanTransaction(client.program, {
+      tokenMint: new PublicKey(params.tokenMint),
+      collateralAmount: new BN(params.collateralAmount),
+      durationSeconds: new BN(params.durationSeconds),
+      borrower: new PublicKey(params.borrower),
     });
     
-    // Get loan account from chain
-    const loans = await client.getLoansByBorrower(new PublicKey(params.borrower));
-    const loan = loans[loans.length - 1]; // Most recent loan
+    // Get recent blockhash
+    const { blockhash } = await client.connection.getLatestBlockhash();
+    tx.recentBlockhash = blockhash;
+    tx.feePayer = new PublicKey(params.borrower);
     
-    if (!loan) {
-      throw new Error('Failed to fetch created loan');
-    }
+    // Serialize and return (unsigned)
+    const serializedTx = tx.serialize({ 
+      requireAllSignatures: false,
+      verifySignatures: false 
+    }).toString('base64');
     
-    // Save to database
-    const dbLoan = await prisma.loan.create({
-      data: {
-        id: loan.pubkey,
-        borrower: loan.borrower,
-        tokenMint: loan.tokenMint,
-        collateralAmount: loan.collateralAmount,
-        solBorrowed: loan.solBorrowed,
-        entryPrice: loan.entryPrice,
-        liquidationPrice: loan.liquidationPrice,
-        interestRateBps: loan.interestRateBps,
-        status: loan.status,
-        createdAt: new Date(loan.createdAt * 1000),
-        dueAt: new Date(loan.dueAt * 1000),
-        txSignature,
-      },
-      include: { token: true },
-    });
-    
-    // Create notification
-    await notificationService.createNotification({
-      userId: params.borrower,
-      type: 'loan_created',
-      title: 'Loan Created',
-      message: `Your loan for ${estimate.solAmount} SOL has been created`,
-      loanId: loan.pubkey,
-    });
-    
-    // Emit websocket event
-    websocketService.emit(WebSocketEvent.LOAN_CREATED, {
-      loan: this.formatLoan(dbLoan),
-      txSignature,
-    });
-    
-    return this.formatLoan(dbLoan);
+    return { transaction: serializedTx };
   }
   
   async repayLoan(loanPubkey: string, repayer: string): Promise<Loan> {

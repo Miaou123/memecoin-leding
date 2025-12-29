@@ -5,11 +5,21 @@ import {
   TokenVerificationResult,
   TokenVerificationCache,
 } from '@memecoin-lending/types';
-import { getNetworkConfig, PROGRAM_ID, NetworkType } from '@memecoin-lending/config';
+import { getNetworkConfig, PROGRAM_ID, NetworkType, PUMPFUN_PROGRAM_ID } from '@memecoin-lending/config';
 import { manualWhitelistService } from './manual-whitelist.service';
+import { prisma } from '../db/client.js';
 import BN from 'bn.js';
 import fs from 'fs';
 import path from 'path';
+
+// Helper function to get PumpFun bonding curve PDA
+function getPumpFunBondingCurve(mint: PublicKey): PublicKey {
+  const [bondingCurve] = PublicKey.findProgramAddressSync(
+    [Buffer.from('bonding-curve'), mint.toBuffer()],
+    PUMPFUN_PROGRAM_ID
+  );
+  return bondingCurve;
+}
 
 // NodeWallet wrapper for Keypair
 class NodeWallet {
@@ -114,12 +124,58 @@ export class TokenVerificationService {
           if (!error.message?.includes('already in use')) {
             console.error(`[TokenVerification] Auto-whitelist failed:`, error.message);
             return this.createInvalidResult(mint, 'Failed to whitelist token on-chain. Please try again.');
+          } else {
+            // Token was already whitelisted by another request, sync to database
+            try {
+              const mintPubkey = new PublicKey(mint);
+              const bondingCurve = getPumpFunBondingCurve(mintPubkey);
+              
+              await prisma.token.upsert({
+                where: { id: mint },
+                update: { enabled: true },
+                create: {
+                  id: mint,
+                  symbol: 'PUMP',
+                  name: 'PumpFun Token',
+                  decimals: 6,
+                  tier: 'bronze',
+                  poolAddress: bondingCurve.toString(), // Store bonding curve PDA
+                  enabled: true,
+                },
+              });
+              console.log(`[TokenVerification] Token synced to database after concurrent whitelist: ${mint.substring(0, 8)}...`);
+            } catch (dbError: any) {
+              console.warn(`[TokenVerification] Failed to sync concurrent token to database: ${dbError.message}`);
+            }
           }
         }
       } else if (!isOnChain && !this.adminKeypair) {
         console.log(`[TokenVerification] Auto-whitelist disabled: no admin keypair`);
       } else if (isOnChain) {
         console.log(`[TokenVerification] Token already on-chain`);
+        // Add database upsert to ensure it exists in DB too
+        try {
+          const mintPubkey = new PublicKey(mint);
+          const bondingCurve = getPumpFunBondingCurve(mintPubkey);
+          
+          await prisma.token.upsert({
+            where: { id: mint },
+            update: { enabled: true },
+            create: {
+              id: mint,
+              symbol: 'PUMP',
+              name: 'PumpFun Token',
+              decimals: 6,
+              tier: 'bronze',
+              poolAddress: bondingCurve.toString(), // Store bonding curve PDA
+              enabled: true,
+            },
+          });
+          console.log(`[TokenVerification] Token synced to database: ${mint.substring(0, 8)}...`);
+        } catch (dbError: any) {
+          console.warn(`[TokenVerification] Failed to sync token to database: ${dbError.message}`);
+          // Don't throw - token is already on-chain, that's what matters
+        }
       }
 
       // 6. Return success
@@ -345,11 +401,14 @@ export class TokenVerificationService {
     // Pool type: 2=pumpfun
     const poolType = 2;
 
+    // Derive the correct bonding curve PDA for PumpFun
+    const bondingCurve = getPumpFunBondingCurve(mintPubkey);
+
     try {
       const tx = await (this.program.methods as any)
         .whitelistToken(
           tier,
-          mintPubkey, // pool address (use mint for pumpfun)
+          bondingCurve, // Use bonding curve PDA, not mint address
           poolType,
           new BN(1000000),       // min loan: 0.001 SOL
           new BN(100000000000),  // max loan: 100 SOL
@@ -365,6 +424,32 @@ export class TokenVerificationService {
         .rpc();
 
       console.log(`[TokenVerification] Auto-whitelisted - tx: ${tx.substring(0, 8)}...`);
+      
+      // Insert into database so loan.service.ts can find it
+      try {
+        await prisma.token.upsert({
+          where: { id: mint },
+          update: {
+            enabled: true,
+            tier: tokenData.tier?.toLowerCase() || 'bronze',
+            updatedAt: new Date(),
+          },
+          create: {
+            id: mint,
+            symbol: tokenData.symbol || 'PUMP',
+            name: tokenData.name || 'PumpFun Token',
+            decimals: 6, // PumpFun tokens use 6 decimals
+            tier: tokenData.tier?.toLowerCase() || 'bronze',
+            poolAddress: bondingCurve.toString(), // Store bonding curve PDA
+            enabled: true,
+          },
+        });
+        console.log(`[TokenVerification] Token added to database: ${mint.substring(0, 8)}...`);
+      } catch (dbError: any) {
+        console.warn(`[TokenVerification] Failed to add token to database: ${dbError.message}`);
+        // Don't throw - on-chain whitelist succeeded, that's what matters
+      }
+      
       return true;
     } catch (error: any) {
       if (error.message?.includes('already in use')) {

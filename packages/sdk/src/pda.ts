@@ -5,6 +5,7 @@ import {
   TREASURY_SEED,
   TOKEN_CONFIG_SEED,
   LOAN_SEED,
+  PUMPFUN_PROGRAM_ID,
 } from '@memecoin-lending/config';
 
 export function getProtocolStatePDA(programId: PublicKey): [PublicKey, number] {
@@ -73,5 +74,12 @@ export function getVaultTokenAccount(
       mint.toBuffer(),
     ],
     programId
+  );
+}
+
+export function getPumpFunBondingCurvePDA(mint: PublicKey): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from('bonding-curve'), mint.toBuffer()],
+    PUMPFUN_PROGRAM_ID
   );
 }
