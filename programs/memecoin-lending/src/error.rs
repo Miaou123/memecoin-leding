@@ -53,8 +53,6 @@ pub enum LendingError {
     #[msg("Invalid loan duration")]
     InvalidLoanDuration,
 
-    #[msg("Interest rate too high")]
-    InterestRateTooHigh,
 
     #[msg("LTV ratio too high")]
     LtvTooHigh,
@@ -130,4 +128,46 @@ pub enum LendingError {
     
     #[msg("Treasury utilization too high")]
     TreasuryUtilizationTooHigh,
+
+    #[msg("Slippage tolerance exceeded")]
+    SlippageExceeded,
+
+    #[msg("Missing PumpFun accounts for liquidation")]
+    MissingPumpfunAccounts,
+
+    #[msg("Missing Jupiter accounts for liquidation")]
+    MissingJupiterAccounts,
+
+    #[msg("Missing Jupiter swap data")]
+    MissingJupiterSwapData,
+
+    #[msg("Invalid bonding curve address")]
+    InvalidBondingCurve,
+
+    #[msg("Invalid pool data")]
+    InvalidPoolData,
+
+    #[msg("Staking pool is paused")]
+    StakingPaused,
+
+    #[msg("Nothing staked")]
+    NothingStaked,
+
+    #[msg("Insufficient stake balance")]
+    InsufficientStakeBalance,
+
+    #[msg("No rewards to claim")]
+    NoRewardsToClaim,
+
+    #[msg("Invalid fee split configuration")]
+    InvalidFeeSplit,
+
+    #[msg("Staking pool not initialized")]
+    StakingPoolNotInitialized,
+
+    #[msg("Invalid staking token")]
+    InvalidStakingToken,
+
+    #[msg("Reward vault insufficient balance")]
+    InsufficientRewardBalance,
 }

@@ -96,3 +96,43 @@ export function getPumpFunBondingCurvePDA(mint: PublicKey): [PublicKey, number] 
     PUMPFUN_PROGRAM_ID
   );
 }
+// === STAKING PDA FUNCTIONS ===
+
+export function getStakingPoolPDA(programId: PublicKey): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from('staking_pool')],
+    programId
+  );
+}
+
+export function getStakingVaultAuthorityPDA(programId: PublicKey): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from('staking_vault')],
+    programId
+  );
+}
+
+export function getRewardVaultPDA(programId: PublicKey): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from('reward_vault')],
+    programId
+  );
+}
+
+export function getUserStakePDA(
+  stakingPool: PublicKey,
+  user: PublicKey,
+  programId: PublicKey
+): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from('user_stake'), stakingPool.toBuffer(), user.toBuffer()],
+    programId
+  );
+}
+
+export function getFeeReceiverPDA(programId: PublicKey): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from('fee_receiver')],
+    programId
+  );
+}

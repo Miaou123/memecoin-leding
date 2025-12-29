@@ -36,20 +36,11 @@ export function calculateLoanTerms(params: LoanTermsParams): LoanTerms {
   // Calculate SOL amount based on LTV
   const solAmount = collateralValue.mul(new BN(tokenConfig.ltvBps)).div(new BN(BPS_DIVISOR));
 
-  // Calculate interest
-  const annualSeconds = new BN(365 * 24 * 60 * 60);
-  const interestRate = tokenConfig.interestRateBps;
-  const interest = solAmount
-    .mul(new BN(interestRate))
-    .mul(durationBN)
-    .div(new BN(BPS_DIVISOR))
-    .div(annualSeconds);
-
-  // Calculate protocol fee
+  // Calculate protocol fee (1% flat)
   const protocolFee = solAmount.mul(new BN(PROTOCOL_FEE_BPS)).div(new BN(BPS_DIVISOR));
 
   // Total owed
-  const totalOwed = solAmount.add(interest).add(protocolFee);
+  const totalOwed = solAmount.add(protocolFee);
 
   // Calculate liquidation price
   // Liquidation happens when collateral value falls below totalOwed / (LTV + buffer)
@@ -64,25 +55,13 @@ export function calculateLoanTerms(params: LoanTermsParams): LoanTerms {
 
   return {
     solAmount: solAmount.toString(),
-    interestRate: interestRate,
+    protocolFeeRate: 1, // Always 1%
     totalOwed: totalOwed.toString(),
     liquidationPrice: liquidationPrice.toString(),
     ltv: tokenConfig.ltvBps / 100,
   };
 }
 
-export function calculateInterest(
-  principal: BN,
-  rateBps: number,
-  durationSeconds: BN
-): BN {
-  const annualSeconds = new BN(365 * 24 * 60 * 60);
-  return principal
-    .mul(new BN(rateBps))
-    .mul(durationSeconds)
-    .div(new BN(BPS_DIVISOR))
-    .div(annualSeconds);
-}
 
 export function calculateLiquidationBonus(
   collateralAmount: BN,

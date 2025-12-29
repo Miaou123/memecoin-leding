@@ -7,6 +7,8 @@ pub mod repay_loan;
 pub mod update_fees;
 pub mod update_token_config;
 pub mod whitelist_token;
+pub mod staking;
+pub mod fee_distribution;
 
 pub use admin::*;
 pub use create_loan::*;
@@ -17,3 +19,5 @@ pub use repay_loan::*;
 pub use update_fees::*;
 pub use update_token_config::*;
 pub use whitelist_token::*;
+pub use staking::*;
+pub use fee_distribution::*;

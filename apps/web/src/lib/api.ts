@@ -15,6 +15,8 @@ import {
   WhitelistStats,
   WhitelistAuditLog,
   TokenVerificationResult,
+  StakingStats,
+  UserStake,
 } from '@memecoin-lending/types';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
@@ -152,6 +154,16 @@ class ApiClient {
       body: JSON.stringify(params),
     });
   }
+
+  async confirmRepayment(
+    loanPubkey: string,
+    txSignature: string
+  ): Promise<Loan> {
+    return this.fetch(`/loans/${loanPubkey}/repay/confirm`, {
+      method: 'POST',
+      body: JSON.stringify({ txSignature }),
+    });
+  }
   
   async getUserStats(wallet: string): Promise<UserStats> {
     return this.fetch(`/user/${wallet}/stats`);
@@ -176,6 +188,61 @@ class ApiClient {
 
   async canCreateLoan(mint: string): Promise<{ allowed: boolean; reason?: string; tier?: string }> {
     return this.fetch(`/tokens/${mint}/can-loan`);
+  }
+
+  // Staking Methods
+  async getStakingPool(): Promise<StakingStats> {
+    return this.fetch('/staking/pool');
+  }
+
+  async getStakingStats(): Promise<StakingStats> {
+    return this.fetch('/staking/stats');
+  }
+
+  async getUserStake(address: string): Promise<{
+    stake: UserStake | null;
+    pendingRewards: string;
+    pendingRewardsSol: number;
+  }> {
+    return this.fetch(`/staking/user/${address}`);
+  }
+
+  async getPendingRewards(address: string): Promise<{
+    pending: string;
+    pendingSol: number;
+  }> {
+    return this.fetch(`/staking/rewards/${address}`);
+  }
+
+  async prepareStakeTransaction(params: {
+    userAddress: string;
+    amount: string;
+    tokenMint: string;
+  }): Promise<{ transaction: string }> {
+    return this.fetch('/staking/stake', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    });
+  }
+
+  async prepareUnstakeTransaction(params: {
+    userAddress: string;
+    amount: string;
+    tokenMint: string;
+  }): Promise<{ transaction: string }> {
+    return this.fetch('/staking/unstake', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    });
+  }
+
+  async prepareClaimTransaction(params: {
+    userAddress: string;
+  }): Promise<{ transaction: string }> {
+    return this.fetch('/staking/claim', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    });
   }
 
   // Admin Methods

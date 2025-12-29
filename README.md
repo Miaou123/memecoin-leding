@@ -190,7 +190,7 @@ TELEGRAM_BOT_TOKEN=your_bot_token
 PROGRAM_ID=your_program_id
 
 # Solana
-SOLANA_RPC_URL=https://api.mainnet-beta.solana.com
+SOLANA_RPC_URL=https://devnet.helius-rpc.com/?api-key=YOUR_API_KEY
 ADMIN_WALLET=your_admin_wallet
 LIQUIDATOR_WALLET=your_liquidator_wallet
 

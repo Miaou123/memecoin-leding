@@ -366,7 +366,7 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
       expect(tokenConfig.tier).to.deep.equal({ gold: {} });
       expect(tokenConfig.enabled).to.be.true;
       expect(tokenConfig.ltvBps).to.equal(7000); // 70%
-      expect(tokenConfig.interestRateBps).to.equal(500); // 5%
+      // Interest rate removed - using flat 1% fee now
       expect(tokenConfig.liquidationBonusBps).to.equal(500); // 5%
     });
 
@@ -395,7 +395,7 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
       const tokenConfig = await program.account.tokenConfig.fetch(silverTokenConfigPda);
       expect(tokenConfig.tier).to.deep.equal({ silver: {} });
       expect(tokenConfig.ltvBps).to.equal(6000); // 60%
-      expect(tokenConfig.interestRateBps).to.equal(700); // 7%
+      // Interest rate removed - using flat 1% fee now
       expect(tokenConfig.liquidationBonusBps).to.equal(750); // 7.5%
     });
 
@@ -424,7 +424,7 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
       const tokenConfig = await program.account.tokenConfig.fetch(bronzeTokenConfigPda);
       expect(tokenConfig.tier).to.deep.equal({ bronze: {} });
       expect(tokenConfig.ltvBps).to.equal(5000); // 50%
-      expect(tokenConfig.interestRateBps).to.equal(1000); // 10%
+      // Interest rate removed - using flat 1% fee now
       expect(tokenConfig.liquidationBonusBps).to.equal(1000); // 10%
     });
 
@@ -447,7 +447,7 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
 
       const tokenConfig = await program.account.tokenConfig.fetch(goldTokenConfigPda);
       expect(tokenConfig.ltvBps).to.equal(6500);
-      expect(tokenConfig.interestRateBps).to.equal(600);
+      // Interest rate removed - using flat 1% fee now
     });
 
     it("should fail whitelist with non-admin", async () => {
@@ -1015,7 +1015,7 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
         const tokenConfig = await program.account.tokenConfig.fetch(config.pda);
         console.log(`${config.name} Token (${config.mint.toString().slice(0, 8)}...):`);
         console.log(`  LTV: ${tokenConfig.ltvBps / 100}%`);
-        console.log(`  Interest: ${tokenConfig.interestRateBps / 100}%`);
+        console.log(`  Protocol Fee: 1.0%`);
         console.log(`  Liquidation Bonus: ${tokenConfig.liquidationBonusBps / 100}%`);
         console.log(`  Enabled: ${tokenConfig.enabled}`);
       }

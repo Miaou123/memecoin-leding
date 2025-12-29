@@ -12,7 +12,7 @@ import {
   TokenConfig,
   PoolType,
 } from '@memecoin-lending/types';
-import { MemecoinLendingClient, buildCreateLoanTransaction, buildRepayLoanTransaction } from '@memecoin-lending/sdk';
+import { MemecoinLendingClient, buildCreateLoanTransaction, buildRepayLoanTransaction, liquidateWithPumpfun, liquidateWithJupiter } from '@memecoin-lending/sdk';
 import { prisma } from '../db/client.js';
 import { priceService } from './price.service.js';
 import { notificationService } from './notification.service.js';
@@ -61,7 +61,6 @@ class LoanService {
       solBorrowed: loan.solBorrowed,
       entryPrice: loan.entryPrice,
       liquidationPrice: loan.liquidationPrice,
-      interestRateBps: loan.interestRateBps,
       createdAt: Math.floor(loan.createdAt.getTime() / 1000),
       dueAt: Math.floor(loan.dueAt.getTime() / 1000),
       status: loan.status as LoanStatus,
@@ -117,7 +116,6 @@ class LoanService {
         poolAddress: account.poolAddress.toString(),
         poolType: account.poolType.pumpfun ? PoolType.Pumpfun : account.poolType.raydium ? PoolType.Raydium : PoolType.Orca,
         ltvBps: account.ltvBps,
-        interestRateBps: account.interestRateBps,
         liquidationBonusBps: account.liquidationBonusBps,
         minLoanAmount: account.minLoanAmount.toString(),
         maxLoanAmount: account.maxLoanAmount.toString(),
@@ -158,13 +156,13 @@ class LoanService {
     
     return {
       solAmount: loanTerms.solAmount,
-      interestRate: loanTerms.interestRate,
+      protocolFeeRate: loanTerms.protocolFeeRate, // Always 1%
       totalOwed: loanTerms.totalOwed,
       liquidationPrice: loanTerms.liquidationPrice,
       ltv: loanTerms.ltv,
       fees: {
-        protocolFee: '0',
-        interest: '0',
+        protocolFee: (parseFloat(loanTerms.solAmount) * 0.01).toString(),
+        interest: '0', // No interest anymore
       },
     };
   }
@@ -302,6 +300,73 @@ class LoanService {
     return this.formatLoan(updatedLoan);
   }
   
+  async confirmRepayment(loanPubkey: string, txSignature: string): Promise<Loan> {
+    // Verify the loan exists
+    const existingLoan = await prisma.loan.findUnique({
+      where: { id: loanPubkey },
+    });
+    
+    if (!existingLoan) {
+      throw new Error('Loan not found');
+    }
+    
+    if (existingLoan.status !== 'active') {
+      throw new Error('Loan is not active');
+    }
+    
+    // Calculate protocol fee (1% flat)
+    const principal = BigInt(existingLoan.solBorrowed);
+    const protocolFee = principal / BigInt(100); // 1%
+    
+    // Update loan status in database
+    const updatedLoan = await prisma.loan.update({
+      where: { id: loanPubkey },
+      data: {
+        status: 'repaid',
+        repaidAt: new Date(),
+      },
+      include: { token: true },
+    });
+    
+    console.log(`[LoanService] Loan ${loanPubkey.substring(0, 8)}... marked as repaid. Tx: ${txSignature.substring(0, 8)}...`);
+    
+    // Create notification for user
+    try {
+      // Ensure user exists first
+      await prisma.user.upsert({
+        where: { id: existingLoan.borrower },
+        update: {},
+        create: { id: existingLoan.borrower },
+      });
+      
+      await notificationService.createNotification({
+        userId: existingLoan.borrower,
+        type: 'loan_repaid',
+        title: 'Loan Repaid Successfully',
+        message: `Your loan of ${this.formatSOL(existingLoan.solBorrowed)} SOL has been repaid`,
+        loanId: loanPubkey,
+      });
+    } catch (notifError: any) {
+      console.warn('[LoanService] Failed to create repayment notification:', notifError.message);
+      // Don't fail the whole operation for notification errors
+    }
+    
+    // Emit websocket event
+    try {
+      websocketService.emit(WebSocketEvent.LOAN_REPAID, {
+        loanPubkey,
+        borrower: existingLoan.borrower,
+        principal: existingLoan.solBorrowed,
+        protocolFee: protocolFee.toString(),
+        txSignature,
+      });
+    } catch (wsError: any) {
+      console.warn('[LoanService] Failed to emit websocket event:', wsError.message);
+    }
+    
+    return this.formatLoan(updatedLoan);
+  }
+  
   async liquidateLoan(loanPubkey: string, liquidator: string): Promise<Loan> {
     const client = await this.getClient();
     
@@ -311,18 +376,51 @@ class LoanService {
       throw new Error('Loan is not liquidatable');
     }
     
-    // Liquidate loan on-chain
-    const txSignature = await client.liquidate(new PublicKey(loanPubkey));
-    
-    // Determine liquidation reason
+    // Get loan data and token config to determine pool type
     const dbLoan = await prisma.loan.findUnique({
       where: { id: loanPubkey },
+      include: { token: true },
     });
     
     if (!dbLoan) {
       throw new Error('Loan not found');
     }
     
+    // Get token configuration to check pool type
+    const tokenConfig = await prisma.tokenConfig.findUnique({
+      where: { tokenMint: dbLoan.tokenMint },
+    });
+    
+    if (!tokenConfig) {
+      throw new Error('Token configuration not found');
+    }
+    
+    let txSignature: string;
+    
+    try {
+      // Execute liquidation based on pool type
+      if (tokenConfig.poolType === PoolType.Pumpfun) {
+        console.log(`🔥 Liquidating PumpFun loan ${loanPubkey} via bonding curve`);
+        txSignature = await liquidateWithPumpfun(
+          client.program,
+          new PublicKey(loanPubkey),
+          client.connection
+        );
+      } else {
+        // Use Jupiter for Raydium, Orca, and PumpSwap
+        console.log(`🔥 Liquidating ${tokenConfig.poolType} loan ${loanPubkey} via Jupiter`);
+        txSignature = await liquidateWithJupiter(
+          client.program,
+          new PublicKey(loanPubkey),
+          150 // 1.5% slippage tolerance
+        );
+      }
+    } catch (error) {
+      console.error(`Failed to liquidate loan ${loanPubkey}:`, error);
+      throw new Error(`Liquidation failed: ${error.message}`);
+    }
+    
+    // Determine liquidation reason
     const currentTime = Math.floor(Date.now() / 1000);
     const dueTime = Math.floor(dbLoan.dueAt.getTime() / 1000);
     const liquidationReason = currentTime > dueTime ? 'time' : 'price';
@@ -340,6 +438,8 @@ class LoanService {
       include: { token: true },
     });
     
+    console.log(`✅ Loan ${loanPubkey} liquidated successfully (${liquidationReason}) - TX: ${txSignature}`);
+    
     // Create notification
     await notificationService.createNotification({
       userId: dbLoan.borrower,
@@ -355,12 +455,12 @@ class LoanService {
       borrower: dbLoan.borrower,
       liquidator,
       reason: liquidationReason,
+      poolType: tokenConfig.poolType,
       txSignature,
     });
     
     return this.formatLoan(updatedLoan);
-  }
-  
+  }  
   async trackCreatedLoan(params: {
     loanPubkey: string;
     txSignature: string;
@@ -401,7 +501,6 @@ class LoanService {
         solBorrowed: loanAccount.solBorrowed.toString(),
         entryPrice: loanAccount.entryPrice.toString(),
         liquidationPrice: loanAccount.liquidationPrice.toString(),
-        interestRateBps: loanAccount.interestRateBps,
         createdAt: new Date(loanAccount.createdAt.toNumber() * 1000),
         dueAt: new Date(loanAccount.dueAt.toNumber() * 1000),
         status: LoanStatus.Active,
@@ -459,10 +558,20 @@ class LoanService {
       
       // Check price-based liquidation
       const currentPrice = await priceService.getCurrentPrice(loan.tokenMint);
-      const currentPriceBN = new BN(currentPrice.price);
-      const liquidationPriceBN = new BN(loan.liquidationPrice);
       
-      if (currentPriceBN.lte(liquidationPriceBN)) {
+      // Log values for debugging
+      console.log(`Checking liquidation for loan ${loan.id}:`, {
+        currentPrice: currentPrice.price,
+        liquidationPrice: loan.liquidationPrice,
+        tokenMint: loan.tokenMint
+      });
+      
+      // Convert decimal prices to comparable numbers
+      // Prices are stored as strings with decimal values
+      const currentPriceNum = parseFloat(currentPrice.price);
+      const liquidationPriceNum = parseFloat(loan.liquidationPrice);
+      
+      if (currentPriceNum <= liquidationPriceNum) {
         liquidatable.push(loan.id);
       }
     }

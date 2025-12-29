@@ -15,7 +15,7 @@ export const NETWORKS: Record<NetworkType, NetworkConfig> = {
   'mainnet-beta': {
     name: 'mainnet-beta',
     cluster: 'mainnet-beta',
-    rpcUrl: process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com',
+    rpcUrl: process.env.SOLANA_RPC_URL || 'https://devnet.helius-rpc.com/?api-key=',
     wsUrl: process.env.SOLANA_WS_URL || 'wss://api.mainnet-beta.solana.com',
     apiUrl: process.env.API_URL || 'https://api.memecoin-lending.com',
     explorerUrl: 'https://explorer.solana.com',
@@ -23,7 +23,7 @@ export const NETWORKS: Record<NetworkType, NetworkConfig> = {
   'devnet': {
     name: 'devnet',
     cluster: 'devnet',
-    rpcUrl: 'https://api.devnet.solana.com',
+    rpcUrl: process.env.SOLANA_RPC_URL || 'https://devnet.helius-rpc.com/?api-key=',
     wsUrl: 'wss://api.devnet.solana.com',
     apiUrl: 'https://api-devnet.memecoin-lending.com',
     explorerUrl: 'https://explorer.solana.com',

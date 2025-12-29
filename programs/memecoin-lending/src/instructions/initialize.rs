@@ -53,7 +53,7 @@ pub fn initialize_handler(
     protocol_state.paused = false;
     protocol_state.total_loans_created = 0;
     protocol_state.total_sol_borrowed = 0;
-    protocol_state.total_interest_earned = 0;
+    protocol_state.total_fees_earned = 0;
     protocol_state.active_loans_count = 0;
     protocol_state.protocol_fee_bps = 100; // 1%
     protocol_state.treasury_fee_bps = 9000; // 90%

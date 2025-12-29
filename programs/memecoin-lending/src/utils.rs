@@ -77,7 +77,7 @@ impl LoanCalculator {
         ltv_bps: u16,
     ) -> Result<u64> {
         // Use u128 for the entire calculation to prevent overflow
-        const PRICE_SCALE: u128 = 1_000_000_000; // 10^9 - matches read_pumpfun_price scaling // 10^6
+        const PRICE_SCALE: u128 = 1_000_000; // 10^6 - matches read_pumpfun_price scaling // 10^6
         
         let collateral_u128 = collateral_amount as u128;
         let price_u128 = token_price as u128;
@@ -98,28 +98,13 @@ impl LoanCalculator {
         Ok(loan_amount as u64)
     }
 
-    /// Calculate interest owed on a loan
-    pub fn calculate_interest(
-        principal: u64,
-        interest_rate_bps: u16,
-        duration_seconds: u64,
-    ) -> Result<u64> {
-        let annual_interest = SafeMath::mul_div(principal, interest_rate_bps as u64, BPS_DIVISOR)?;
-        SafeMath::mul_div(annual_interest, duration_seconds, SECONDS_PER_YEAR)
-    }
-
-    /// Calculate total amount owed (principal + interest + protocol fee)
+    /// Calculate total amount owed (principal + protocol fee only)
     pub fn calculate_total_owed(
         principal: u64,
-        interest_rate_bps: u16,
-        duration_seconds: u64,
         protocol_fee_bps: u16,
     ) -> Result<u64> {
-        let interest = Self::calculate_interest(principal, interest_rate_bps, duration_seconds)?;
         let protocol_fee = SafeMath::mul_div(principal, protocol_fee_bps as u64, BPS_DIVISOR)?;
-        
-        let total = SafeMath::add(principal, interest)?;
-        SafeMath::add(total, protocol_fee)
+        SafeMath::add(principal, protocol_fee)
     }
 
     /// Calculate liquidation price

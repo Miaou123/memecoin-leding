@@ -60,7 +60,7 @@ export function formatLoanMessage(loan: Loan, index?: number): string {
   return `
 ${prefix}${statusEmoji} <b>${formatSOL(loan.solBorrowed)} SOL</b>
 💎 Collateral: ${formatSOL(loan.collateralAmount)} tokens
-📊 Rate: ${(loan.interestRateBps / 100).toFixed(2)}% APR
+📊 Fee: 1.0%
 ${timeStatus}
   `.trim();
 }
@@ -74,7 +74,7 @@ ${statusEmoji} <b>Loan Details</b>
 
 💰 <b>Borrowed:</b> ${formatSOL(loan.solBorrowed)} SOL
 💎 <b>Collateral:</b> ${formatSOL(loan.collateralAmount)} tokens
-📊 <b>Interest Rate:</b> ${(loan.interestRateBps / 100).toFixed(2)}% APR
+📊 <b>Protocol Fee:</b> 1.0%
 🏷️ <b>Status:</b> ${loan.status.charAt(0).toUpperCase() + loan.status.slice(1)}
 
 📅 <b>Created:</b> ${new Date(loan.createdAt * 1000).toLocaleString()}

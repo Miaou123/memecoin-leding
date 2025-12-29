@@ -27,7 +27,7 @@ export interface ProtocolState {
   paused: boolean;
   totalLoansCreated: string;
   totalSolBorrowed: string;
-  totalInterestEarned: string;
+  totalFeesEarned: string;
   activeLoansCount: string;
   protocolFeeBps: number;
   treasuryFeeBps: number;
@@ -44,7 +44,6 @@ export interface TokenConfig {
   poolAddress: string;
   poolType: PoolType;
   ltvBps: number;
-  interestRateBps: number;
   liquidationBonusBps: number;
   minLoanAmount: string;
   maxLoanAmount: string;
@@ -60,7 +59,6 @@ export interface Loan {
   solBorrowed: string;
   entryPrice: string;
   liquidationPrice: string;
-  interestRateBps: number;
   createdAt: number;
   dueAt: number;
   status: LoanStatus;
@@ -74,7 +72,6 @@ export interface LoanAccount {
   solBorrowed: bigint;
   entryPrice: bigint;
   liquidationPrice: bigint;
-  interestRateBps: number;
   createdAt: bigint;
   dueAt: bigint;
   status: {
@@ -104,7 +101,7 @@ export interface LoanTermsParams {
 
 export interface LoanTerms {
   solAmount: string;
-  interestRate: number;
+  protocolFeeRate: number; // Always 1%
   totalOwed: string;
   liquidationPrice: string;
   ltv: number;

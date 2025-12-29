@@ -34,11 +34,11 @@ export function Header() {
                 [MY_LOANS]
               </A>
               <A 
-                href="/admin"
-                class="font-mono text-xs uppercase tracking-wider text-text-secondary hover:text-accent-red transition-colors"
-                activeClass="text-accent-red"
+                href="/staking"
+                class="font-mono text-xs uppercase tracking-wider text-text-secondary hover:text-accent-blue transition-colors"
+                activeClass="text-accent-blue"
               >
-                [ADMIN]
+                [STAKING]
               </A>
             </nav>
           </div>

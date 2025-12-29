@@ -118,8 +118,8 @@ async function deploy(config: DeployConfig) {
   console.log(chalk.gray('─'.repeat(60)));
 
   const networkUrl = {
-    devnet: 'https://api.devnet.solana.com',
-    mainnet: 'https://api.mainnet-beta.solana.com',
+    devnet: process.env.SOLANA_RPC_URL || 'https://devnet.helius-rpc.com/?api-key=',
+    mainnet: process.env.SOLANA_RPC_URL || 'https://devnet.helius-rpc.com/?api-key=',
     localnet: 'http://localhost:8899',
   }[config.network];
 

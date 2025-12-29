@@ -221,7 +221,7 @@ await program.methods
 
 ```bash
 # .env
-ANCHOR_PROVIDER_URL=https://api.devnet.solana.com
+ANCHOR_PROVIDER_URL=https://devnet.helius-rpc.com/?api-key=YOUR_API_KEY
 ANCHOR_WALLET=~/.config/solana/id.json
 PROGRAM_ID=MCLend1111111111111111111111111111111111111
 ```

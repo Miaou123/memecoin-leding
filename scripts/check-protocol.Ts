@@ -3,7 +3,7 @@ import { Program, AnchorProvider } from '@coral-xyz/anchor';
 import fs from 'fs';
 
 async function main() {
-  const connection = new Connection('https://api.devnet.solana.com', 'confirmed');
+  const connection = new Connection(process.env.SOLANA_RPC_URL || 'https://devnet.helius-rpc.com/?api-key=', 'confirmed');
   const idl = JSON.parse(fs.readFileSync('../target/idl/memecoin_lending.json', 'utf8'));
   const programId = new PublicKey('8yrnAJZBNhU6Ae163oyN6tMzVs2Wg4o2dpPYVdt6H9Dt');
 

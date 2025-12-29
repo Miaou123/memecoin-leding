@@ -4,6 +4,7 @@ pub mod error;
 pub mod instructions;
 pub mod state;
 pub mod utils;
+pub mod swap;
 
 use instructions::*;
 
@@ -40,9 +41,8 @@ pub mod memecoin_lending {
         ctx: Context<UpdateTokenConfig>,
         enabled: Option<bool>,
         ltv_bps: Option<u16>,
-        interest_rate_bps: Option<u16>,
     ) -> Result<()> {
-        instructions::update_token_config::update_token_config_handler(ctx, enabled, ltv_bps, interest_rate_bps)
+        instructions::update_token_config::update_token_config_handler(ctx, enabled, ltv_bps)
     }
 
     /// Create a new collateralized loan
@@ -59,9 +59,15 @@ pub mod memecoin_lending {
         instructions::repay_loan::repay_loan_handler(ctx)
     }
 
-    /// Liquidate a loan (time or price based)
-    pub fn liquidate(ctx: Context<Liquidate>) -> Result<()> {
-        instructions::liquidate::liquidate_handler(ctx)
+    /// Liquidate a loan - sells collateral and splits proceeds
+    /// For PumpFun tokens: uses PumpFun bonding curve
+    /// For other tokens: uses Jupiter aggregator
+    pub fn liquidate<'info>(
+        ctx: Context<'_, '_, 'info, 'info, Liquidate<'info>>,
+        min_sol_output: u64,
+        jupiter_swap_data: Option<Vec<u8>>, // None for PumpFun, Some for Jupiter
+    ) -> Result<()> {
+        instructions::liquidate::liquidate_handler(ctx, min_sol_output, jupiter_swap_data)
     }
 
     /// Pause protocol operations (admin only)
@@ -121,5 +127,80 @@ pub mod memecoin_lending {
         new_operations_wallet: Option<Pubkey>,
     ) -> Result<()> {
         instructions::admin::update_wallets_handler(ctx, new_admin, new_buyback_wallet, new_operations_wallet)
+    }
+    /// Initialize staking pool
+    pub fn initialize_staking(
+        ctx: Context<InitializeStaking>,
+        target_pool_balance: u64,
+        base_emission_rate: u64,
+        max_emission_rate: u64,
+        min_emission_rate: u64,
+    ) -> Result<()> {
+        instructions::staking::initialize_staking::initialize_staking_handler(
+            ctx,
+            target_pool_balance,
+            base_emission_rate,
+            max_emission_rate,
+            min_emission_rate,
+        )
+    }
+
+    /// Stake governance tokens
+    pub fn stake(ctx: Context<Stake>, amount: u64) -> Result<()> {
+        instructions::staking::stake::stake_handler(ctx, amount)
+    }
+
+    /// Unstake governance tokens
+    pub fn unstake(ctx: Context<Unstake>, amount: u64) -> Result<()> {
+        instructions::staking::unstake::unstake_handler(ctx, amount)
+    }
+
+    /// Claim staking rewards (SOL)
+    pub fn claim_rewards(ctx: Context<ClaimRewards>) -> Result<()> {
+        instructions::staking::claim_rewards::claim_rewards_handler(ctx)
+    }
+
+    /// Deposit SOL rewards to pool (admin/fee distribution)
+    pub fn deposit_rewards(ctx: Context<DepositRewards>, amount: u64) -> Result<()> {
+        instructions::staking::deposit_rewards::deposit_rewards_handler(ctx, amount)
+    }
+
+    /// Update staking pool configuration (admin only)
+    pub fn update_staking_config(
+        ctx: Context<UpdateStakingConfig>,
+        target_pool_balance: Option<u64>,
+        base_emission_rate: Option<u64>,
+        max_emission_rate: Option<u64>,
+        min_emission_rate: Option<u64>,
+        paused: Option<bool>,
+    ) -> Result<()> {
+        instructions::staking::update_staking_config::update_staking_config_handler(
+            ctx,
+            target_pool_balance,
+            base_emission_rate,
+            max_emission_rate,
+            min_emission_rate,
+            paused,
+        )
+    }
+
+    /// Initialize fee receiver for creator fees
+    pub fn initialize_fee_receiver(
+        ctx: Context<InitializeFeeReceiver>,
+        treasury_split_bps: u16,
+        staking_split_bps: u16,
+        dev_split_bps: u16,
+    ) -> Result<()> {
+        instructions::fee_distribution::initialize_fee_receiver_handler(
+            ctx,
+            treasury_split_bps,
+            staking_split_bps,
+            dev_split_bps,
+        )
+    }
+
+    /// Distribute accumulated creator fees
+    pub fn distribute_creator_fees(ctx: Context<DistributeCreatorFees>) -> Result<()> {
+        instructions::fee_distribution::distribute_creator_fees_handler(ctx)
     }
 }

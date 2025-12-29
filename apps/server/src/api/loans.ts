@@ -299,4 +299,32 @@ loansRouter.post(
   }
 );
 
+// Confirm loan repayment after on-chain success
+const confirmRepaySchema = z.object({
+  txSignature: z.string(),
+});
+
+loansRouter.post(
+  '/:pubkey/repay/confirm',
+  zValidator('json', confirmRepaySchema),
+  async (c) => {
+    const pubkey = c.req.param('pubkey');
+    const { txSignature } = c.req.valid('json');
+    
+    try {
+      const loan = await loanService.confirmRepayment(pubkey, txSignature);
+      
+      return c.json<ApiResponse<Loan>>({
+        success: true,
+        data: loan,
+      });
+    } catch (error: any) {
+      return c.json<ApiResponse<null>>({
+        success: false,
+        error: error.message,
+      }, 400);
+    }
+  }
+);
+
 export { loansRouter };

@@ -80,7 +80,7 @@ program
       printInfo('Token Mint', loan.tokenMint);
       printInfo('Collateral', formatTokens(loan.collateralAmount) + ' tokens');
       printInfo('SOL Borrowed', formatSOL(loan.solBorrowed) + ' SOL');
-      printInfo('Interest Rate', `${loan.interestRateBps / 100}% APR`);
+      printInfo('Protocol Fee', '1.0%');
       printInfo('Created', createdDate.toLocaleString());
       printInfo('Due Date', isOverdue 
         ? chalk.red(dueDate.toLocaleString() + ' (OVERDUE!)') 
@@ -95,14 +95,10 @@ program
       console.log(chalk.blue('\n💰 Repayment Calculation:'));
       
       const principal = parseInt(loan.solBorrowed);
-      const elapsedSeconds = Math.floor(Date.now() / 1000) - loan.createdAt;
-      const interestRate = loan.interestRateBps / 10000; // Convert bps to decimal
-      const interest = Math.floor(principal * interestRate * elapsedSeconds / (365 * 24 * 3600));
       const protocolFee = Math.floor(principal * 0.01); // 1% protocol fee
-      const totalRepayment = principal + interest + protocolFee;
+      const totalRepayment = principal + protocolFee;
       
       printInfo('Principal', formatSOL(principal) + ' SOL');
-      printInfo('Accrued Interest', formatSOL(interest) + ' SOL');
       printInfo('Protocol Fee (1%)', formatSOL(protocolFee) + ' SOL');
       printInfo('Total Repayment', chalk.bold(formatSOL(totalRepayment) + ' SOL'));
       

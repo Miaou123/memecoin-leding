@@ -5,19 +5,6 @@ use crate::state::*;
 use crate::error::LendingError;
 use crate::utils::*;
 
-/// Get duration-based interest rate multiplier
-fn get_duration_multiplier(duration_seconds: u64) -> u16 {
-    const HOUR: u64 = 3600;
-    if duration_seconds <= 12 * HOUR {
-        150  // 1.5x for ≤12h
-    } else if duration_seconds <= 24 * HOUR {
-        125  // 1.25x for ≤24h
-    } else if duration_seconds <= 48 * HOUR {
-        100  // 1.0x for ≤48h
-    } else {
-        75   // 0.75x for >48h
-    }
-}
 
 #[derive(Accounts)]
 #[instruction(collateral_amount: u64)]
@@ -120,10 +107,6 @@ pub fn create_loan_handler(
     
     require!(current_price > 0, LendingError::ZeroPrice);
     
-    // Add duration-based interest multiplier
-    let duration_multiplier = get_duration_multiplier(duration_seconds);
-    let base_rate = token_config.interest_rate_bps;
-    let effective_rate = (base_rate as u64 * duration_multiplier as u64 / 100) as u16;
 
     // Calculate loan amount based on LTV
     let sol_loan_amount = LoanCalculator::calculate_loan_amount(
@@ -189,7 +172,6 @@ pub fn create_loan_handler(
     loan.sol_borrowed = sol_loan_amount;
     loan.entry_price = current_price;
     loan.liquidation_price = liquidation_price;
-    loan.interest_rate_bps = effective_rate;
     loan.created_at = clock.unix_timestamp;
     loan.due_at = clock.unix_timestamp + duration_seconds as i64;
     loan.status = LoanStatus::Active;

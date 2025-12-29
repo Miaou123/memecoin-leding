@@ -93,7 +93,7 @@ REDIS_URL=redis://localhost:6379
 
 # Solana
 SOLANA_NETWORK=devnet
-SOLANA_RPC_URL=https://api.devnet.solana.com
+SOLANA_RPC_URL=https://devnet.helius-rpc.com/?api-key=
 PROGRAM_ID=${programKeypair.publicKey.toString()}
 ADMIN_WALLET=${adminKeypair.publicKey.toString()}
 ADMIN_WALLET_PRIVATE_KEY=${JSON.stringify(Array.from(adminKeypair.secretKey))}
@@ -110,7 +110,7 @@ TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here
 # Frontend
 VITE_API_URL=http://localhost:3001/api
 VITE_WS_URL=ws://localhost:3001/ws
-VITE_SOLANA_RPC_URL=https://api.devnet.solana.com
+VITE_SOLANA_RPC_URL=https://devnet.helius-rpc.com/?api-key=
 VITE_PROGRAM_ID=${programKeypair.publicKey.toString()}
 VITE_SOLANA_NETWORK=devnet
 

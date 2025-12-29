@@ -35,7 +35,6 @@ program
   .option('-n, --network <network>', 'Network to use', 'devnet')
   .option('-k, --keypair <path>', 'Path to admin keypair', './keys/admin.json')
   .option('--ltv <bps>', 'New LTV ratio in basis points (e.g., 7000 = 70%)')
-  .option('--interest <bps>', 'New interest rate in basis points (e.g., 500 = 5% APR)')
   .option('--enable', 'Enable the token for lending')
   .option('--disable', 'Disable the token for lending')
   .option('--dry-run', 'Simulate the transaction without executing')
@@ -73,7 +72,7 @@ program
       printInfo('Pool', tokenConfig.poolAccount);
       printInfo('Pool Type', formatPoolType(tokenConfig.poolType));
       printInfo('LTV', `${tokenConfig.ltvBps / 100}% (${tokenConfig.ltvBps} bps)`);
-      printInfo('Interest Rate', `${tokenConfig.interestRateBps / 100}% APR (${tokenConfig.interestRateBps} bps)`);
+      printInfo('Protocol Fee', '1.0% (flat fee)');
       printInfo('Liquidation Bonus', `${tokenConfig.liquidationBonusBps / 100}% (${tokenConfig.liquidationBonusBps} bps)`);
       printInfo('Min Loan', `${formatSOL(tokenConfig.minLoanAmount)} SOL`);
       printInfo('Max Loan', `${formatSOL(tokenConfig.maxLoanAmount)} SOL`);
@@ -82,11 +81,10 @@ program
       // Determine new values
       const newEnabled = options.enable ? true : options.disable ? false : null;
       const newLtv = options.ltv !== undefined ? parseInt(options.ltv) : null;
-      const newInterest = options.interest !== undefined ? parseInt(options.interest) : null;
       
-      if (newEnabled === null && newLtv === null && newInterest === null) {
+      if (newEnabled === null && newLtv === null) {
         console.log(chalk.yellow('\n⚠️  No changes specified.'));
-        console.log(chalk.gray('Use --ltv, --interest, --enable, or --disable to specify changes.'));
+        console.log(chalk.gray('Use --ltv, --enable, or --disable to specify changes.'));
         return;
       }
       
@@ -97,22 +95,12 @@ program
         }
       }
       
-      // Validate interest
-      if (newInterest !== null) {
-        if (newInterest < 0 || newInterest > 5000) {
-          throw new Error('Interest rate must be between 0% and 50% (5000 bps)');
-        }
-      }
-      
       console.log(chalk.blue('\n📋 Changes:'));
       if (newEnabled !== null) {
         printInfo('Enabled', newEnabled ? chalk.green('Yes') + ' ← CHANGED' : chalk.red('No') + ' ← CHANGED');
       }
       if (newLtv !== null) {
         printInfo('LTV', `${newLtv / 100}% (${newLtv} bps) ← CHANGED`);
-      }
-      if (newInterest !== null) {
-        printInfo('Interest Rate', `${newInterest / 100}% APR (${newInterest} bps) ← CHANGED`);
       }
       
       if (options.dryRun) {
@@ -125,7 +113,6 @@ program
       const txSignature = await client.updateTokenConfig(mint, {
         enabled: newEnabled ?? undefined,
         ltvBps: newLtv ?? undefined,
-        interestRateBps: newInterest ?? undefined,
       });
       
       console.log('');

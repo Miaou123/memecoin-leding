@@ -1,17 +1,22 @@
-import { Show, createMemo } from 'solid-js';
+import { Show, createMemo, createSignal } from 'solid-js';
 import { useParams, useNavigate } from '@solidjs/router';
 import { createQuery, createMutation } from '@tanstack/solid-query';
 import { useWallet } from '@/components/wallet/WalletProvider';
 import { Button } from '@/components/ui/Button';
-import { formatSOL, formatTimeRemaining } from '@/lib/utils';
+import { formatSOL, formatTimeRemaining, formatNumber } from '@/lib/utils';
 import { api } from '@/lib/api';
 import { LoanStatus } from '@memecoin-lending/types';
 import { Connection, Transaction } from '@solana/web3.js';
+import { SuccessModal } from '@/components/ui/SuccessModal';
 
 export default function Repay() {
   const params = useParams();
   const navigate = useNavigate();
   const wallet = useWallet();
+  
+  // Success modal state
+  const [showSuccessModal, setShowSuccessModal] = createSignal(false);
+  const [repayResult, setRepayResult] = createSignal<any>(null);
   
   const loan = createQuery(() => ({
     queryKey: ['loan', params.id],
@@ -36,8 +41,8 @@ export default function Repay() {
       const transaction = Transaction.from(transactionBuffer);
       
       // Get a fresh blockhash
-      const connection = new Connection(import.meta.env.VITE_RPC_URL || 'http://localhost:8899');
-      const { blockhash } = await connection.getLatestBlockhash();
+      const connection = new Connection(import.meta.env.VITE_RPC_URL || 'https://devnet.helius-rpc.com/?api-key=');
+      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
       transaction.recentBlockhash = blockhash;
       transaction.feePayer = wallet.publicKey()!;
       
@@ -46,12 +51,28 @@ export default function Repay() {
       const signature = await connection.sendRawTransaction(signedTransaction.serialize());
       
       // Wait for confirmation
-      await connection.confirmTransaction(signature);
+      await connection.confirmTransaction({
+        signature,
+        blockhash,
+        lastValidBlockHeight,
+      });
       
-      return signature;
+      // Confirm repayment in database
+      const updatedLoan = await api.confirmRepayment(params.id, signature);
+      
+      return { 
+        signature, 
+        loan: loan.data!,
+        updatedLoan 
+      };
     },
-    onSuccess: () => {
-      navigate('/loans');
+    onSuccess: (result) => {
+      setRepayResult(result);
+      setShowSuccessModal(true);
+    },
+    onError: (error) => {
+      console.error('Repayment failed:', error);
+      // Error is already shown by the existing error display in the UI
     },
   }));
   
@@ -67,14 +88,11 @@ export default function Repay() {
     const loanData = loan.data;
     if (!loanData) return '0';
     
-    // Calculate total including interest
-    // This is simplified - in reality, interest accumulates over time
+    // Calculate total including 1% flat fee
     const principal = parseFloat(loanData.solBorrowed);
-    const interestRate = loanData.interestRateBps / 10000;
-    const durationInDays = (loanData.dueAt - loanData.createdAt) / (24 * 60 * 60);
-    const interest = principal * interestRate * (durationInDays / 365);
+    const protocolFee = principal * 0.01; // 1% flat fee
     
-    return (principal + interest).toString();
+    return (principal + protocolFee).toString();
   });
   
   const isOverdue = createMemo(() => {
@@ -129,8 +147,8 @@ export default function Repay() {
                   <span class="font-medium">{formatSOL(loan.data!.collateralAmount)} tokens</span>
                 </div>
                 <div class="flex justify-between">
-                  <span class="text-muted-foreground">Interest Rate</span>
-                  <span class="font-medium">{(loan.data!.interestRateBps / 100).toFixed(2)}% APR</span>
+                  <span class="text-muted-foreground">Protocol Fee</span>
+                  <span class="font-medium">1.0%</span>
                 </div>
               </div>
               
@@ -181,7 +199,7 @@ export default function Repay() {
                   <span class="font-medium">{formatSOL(loan.data!.solBorrowed)} SOL</span>
                 </div>
                 <div class="flex justify-between items-center py-3 border-b">
-                  <span class="text-muted-foreground">Interest</span>
+                  <span class="text-muted-foreground">Protocol Fee (1%)</span>
                   <span class="font-medium">
                     {formatSOL((parseFloat(totalToRepay()) - parseFloat(loan.data!.solBorrowed)).toString())} SOL
                   </span>
@@ -233,6 +251,36 @@ export default function Repay() {
           </Show>
         </div>
       </Show>
+      
+      {/* Success Modal */}
+      <SuccessModal
+        isOpen={showSuccessModal()}
+        onClose={() => setShowSuccessModal(false)}
+        title="Loan Repaid Successfully!"
+        subtitle="Your collateral has been returned to your wallet"
+        details={repayResult() && loan.data ? (() => {
+          const principal = parseFloat(loan.data.solBorrowed) / 1e9;
+          const protocolFee = principal * 0.01; // 1% flat fee
+          const totalRepaid = principal + protocolFee;
+          
+          return [
+            { label: "Principal Repaid", value: formatSOL(loan.data.solBorrowed) + " SOL" },
+            { label: "Protocol Fee", value: protocolFee.toFixed(6) + " SOL" },
+            { label: "Total Repaid", value: totalRepaid.toFixed(6) + " SOL", highlight: true },
+            { label: "Collateral Returned", value: formatNumber(parseFloat(loan.data.collateralAmount) / 1e6) + " " + loan.data.token?.symbol },
+            { label: "Protocol Fee Rate", value: "1.0%" },
+          ];
+        })() : []}
+        transactionSignature={repayResult()?.signature}
+        primaryAction={{
+          label: "View My Loans",
+          onClick: () => navigate('/loans')
+        }}
+        secondaryAction={{
+          label: "Close",
+          onClick: () => {}
+        }}
+      />
     </div>
   );
 }

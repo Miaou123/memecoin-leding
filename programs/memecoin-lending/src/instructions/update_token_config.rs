@@ -26,7 +26,6 @@ pub fn update_token_config_handler(
     ctx: Context<UpdateTokenConfig>,
     enabled: Option<bool>,
     ltv_bps: Option<u16>,
-    interest_rate_bps: Option<u16>,
 ) -> Result<()> {
     let token_config = &mut ctx.accounts.token_config;
     
@@ -45,14 +44,6 @@ pub fn update_token_config_handler(
         msg!("Token {} LTV updated to: {} bps", token_config.mint, ltv_value);
     }
 
-    // Update interest rate with validation
-    if let Some(interest_value) = interest_rate_bps {
-        if interest_value > 5000 { // Max 50% APR
-            return Err(LendingError::InterestRateTooHigh.into());
-        }
-        token_config.interest_rate_bps = interest_value;
-        msg!("Token {} interest rate updated to: {} bps", token_config.mint, interest_value);
-    }
     
     Ok(())
 }

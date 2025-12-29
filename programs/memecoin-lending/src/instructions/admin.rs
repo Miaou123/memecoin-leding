@@ -231,7 +231,7 @@ pub fn emergency_drain_handler(ctx: Context<EmergencyDrain>) -> Result<()> {
 
     // Reset protocol state tracking
     protocol_state.total_sol_borrowed = 0;
-    protocol_state.total_interest_earned = 0;
+    protocol_state.total_fees_earned = 0;
     
     msg!("EMERGENCY DRAIN: {} SOL drained to admin {}", treasury_balance, ctx.accounts.admin.key());
     

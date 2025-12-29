@@ -88,12 +88,9 @@ pub fn repay_loan_handler(ctx: Context<RepayLoan>) -> Result<()> {
     // Now we can borrow loan mutably
     let loan = &mut ctx.accounts.loan;
 
-    // Calculate total amount owed
-    let loan_duration = clock.unix_timestamp - loan.created_at;
+    // Calculate total amount owed (principal + 1% flat fee)
     let total_owed = LoanCalculator::calculate_total_owed(
         loan.sol_borrowed,
-        loan.interest_rate_bps,
-        loan_duration as u64,
         protocol_state.protocol_fee_bps,
     )?;
 
@@ -103,12 +100,7 @@ pub fn repay_loan_handler(ctx: Context<RepayLoan>) -> Result<()> {
         return Err(LendingError::InsufficientTreasuryBalance.into()); // Reusing error for insufficient balance
     }
 
-    // Calculate interest and protocol fee for tracking
-    let interest = LoanCalculator::calculate_interest(
-        loan.sol_borrowed,
-        loan.interest_rate_bps,
-        loan_duration as u64,
-    )?;
+    // Calculate protocol fee for tracking
     let protocol_fee = SafeMath::mul_div(loan.sol_borrowed, protocol_state.protocol_fee_bps as u64, BPS_DIVISOR)?;
 
     // Store collateral amount before we need it
@@ -155,7 +147,7 @@ pub fn repay_loan_handler(ctx: Context<RepayLoan>) -> Result<()> {
 
     // Update protocol state
     protocol_state.total_sol_borrowed = SafeMath::sub(protocol_state.total_sol_borrowed, loan.sol_borrowed)?;
-    protocol_state.total_interest_earned = SafeMath::add(protocol_state.total_interest_earned, interest)?;
+    protocol_state.total_fees_earned = SafeMath::add(protocol_state.total_fees_earned, protocol_fee)?;
     protocol_state.active_loans_count = SafeMath::sub(protocol_state.active_loans_count, 1)?;
     
     // Update token config counters
@@ -166,9 +158,8 @@ pub fn repay_loan_handler(ctx: Context<RepayLoan>) -> Result<()> {
     // No need to track it separately in protocol_state
 
     msg!(
-        "Loan repaid: {} SOL principal + {} SOL interest + {} SOL protocol fee",
+        "Loan repaid: {} SOL principal + {} SOL protocol fee",
         loan.sol_borrowed,
-        interest,
         protocol_fee
     );
     

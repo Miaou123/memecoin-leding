@@ -14,6 +14,7 @@ import { protocolRouter } from './api/protocol.js';
 import { userRouter } from './api/user.js';
 import pricesRouter from './routes/prices.js';
 import adminWhitelistRouter from './routes/admin/whitelist.js';
+import { stakingRoutes } from './routes/staking.js';
 
 // Import services
 import { initializeJobs } from './jobs/index.js';
@@ -54,6 +55,7 @@ app.route('/api/tokens', tokensRouter);
 app.route('/api/protocol', protocolRouter);
 app.route('/api/user', userRouter);
 app.route('/api/prices', pricesRouter);
+app.route('/api/staking', stakingRoutes);
 
 // Admin routes
 app.route('/api/admin/whitelist', adminWhitelistRouter);

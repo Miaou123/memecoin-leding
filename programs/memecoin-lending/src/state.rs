@@ -16,8 +16,8 @@ pub struct ProtocolState {
     pub total_loans_created: u64,
     /// Total SOL borrowed across all loans
     pub total_sol_borrowed: u64,
-    /// Total interest earned by protocol
-    pub total_interest_earned: u64,
+    /// Total fees earned by protocol
+    pub total_fees_earned: u64,
     /// Number of currently active loans
     pub active_loans_count: u64,
     /// Protocol fee in basis points (out of 10,000)
@@ -50,7 +50,7 @@ impl ProtocolState {
         1 + // paused
         8 + // total_loans_created
         8 + // total_sol_borrowed
-        8 + // total_interest_earned
+        8 + // total_fees_earned
         8 + // active_loans_count
         2 + // protocol_fee_bps
         2 + // treasury_fee_bps
@@ -80,8 +80,6 @@ pub struct TokenConfig {
     pub pool_type: PoolType,
     /// Loan-to-value ratio in basis points (7000 = 70%)
     pub ltv_bps: u16,
-    /// Annual interest rate in basis points (1000 = 10%)
-    pub interest_rate_bps: u16,
     /// Liquidation bonus in basis points (500 = 5%)
     pub liquidation_bonus_bps: u16,
     /// Minimum loan amount in lamports
@@ -106,7 +104,6 @@ impl TokenConfig {
         32 + // pool_address
         1 + // pool_type
         2 + // ltv_bps
-        2 + // interest_rate_bps
         2 + // liquidation_bonus_bps
         8 + // min_loan_amount
         8 + // max_loan_amount
@@ -132,8 +129,6 @@ pub struct Loan {
     pub entry_price: u64,
     /// Price at which liquidation is triggered
     pub liquidation_price: u64,
-    /// Interest rate for this loan (basis points)
-    pub interest_rate_bps: u16,
     /// When the loan was created
     pub created_at: i64,
     /// When the loan is due
@@ -156,7 +151,6 @@ impl Loan {
         8 + // sol_borrowed
         8 + // entry_price
         8 + // liquidation_price
-        2 + // interest_rate_bps
         8 + // created_at
         8 + // due_at
         1 + // status
@@ -215,3 +209,177 @@ pub const TOKEN_CONFIG_SEED: &[u8] = b"token_config";
 pub const LOAN_SEED: &[u8] = b"loan";
 pub const TREASURY_SEED: &[u8] = b"treasury";
 pub const VAULT_SEED: &[u8] = b"vault";
+
+// === STAKING CONSTANTS ===
+pub const STAKING_POOL_SEED: &[u8] = b"staking_pool";
+pub const STAKING_VAULT_SEED: &[u8] = b"staking_vault";
+pub const REWARD_VAULT_SEED: &[u8] = b"reward_vault";
+pub const USER_STAKE_SEED: &[u8] = b"user_stake";
+pub const FEE_RECEIVER_SEED: &[u8] = b"fee_receiver";
+
+/// Precision for reward calculations (1e12)
+pub const REWARD_PRECISION: u128 = 1_000_000_000_000;
+
+/// Staking pool configuration and state
+#[account]
+pub struct StakingPool {
+    /// Authority (admin) who can update config
+    pub authority: Pubkey,
+    
+    /// The governance token mint that users stake
+    pub staking_token_mint: Pubkey,
+    
+    /// PDA that holds staked tokens
+    pub staking_vault: Pubkey,
+    
+    /// PDA that holds SOL rewards
+    pub reward_vault: Pubkey,
+    
+    /// Total tokens currently staked
+    pub total_staked: u64,
+    
+    /// Accumulated reward per token (scaled by REWARD_PRECISION)
+    pub reward_per_token_stored: u128,
+    
+    /// Last time rewards were updated
+    pub last_update_time: i64,
+    
+    // === Dynamic Emission Config ===
+    
+    /// Target SOL balance for 1x emission rate (e.g., 50 SOL = 50_000_000_000 lamports)
+    pub target_pool_balance: u64,
+    
+    /// Base emission rate in lamports per second at target balance
+    pub base_emission_rate: u64,
+    
+    /// Maximum emission rate cap (prevents drain)
+    pub max_emission_rate: u64,
+    
+    /// Minimum emission rate floor
+    pub min_emission_rate: u64,
+    
+    // === Stats ===
+    
+    /// Total SOL rewards distributed all-time
+    pub total_rewards_distributed: u64,
+    
+    /// Total SOL rewards deposited all-time
+    pub total_rewards_deposited: u64,
+    
+    /// Whether staking is paused
+    pub paused: bool,
+    
+    /// Bump seed for PDA
+    pub bump: u8,
+    
+    /// Reserved for future upgrades
+    pub _reserved: [u8; 64],
+}
+
+impl StakingPool {
+    pub const LEN: usize = 8 +  // discriminator
+        32 +    // authority
+        32 +    // staking_token_mint
+        32 +    // staking_vault
+        32 +    // reward_vault
+        8 +     // total_staked
+        16 +    // reward_per_token_stored (u128)
+        8 +     // last_update_time
+        8 +     // target_pool_balance
+        8 +     // base_emission_rate
+        8 +     // max_emission_rate
+        8 +     // min_emission_rate
+        8 +     // total_rewards_distributed
+        8 +     // total_rewards_deposited
+        1 +     // paused
+        1 +     // bump
+        64;     // _reserved
+}
+
+/// Individual user's stake position
+#[account]
+pub struct UserStake {
+    /// Owner of this stake
+    pub owner: Pubkey,
+    
+    /// The staking pool this belongs to
+    pub pool: Pubkey,
+    
+    /// Amount of tokens staked
+    pub staked_amount: u64,
+    
+    /// Reward per token value when user last claimed/staked
+    pub reward_per_token_paid: u128,
+    
+    /// Pending rewards not yet claimed (in lamports)
+    pub pending_rewards: u64,
+    
+    /// When user first staked
+    pub stake_timestamp: i64,
+    
+    /// Bump seed for PDA
+    pub bump: u8,
+    
+    /// Reserved
+    pub _reserved: [u8; 32],
+}
+
+impl UserStake {
+    pub const LEN: usize = 8 +  // discriminator
+        32 +    // owner
+        32 +    // pool
+        8 +     // staked_amount
+        16 +    // reward_per_token_paid (u128)
+        8 +     // pending_rewards
+        8 +     // stake_timestamp
+        1 +     // bump
+        32;     // _reserved
+}
+
+/// Fee receiver account for collecting pumpfun creator fees
+#[account]
+pub struct FeeReceiver {
+    /// Authority who can distribute fees
+    pub authority: Pubkey,
+    
+    /// Treasury wallet (50%)
+    pub treasury_wallet: Pubkey,
+    
+    /// Dev wallet (25%)
+    pub dev_wallet: Pubkey,
+    
+    /// Staking reward vault (25%)
+    pub staking_reward_vault: Pubkey,
+    
+    /// Fee splits in basis points (must sum to 10000)
+    pub treasury_split_bps: u16,
+    pub staking_split_bps: u16,
+    pub dev_split_bps: u16,
+    
+    /// Total fees received
+    pub total_fees_received: u64,
+    
+    /// Total fees distributed
+    pub total_fees_distributed: u64,
+    
+    /// Bump seed
+    pub bump: u8,
+    
+    /// Reserved
+    pub _reserved: [u8; 32],
+}
+
+impl FeeReceiver {
+    pub const LEN: usize = 8 +  // discriminator
+        32 +    // authority
+        32 +    // treasury_wallet
+        32 +    // dev_wallet
+        32 +    // staking_reward_vault
+        2 +     // treasury_split_bps
+        2 +     // staking_split_bps
+        2 +     // dev_split_bps
+        8 +     // total_fees_received
+        8 +     // total_fees_distributed
+        1 +     // bump
+        32;     // _reserved
+}

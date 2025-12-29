@@ -61,3 +61,16 @@ export function formatTimeRemaining(timestamp: number): string {
 export function shortenAddress(address: string, chars = 4): string {
   return `${address.slice(0, chars)}...${address.slice(-chars)}`;
 }
+
+export function getHealthColor(health: number): string {
+  if (health >= 70) return 'accent-green';
+  if (health >= 40) return 'accent-yellow';
+  return 'accent-red';
+}
+
+export function getLoanUrgency(dueAt: number): 'normal' | 'warning' | 'critical' {
+  const hoursLeft = (dueAt - Date.now() / 1000) / 3600;
+  if (hoursLeft <= 2) return 'critical';
+  if (hoursLeft <= 6) return 'warning';
+  return 'normal';
+}

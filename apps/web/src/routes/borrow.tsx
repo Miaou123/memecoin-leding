@@ -1,5 +1,5 @@
 import { Show, createSignal, createMemo } from 'solid-js';
-import { useSearchParams } from '@solidjs/router';
+import { useSearchParams, useNavigate } from '@solidjs/router';
 import { createQuery, createMutation } from '@tanstack/solid-query';
 import { useWallet } from '@/components/wallet/WalletProvider';
 import { Button } from '@/components/ui/Button';
@@ -11,15 +11,21 @@ import { api } from '@/lib/api';
 import { useTokenBalance } from '@/hooks/useTokenBalance';
 import { Connection, Transaction, PublicKey } from '@solana/web3.js';
 import BN from 'bn.js';
+import { SuccessModal } from '@/components/ui/SuccessModal';
 
 export default function Borrow() {
   const [searchParams] = useSearchParams();
   const wallet = useWallet();
+  const navigate = useNavigate();
   
   const [selectedToken, setSelectedToken] = createSignal(searchParams.token || '');
   const [collateralAmount, setCollateralAmount] = createSignal('');
   const [duration, setDuration] = createSignal(12 * 60 * 60); // 12 hours default
   const [tokenVerificationEnabled, setTokenVerificationEnabled] = createSignal(true);
+  
+  // Success modal state
+  const [showSuccessModal, setShowSuccessModal] = createSignal(false);
+  const [loanResult, setLoanResult] = createSignal<any>(null);
   
   // Token verification hooks
   const tokenVerification = createTokenVerification(() => selectedToken());
@@ -95,7 +101,7 @@ export default function Borrow() {
       
       // 2. Deserialize and prepare transaction
       const tx = Transaction.from(Buffer.from(response.transaction, 'base64'));
-      const connection = new Connection(import.meta.env.VITE_SOLANA_RPC_URL || 'https://api.devnet.solana.com');
+      const connection = new Connection(import.meta.env.VITE_SOLANA_RPC_URL || 'https://devnet.helius-rpc.com/?api-key=');
       const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
       tx.recentBlockhash = blockhash;
       tx.feePayer = wallet.publicKey()!;
@@ -114,14 +120,18 @@ export default function Borrow() {
       });
       
       // 6. Track the loan in database (backend will parse transaction to find actual loan PDA)
-      await api.trackLoan({
+      const loan = await api.trackLoan({
         loanPubkey: '', // Backend will determine this from transaction
         txSignature: signature,
         borrower: wallet.publicKey()!.toString(),
         tokenMint: selectedToken(),
       });
       
-      return { signature };
+      return { signature, loan, estimate: loanEstimate.data! };
+    },
+    onSuccess: (result) => {
+      setLoanResult(result);
+      setShowSuccessModal(true);
     },
   }));
   
@@ -264,8 +274,8 @@ export default function Borrow() {
                 <span class="font-medium">{formatSOL(loanEstimate.data!.solAmount)} SOL</span>
               </div>
               <div class="flex justify-between">
-                <span>Interest Rate (APR)</span>
-                <span>{formatPercentage(loanEstimate.data!.interestRate / 100)}</span>
+                <span>Protocol Fee</span>
+                <span>1.0%</span>
               </div>
               <div class="flex justify-between">
                 <span>Total to Repay</span>
@@ -391,15 +401,6 @@ export default function Borrow() {
           </Show>
         </Button>
         
-        <Show when={createLoanMutation.isSuccess}>
-          <div class="text-center p-4 bg-green-50 border border-green-200 rounded-lg">
-            <div class="text-green-800 font-medium">Loan Created Successfully!</div>
-            <div class="text-green-600 text-sm mt-1">
-              Check your loans page to manage your new loan
-            </div>
-          </div>
-        </Show>
-        
         <Show when={createLoanMutation.error}>
           <div class="text-center p-4 bg-red-50 border border-red-200 rounded-lg">
             <div class="text-red-800 font-medium">Error Creating Loan</div>
@@ -409,6 +410,38 @@ export default function Borrow() {
           </div>
         </Show>
       </div>
+      
+      {/* Success Modal */}
+      <SuccessModal
+        isOpen={showSuccessModal()}
+        onClose={() => setShowSuccessModal(false)}
+        title="Loan Created Successfully!"
+        subtitle="Your loan has been created and your collateral has been locked"
+        details={loanResult() ? [
+          { label: "Principal Amount", value: formatSOL(loanResult().estimate.solAmount) + " SOL", highlight: true },
+          { label: "Collateral Locked", value: formatNumber(collateralAmount()) + " " + selectedTokenData()?.symbol },
+          { label: "Protocol Fee", value: "1.0%" },
+          { label: "Duration", value: formatDuration(duration()) },
+          { label: "Due Date", value: new Date(Date.now() + duration() * 1000).toLocaleDateString() },
+          { label: "Total to Repay", value: formatSOL(loanResult().estimate.totalOwed) + " SOL" },
+          { label: "Liquidation Price", value: "$" + formatNumber(loanResult().estimate.liquidationPrice) },
+        ] : []}
+        transactionSignature={loanResult()?.signature}
+        primaryAction={{
+          label: "View My Loans",
+          onClick: () => navigate('/loans')
+        }}
+        secondaryAction={{
+          label: "Create Another",
+          onClick: () => {
+            // Reset form
+            setSelectedToken('');
+            setCollateralAmount('');
+            setDuration(12 * 60 * 60);
+            setLoanResult(null);
+          }
+        }}
+      />
     </div>
   );
 }
