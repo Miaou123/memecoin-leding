@@ -3,7 +3,7 @@ import { prisma } from '../db/client.js';
 
 class UserService {
   async getUserStats(wallet: string): Promise<UserStats> {
-    const [totalLoans, activeLoans, aggregates] = await Promise.all([
+    const [totalLoans, activeLoans, allLoans, liquidationCount] = await Promise.all([
       prisma.loan.count({
         where: { borrower: wallet },
       }),
@@ -13,55 +13,56 @@ class UserService {
           status: 'active',
         },
       }),
-      prisma.loan.aggregate({
+      prisma.loan.findMany({
         where: { borrower: wallet },
-        _sum: {
+        select: {
           solBorrowed: true,
-        },
-        _count: {
+          status: true,
+          interestRateBps: true,
+          createdAt: true,
+          repaidAt: true,
           liquidatedAt: true,
+        },
+      }),
+      prisma.loan.count({
+        where: {
+          borrower: wallet,
+          liquidatedAt: { not: null },
         },
       }),
     ]);
     
-    // Calculate total repaid (for repaid loans)
-    const repaidLoans = await prisma.loan.findMany({
-      where: {
-        borrower: wallet,
-        status: 'repaid',
-      },
-      select: {
-        solBorrowed: true,
-        interestRateBps: true,
-        createdAt: true,
-        repaidAt: true,
-      },
-    });
+    // Calculate totals manually using BigInt
+    let totalBorrowed = BigInt(0);
+    let totalRepaid = BigInt(0);
+    let totalInterestPaid = BigInt(0);
     
-    let totalRepaid = '0';
-    let totalInterestPaid = '0';
-    
-    for (const loan of repaidLoans) {
+    for (const loan of allLoans) {
       const principal = BigInt(loan.solBorrowed);
-      const duration = loan.repaidAt!.getTime() - loan.createdAt.getTime();
-      const durationInSeconds = Math.floor(duration / 1000);
-      const annualSeconds = 365 * 24 * 60 * 60;
+      totalBorrowed += principal;
       
-      const interest = (principal * BigInt(loan.interestRateBps) * BigInt(durationInSeconds)) / 
-        (BigInt(10000) * BigInt(annualSeconds));
-      
-      totalRepaid = (BigInt(totalRepaid) + principal + interest).toString();
-      totalInterestPaid = (BigInt(totalInterestPaid) + interest).toString();
+      // For repaid loans, calculate total repayment with interest
+      if (loan.status === 'repaid' && loan.repaidAt) {
+        const duration = loan.repaidAt.getTime() - loan.createdAt.getTime();
+        const durationInSeconds = Math.floor(duration / 1000);
+        const annualSeconds = 365 * 24 * 60 * 60;
+        
+        const interest = (principal * BigInt(loan.interestRateBps) * BigInt(durationInSeconds)) / 
+          (BigInt(10000) * BigInt(annualSeconds));
+        
+        totalRepaid += principal + interest;
+        totalInterestPaid += interest;
+      }
     }
     
     return {
       wallet,
       totalLoans,
       activeLoans,
-      totalBorrowed: aggregates._sum.solBorrowed || '0',
-      totalRepaid,
-      totalInterestPaid,
-      liquidations: aggregates._count.liquidatedAt || 0,
+      totalBorrowed: totalBorrowed.toString(),
+      totalRepaid: totalRepaid.toString(),
+      totalInterestPaid: totalInterestPaid.toString(),
+      liquidations: liquidationCount,
     };
   }
   

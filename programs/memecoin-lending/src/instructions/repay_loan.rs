@@ -1,4 +1,5 @@
 use anchor_lang::prelude::*;
+use anchor_lang::system_program;
 use anchor_spl::token::{self, Token, TokenAccount, Transfer};
 use crate::state::*;
 use crate::error::LendingError;
@@ -57,17 +58,12 @@ pub struct RepayLoan<'info> {
     /// Protocol vault token account storing collateral
     #[account(
         mut,
-        associated_token::mint = token_mint,
-        associated_token::authority = vault_authority
-    )]
-    pub vault_token_account: Account<'info, TokenAccount>,
-
-    /// Vault authority PDA
-    #[account(
-        seeds = [VAULT_SEED, loan.key().as_ref()],
+        token::mint = token_mint,
+        token::authority = loan,
+        seeds = [b"vault", loan.key().as_ref()],
         bump
     )]
-    pub vault_authority: SystemAccount<'info>,
+    pub vault_token_account: Account<'info, TokenAccount>,
 
     #[account(
         constraint = token_mint.key() == loan.token_mint
@@ -82,8 +78,12 @@ pub fn repay_loan_handler(ctx: Context<RepayLoan>) -> Result<()> {
     let protocol_state = &mut ctx.accounts.protocol_state;
     let clock = Clock::get()?;
     
-    // Extract loan key FIRST before any mutable borrow
-    let loan_key = ctx.accounts.loan.key();
+    // Store loan data before taking mutable borrow
+    let borrower = ctx.accounts.loan.borrower;
+    let token_mint = ctx.accounts.loan.token_mint;
+    let loan_index = ctx.accounts.loan.index;
+    let loan_bump = ctx.accounts.loan.bump;
+    let loan_authority = ctx.accounts.loan.to_account_info();
     
     // Now we can borrow loan mutably
     let loan = &mut ctx.accounts.loan;
@@ -117,27 +117,37 @@ pub fn repay_loan_handler(ctx: Context<RepayLoan>) -> Result<()> {
     // Update loan status BEFORE the CPI call
     loan.status = LoanStatus::Repaid;
 
-    // Transfer SOL payment from borrower to treasury
-    **ctx.accounts.borrower.to_account_info().try_borrow_mut_lamports()? -= total_owed;
-    **ctx.accounts.treasury.to_account_info().try_borrow_mut_lamports()? += total_owed;
+    // Transfer SOL payment from borrower to treasury using CPI
+    // Borrower is a signer, so we use regular CpiContext (no signer seeds needed)
+    system_program::transfer(
+        CpiContext::new(
+            ctx.accounts.system_program.to_account_info(),
+            system_program::Transfer {
+                from: ctx.accounts.borrower.to_account_info(),
+                to: ctx.accounts.treasury.to_account_info(),
+            },
+        ),
+        total_owed,
+    )?;
 
-    // Now use the pre-extracted loan_key for vault seeds
-    let vault_authority_bump = ctx.bumps.vault_authority;
-    let vault_seeds = &[
-        VAULT_SEED,
-        loan_key.as_ref(),  // Use the pre-extracted key
-        &[vault_authority_bump],
+    // Transfer collateral back to borrower using loan PDA as signer
+    let loan_seeds: &[&[u8]] = &[
+        LOAN_SEED,
+        borrower.as_ref(),
+        token_mint.as_ref(),
+        &loan_index.to_le_bytes(),
+        &[loan_bump],
     ];
-    let vault_signer = &[&vault_seeds[..]];
+    let loan_signer_seeds = &[loan_seeds];
 
     let transfer_ctx = CpiContext::new_with_signer(
         ctx.accounts.token_program.to_account_info(),
         Transfer {
             from: ctx.accounts.vault_token_account.to_account_info(),
             to: ctx.accounts.borrower_token_account.to_account_info(),
-            authority: ctx.accounts.vault_authority.to_account_info(),
+            authority: loan_authority,
         },
-        vault_signer,
+        loan_signer_seeds,
     );
     token::transfer(transfer_ctx, collateral_amount)?;  // Use stored value
 

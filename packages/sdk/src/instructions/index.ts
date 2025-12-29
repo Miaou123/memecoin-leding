@@ -93,6 +93,12 @@ export async function buildCreateLoanTransaction(
   const [tokenConfig] = pda.getTokenConfigPDA(params.tokenMint, program.programId);
   const [treasury] = pda.getTreasuryPDA(program.programId);
   
+  // Fetch protocol state to get loan index
+  const protocolStateAccount = await (program.account as any).protocolState.fetch(protocolState);
+  if (!protocolStateAccount) {
+    throw new Error('Protocol not initialized');
+  }
+  
   // Fetch token config to get pool address
   const tokenConfigAccount = await (program.account as any).tokenConfig.fetch(tokenConfig);
   if (!tokenConfigAccount) {
@@ -102,9 +108,8 @@ export async function buildCreateLoanTransaction(
   // Get the pool account from token config
   const poolAccount = tokenConfigAccount.poolAddress;
   
-  // Get loan index from protocol state
-  // TODO: Fetch actual loan count for this borrower+mint combination
-  const loanIndex = new BN(0);
+  // Use protocol state's total loans count as the loan index
+  const loanIndex = protocolStateAccount.totalLoansCreated;
   
   const [loan] = pda.getLoanPDA(
     params.borrower,
@@ -113,8 +118,9 @@ export async function buildCreateLoanTransaction(
     program.programId
   );
   
-  const [vaultTokenAccount] = pda.getVaultTokenAccount(
-    params.tokenMint,
+  // Use new vault derivation - vault is now derived from loan PDA
+  const [vaultTokenAccount] = PublicKey.findProgramAddressSync(
+    [Buffer.from("vault"), loan.toBuffer()],
     program.programId
   );
   
@@ -154,6 +160,53 @@ export async function buildCreateLoanTransaction(
   return tx;
 }
 
+export async function buildRepayLoanTransaction(
+  program: Program,
+  loanPubkey: PublicKey,
+  borrower: PublicKey
+): Promise<Transaction> {
+  // Fetch actual loan data from chain
+  const loanAccount = await (program.account as any).loan.fetch(loanPubkey);
+  if (!loanAccount) {
+    throw new Error('Loan not found');
+  }
+
+  const tokenMint = loanAccount.tokenMint;
+
+  const [protocolState] = pda.getProtocolStatePDA(program.programId);
+  const [tokenConfig] = pda.getTokenConfigPDA(tokenMint, program.programId);
+  const [treasury] = pda.getTreasuryPDA(program.programId);
+  
+  // Vault uses loan PDA as authority
+  const [vaultTokenAccount] = PublicKey.findProgramAddressSync(
+    [Buffer.from("vault"), loanPubkey.toBuffer()],
+    program.programId
+  );
+  
+  const borrowerTokenAccount = await getAssociatedTokenAddress(
+    tokenMint,
+    borrower
+  );
+
+  const tx = await program.methods
+    .repayLoan()
+    .accounts({
+      protocolState,
+      tokenConfig,
+      loan: loanPubkey,
+      treasury,
+      borrower,
+      borrowerTokenAccount,
+      vaultTokenAccount,
+      tokenMint,
+      tokenProgram: TOKEN_PROGRAM_ID,
+      systemProgram: SystemProgram.programId,
+    })
+    .transaction();
+
+  return tx;
+}
+
 export async function createLoan(
   program: Program,
   params: {
@@ -167,6 +220,12 @@ export async function createLoan(
   const [tokenConfig] = pda.getTokenConfigPDA(params.tokenMint, program.programId);
   const [treasury] = pda.getTreasuryPDA(program.programId);
   
+  // Fetch protocol state to get loan index
+  const protocolStateAccount = await (program.account as any).protocolState.fetch(protocolState);
+  if (!protocolStateAccount) {
+    throw new Error('Protocol not initialized');
+  }
+  
   // Fetch token config to get pool address
   const tokenConfigAccount = await (program.account as any).tokenConfig.fetch(tokenConfig);
   if (!tokenConfigAccount) {
@@ -176,9 +235,8 @@ export async function createLoan(
   // Get the pool account from token config
   const poolAccount = tokenConfigAccount.poolAddress;
   
-  // Get loan index from protocol state
-  // TODO: Fetch actual loan count for this borrower+mint combination
-  const loanIndex = new BN(0);
+  // Use protocol state's total loans count as the loan index
+  const loanIndex = protocolStateAccount.totalLoansCreated;
   
   const [loan] = pda.getLoanPDA(
     params.borrower,
@@ -187,8 +245,9 @@ export async function createLoan(
     program.programId
   );
   
-  const [vaultTokenAccount] = pda.getVaultTokenAccount(
-    params.tokenMint,
+  // Use new vault derivation - vault is now derived from loan PDA
+  const [vaultTokenAccount] = PublicKey.findProgramAddressSync(
+    [Buffer.from("vault"), loan.toBuffer()],
     program.programId
   );
   
@@ -229,34 +288,43 @@ export async function repayLoan(
   program: Program,
   loanPubkey: PublicKey
 ): Promise<TransactionSignature> {
-  // Mock loan account data (in real implementation, this would fetch from blockchain)
-  const loanAccount = {
-    tokenMint: new PublicKey('So11111111111111111111111111111111111111112'), // Mock SOL mint
-    borrower: new PublicKey('11111111111111111111111111111111'), // Mock borrower
-  };
+  // Fetch actual loan data from chain
+  const loanAccount = await (program.account as any).loan.fetch(loanPubkey);
+  if (!loanAccount) {
+    throw new Error('Loan not found');
+  }
+
+  const tokenMint = loanAccount.tokenMint;
+  const borrower = loanAccount.borrower;
+
   const [protocolState] = pda.getProtocolStatePDA(program.programId);
+  const [tokenConfig] = pda.getTokenConfigPDA(tokenMint, program.programId);
   const [treasury] = pda.getTreasuryPDA(program.programId);
-  const [vaultTokenAccount] = pda.getVaultTokenAccount(
-    loanAccount.tokenMint,
+  
+  // Vault uses loan PDA as authority - derive vault token account correctly
+  const [vaultTokenAccount] = PublicKey.findProgramAddressSync(
+    [Buffer.from("vault"), loanPubkey.toBuffer()],
     program.programId
   );
   
   const borrowerTokenAccount = await getAssociatedTokenAddress(
-    loanAccount.tokenMint,
-    loanAccount.borrower
+    tokenMint,
+    borrower
   );
 
   return program.methods
     .repayLoan()
     .accounts({
-      loan: loanPubkey,
       protocolState,
+      tokenConfig,
+      loan: loanPubkey,
       treasury,
-      borrower: loanAccount.borrower,
+      borrower,
       borrowerTokenAccount,
       vaultTokenAccount,
-      tokenMint: loanAccount.tokenMint,
-      ...getCommonInstructionAccounts(),
+      tokenMint,
+      tokenProgram: TOKEN_PROGRAM_ID,
+      systemProgram: SystemProgram.programId,
     })
     .rpc();
 }
@@ -272,7 +340,6 @@ export async function liquidate(
   }
   
   const tokenMint = loanAccount.tokenMint;
-  const borrower = loanAccount.borrower;
   
   // Fetch token config for pool address
   const [tokenConfigPDA] = pda.getTokenConfigPDA(tokenMint, program.programId);
@@ -282,7 +349,12 @@ export async function liquidate(
   
   const [protocolState] = pda.getProtocolStatePDA(program.programId);
   const [treasury] = pda.getTreasuryPDA(program.programId);
-  const [vaultTokenAccount] = pda.getVaultTokenAccount(tokenMint, program.programId);
+  
+  // Vault uses loan PDA as authority
+  const [vaultTokenAccount] = PublicKey.findProgramAddressSync(
+    [Buffer.from("vault"), loanPubkey.toBuffer()],
+    program.programId
+  );
   
   const liquidatorTokenAccount = await getAssociatedTokenAddress(
     tokenMint,
@@ -302,9 +374,9 @@ export async function liquidate(
   return program.methods
     .liquidate()
     .accounts({
-      loan: loanPubkey,
       protocolState,
       tokenConfig: tokenConfigPDA,
+      loan: loanPubkey,
       treasury,
       liquidator: program.provider.publicKey!,
       liquidatorTokenAccount,
@@ -312,7 +384,8 @@ export async function liquidate(
       tokenMint,
       poolAccount,
       poolProgram,
-      ...getCommonInstructionAccounts(),
+      tokenProgram: TOKEN_PROGRAM_ID,
+      systemProgram: SystemProgram.programId,
     })
     .rpc();
 }

@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/Button';
 import { formatSOL, formatTimeRemaining } from '@/lib/utils';
 import { api } from '@/lib/api';
 import { LoanStatus } from '@memecoin-lending/types';
+import { Connection, Transaction } from '@solana/web3.js';
 
 export default function Repay() {
   const params = useParams();
@@ -24,19 +25,30 @@ export default function Repay() {
         throw new Error('Wallet not connected');
       }
       
-      // Sign authentication message
-      const timestamp = Date.now();
-      const message = `Sign in to Memecoin Lending Protocol\nTimestamp: ${timestamp}`;
-      const messageBytes = new TextEncoder().encode(message);
-      const signature = await wallet.signMessage(messageBytes);
+      // Get unsigned transaction from API
+      const { transaction: encodedTransaction } = await api.repayLoanUnsigned(
+        params.id,
+        wallet.publicKey()!.toString()
+      );
       
-      const authHeaders = {
-        'X-Signature': btoa(String.fromCharCode(...signature)),
-        'X-Public-Key': wallet.publicKey()!.toString(),
-        'X-Timestamp': timestamp.toString(),
-      };
+      // Deserialize the transaction
+      const transactionBuffer = Buffer.from(encodedTransaction, 'base64');
+      const transaction = Transaction.from(transactionBuffer);
       
-      return api.repayLoan(params.id, authHeaders);
+      // Get a fresh blockhash
+      const connection = new Connection(import.meta.env.VITE_RPC_URL || 'http://localhost:8899');
+      const { blockhash } = await connection.getLatestBlockhash();
+      transaction.recentBlockhash = blockhash;
+      transaction.feePayer = wallet.publicKey()!;
+      
+      // Sign and send the transaction
+      const signedTransaction = await wallet.signTransaction(transaction);
+      const signature = await connection.sendRawTransaction(signedTransaction.serialize());
+      
+      // Wait for confirmation
+      await connection.confirmTransaction(signature);
+      
+      return signature;
     },
     onSuccess: () => {
       navigate('/loans');

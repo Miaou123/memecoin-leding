@@ -9,7 +9,8 @@ import { createTokenVerification, createCanCreateLoan } from '@/hooks/useTokenVe
 import { formatSOL, formatNumber, formatPercentage } from '@/lib/utils';
 import { api } from '@/lib/api';
 import { useTokenBalance } from '@/hooks/useTokenBalance';
-import { Connection, Transaction } from '@solana/web3.js';
+import { Connection, Transaction, PublicKey } from '@solana/web3.js';
+import BN from 'bn.js';
 
 export default function Borrow() {
   const [searchParams] = useSearchParams();
@@ -110,6 +111,14 @@ export default function Borrow() {
         signature,
         blockhash,
         lastValidBlockHeight,
+      });
+      
+      // 6. Track the loan in database (backend will parse transaction to find actual loan PDA)
+      await api.trackLoan({
+        loanPubkey: '', // Backend will determine this from transaction
+        txSignature: signature,
+        borrower: wallet.publicKey()!.toString(),
+        tokenMint: selectedToken(),
       });
       
       return { signature };

@@ -1,4 +1,5 @@
 use anchor_lang::prelude::*;
+use anchor_lang::system_program;
 use anchor_spl::token::{self, Token, TokenAccount, Transfer};
 use crate::state::*;
 use crate::error::LendingError;
@@ -164,13 +165,22 @@ pub fn create_loan_handler(
     );
     token::transfer(transfer_ctx, collateral_amount)?;
 
-    // Transfer SOL from treasury to borrower
+    // Transfer SOL from treasury to borrower using CPI with PDA signer
     let treasury_bump = ctx.bumps.treasury;
-    let treasury_seeds = &[TREASURY_SEED, &[treasury_bump]];
-    let _treasury_signer = &[&treasury_seeds[..]];
+    let treasury_seeds: &[&[u8]] = &[TREASURY_SEED, &[treasury_bump]];
+    let treasury_signer_seeds = &[treasury_seeds];
 
-    **ctx.accounts.treasury.to_account_info().try_borrow_mut_lamports()? -= sol_loan_amount;
-    **ctx.accounts.borrower.to_account_info().try_borrow_mut_lamports()? += sol_loan_amount;
+    system_program::transfer(
+        CpiContext::new_with_signer(
+            ctx.accounts.system_program.to_account_info(),
+            system_program::Transfer {
+                from: ctx.accounts.treasury.to_account_info(),
+                to: ctx.accounts.borrower.to_account_info(),
+            },
+            treasury_signer_seeds,
+        ),
+        sol_loan_amount,
+    )?;
 
     // Initialize loan account
     loan.borrower = ctx.accounts.borrower.key();

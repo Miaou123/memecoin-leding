@@ -110,6 +110,16 @@ class ApiClient {
       body: JSON.stringify(params),
     });
   }
+
+  async repayLoanUnsigned(
+    loanPubkey: string,
+    borrower: string
+  ): Promise<{ transaction: string }> {
+    return this.fetch(`/loans/${loanPubkey}/repay/unsigned`, {
+      method: 'POST',
+      body: JSON.stringify({ borrower }),
+    });
+  }
   
   async repayLoan(
     loanPubkey: string,
@@ -128,6 +138,18 @@ class ApiClient {
     return this.fetch(`/loans/${loanPubkey}/liquidate`, {
       method: 'POST',
       headers: authHeaders,
+    });
+  }
+
+  async trackLoan(params: {
+    loanPubkey: string;
+    txSignature: string;
+    borrower: string;
+    tokenMint: string;
+  }): Promise<Loan> {
+    return this.fetch('/loans/track', {
+      method: 'POST',
+      body: JSON.stringify(params),
     });
   }
   

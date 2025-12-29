@@ -1,4 +1,5 @@
 use anchor_lang::prelude::*;
+use anchor_lang::system_program;
 use anchor_spl::token::Token;
 use crate::state::*;
 use crate::error::LendingError;
@@ -127,9 +128,22 @@ pub fn withdraw_treasury_handler(ctx: Context<WithdrawTreasury>, amount: u64) ->
         return Err(LendingError::InsufficientTreasuryBalance.into());
     }
 
-    // Transfer SOL from treasury to admin
-    **ctx.accounts.treasury.to_account_info().try_borrow_mut_lamports()? -= amount;
-    **ctx.accounts.admin.to_account_info().try_borrow_mut_lamports()? += amount;
+    // Transfer SOL from treasury to admin using CPI with PDA signer
+    let treasury_bump = ctx.bumps.treasury;
+    let treasury_seeds: &[&[u8]] = &[TREASURY_SEED, &[treasury_bump]];
+    let treasury_signer_seeds = &[treasury_seeds];
+
+    system_program::transfer(
+        CpiContext::new_with_signer(
+            ctx.accounts.system_program.to_account_info(),
+            system_program::Transfer {
+                from: ctx.accounts.treasury.to_account_info(),
+                to: ctx.accounts.admin.to_account_info(),
+            },
+            treasury_signer_seeds,
+        ),
+        amount,
+    )?;
 
     // Treasury balance is tracked by the actual lamport balance of the treasury account
     // No need to track it separately in protocol_state
@@ -195,11 +209,24 @@ pub fn emergency_drain_handler(ctx: Context<EmergencyDrain>) -> Result<()> {
     // Set protocol to paused
     protocol_state.paused = true;
     
-    // Transfer all SOL from treasury to admin
+    // Transfer all SOL from treasury to admin using CPI with PDA signer
     let treasury_balance = ctx.accounts.treasury.lamports();
     if treasury_balance > 0 {
-        **ctx.accounts.treasury.to_account_info().try_borrow_mut_lamports()? = 0;
-        **ctx.accounts.admin.to_account_info().try_borrow_mut_lamports()? += treasury_balance;
+        let treasury_bump = ctx.bumps.treasury;
+        let treasury_seeds: &[&[u8]] = &[TREASURY_SEED, &[treasury_bump]];
+        let treasury_signer_seeds = &[treasury_seeds];
+
+        system_program::transfer(
+            CpiContext::new_with_signer(
+                ctx.accounts.system_program.to_account_info(),
+                system_program::Transfer {
+                    from: ctx.accounts.treasury.to_account_info(),
+                    to: ctx.accounts.admin.to_account_info(),
+                },
+                treasury_signer_seeds,
+            ),
+            treasury_balance,
+        )?;
     }
 
     // Reset protocol state tracking

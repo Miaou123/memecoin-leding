@@ -218,6 +218,37 @@ loansRouter.post('/:pubkey/repay', requireAuth, async (c) => {
   }
 });
 
+// Repay loan (unsigned) - returns transaction for client signing
+const repayUnsignedSchema = z.object({
+  borrower: z.string(),
+});
+
+loansRouter.post(
+  '/:pubkey/repay/unsigned',
+  createLoanRateLimit,
+  zValidator('json', repayUnsignedSchema),
+  async (c) => {
+    const pubkey = c.req.param('pubkey');
+    const { borrower } = c.req.valid('json');
+    
+    try {
+      const result = await loanService.buildRepayTransaction(pubkey, borrower);
+      
+      return c.json<ApiResponse<{ transaction: string }>>({
+        success: true,
+        data: {
+          transaction: result.transaction,
+        },
+      });
+    } catch (error: any) {
+      return c.json<ApiResponse<null>>({
+        success: false,
+        error: error.message,
+      }, 400);
+    }
+  }
+);
+
 // Liquidate loan
 loansRouter.post('/:pubkey/liquidate', requireAuth, async (c) => {
   const pubkey = c.req.param('pubkey');
@@ -237,5 +268,35 @@ loansRouter.post('/:pubkey/liquidate', requireAuth, async (c) => {
     }, 400);
   }
 });
+
+// Track loan after on-chain creation
+const trackLoanSchema = z.object({
+  loanPubkey: z.string(),
+  txSignature: z.string(),
+  borrower: z.string(),
+  tokenMint: z.string(),
+});
+
+loansRouter.post(
+  '/track',
+  zValidator('json', trackLoanSchema),
+  async (c) => {
+    const body = c.req.valid('json');
+    
+    try {
+      const loan = await loanService.trackCreatedLoan(body);
+      
+      return c.json<ApiResponse<Loan>>({
+        success: true,
+        data: loan,
+      });
+    } catch (error: any) {
+      return c.json<ApiResponse<null>>({
+        success: false,
+        error: error.message,
+      }, 400);
+    }
+  }
+);
 
 export { loansRouter };

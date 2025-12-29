@@ -64,10 +64,23 @@ export function getBorrowerTokenAccount(
   );
 }
 
+export function getVaultPDA(
+  loanPubkey: PublicKey,
+  programId: PublicKey
+): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("vault"), loanPubkey.toBuffer()],
+    programId
+  );
+}
+
+// Deprecated: Use getVaultPDA instead
 export function getVaultTokenAccount(
   mint: PublicKey,
   programId: PublicKey
 ): [PublicKey, number] {
+  // This function is now deprecated in favor of getVaultPDA
+  // Keeping for backwards compatibility but should not be used for new vault structure
   return PublicKey.findProgramAddressSync(
     [
       Buffer.from('vault'),
