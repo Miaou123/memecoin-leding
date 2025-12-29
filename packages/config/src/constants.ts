@@ -1,7 +1,7 @@
 import { PublicKey } from '@solana/web3.js';
 
 // Program constants
-export const PROGRAM_ID = new PublicKey(process.env.PROGRAM_ID || 'MCLend1111111111111111111111111111111111111');
+export const PROGRAM_ID = new PublicKey(process.env.PROGRAM_ID || '8yrnAJZBNhU6Ae163oyN6tMzVs2Wg4o2dpPYVdt6H9Dt');
 export const PROTOCOL_SEED = Buffer.from('protocol_state');
 export const TREASURY_SEED = Buffer.from('treasury');
 export const TOKEN_CONFIG_SEED = Buffer.from('token_config');

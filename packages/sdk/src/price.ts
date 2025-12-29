@@ -1,5 +1,5 @@
 import { PublicKey, Connection } from '@solana/web3.js';
-import { BN } from '@coral-xyz/anchor';
+import BN from 'bn.js';
 import { API_ENDPOINTS } from '@memecoin-lending/config';
 
 export interface PriceData {

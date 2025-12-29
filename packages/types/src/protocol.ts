@@ -33,6 +33,7 @@ export interface ProtocolState {
   treasuryFeeBps: number;
   buybackFeeBps: number;
   operationsFeeBps: number;
+  treasuryBalance: string;
 }
 
 export interface TokenConfig {

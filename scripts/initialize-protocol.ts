@@ -1,7 +1,7 @@
 #!/usr/bin/env tsx
 
 import { config } from 'dotenv';
-import { Connection, Keypair, PublicKey } from '@solana/web3.js';
+import { Connection, Keypair, PublicKey, Transaction, VersionedTransaction } from '@solana/web3.js';
 import { MemecoinLendingClient } from '@memecoin-lending/sdk';
 import { PROGRAM_ID, getNetworkConfig } from '@memecoin-lending/config';
 import chalk from 'chalk';
@@ -9,6 +9,35 @@ import { Command } from 'commander';
 import fs from 'fs';
 
 config();
+
+// Wallet wrapper for Keypair
+class NodeWallet {
+  constructor(readonly payer: Keypair) {}
+
+  async signTransaction<T extends Transaction | VersionedTransaction>(tx: T): Promise<T> {
+    if ('version' in tx) {
+      (tx as VersionedTransaction).sign([this.payer]);
+    } else {
+      (tx as Transaction).partialSign(this.payer);
+    }
+    return tx;
+  }
+
+  async signAllTransactions<T extends Transaction | VersionedTransaction>(txs: T[]): Promise<T[]> {
+    return txs.map((tx) => {
+      if ('version' in tx) {
+        (tx as VersionedTransaction).sign([this.payer]);
+      } else {
+        (tx as Transaction).partialSign(this.payer);
+      }
+      return tx;
+    });
+  }
+
+  get publicKey(): PublicKey {
+    return this.payer.publicKey;
+  }
+}
 
 const program = new Command();
 
@@ -42,28 +71,23 @@ program
       );
       
       console.log(chalk.gray(`Admin: ${adminKeypair.publicKey.toString()}`));
-      
-      // Create SDK client
-      // Note: You'll need to load the IDL file
-      const idl = {}; // Load from target/idl/memecoin_lending.json
+
+      // Load the actual IDL
+      const idlPath = '../target/idl/memecoin_lending.json';
+      if (!fs.existsSync(idlPath)) {
+        throw new Error(`IDL not found: ${idlPath}`);
+      }
+      const idl = JSON.parse(fs.readFileSync(idlPath, 'utf8'));
+
+      // Create wallet wrapper
+      const wallet = new NodeWallet(adminKeypair);
+
       const client = new MemecoinLendingClient(
         connection,
-        adminKeypair as any,
+        wallet,
         PROGRAM_ID,
-        idl as any
+        idl
       );
-      
-      // Check if protocol is already initialized
-      try {
-        const protocolState = await client.getProtocolState();
-        console.log(chalk.yellow('⚠️  Protocol already initialized'));
-        console.log(chalk.gray(`Current admin: ${protocolState.admin}`));
-        console.log(chalk.gray(`Paused: ${protocolState.paused}`));
-        console.log(chalk.gray(`Total loans: ${protocolState.totalLoansCreated}`));
-        return;
-      } catch (error) {
-        // Protocol not initialized, continue
-      }
       
       // Initialize protocol
       console.log(chalk.blue('📝 Initializing protocol state...'));

@@ -1,6 +1,6 @@
 import { Job } from 'bullmq';
 import { WebSocketEvent, PriceData } from '@memecoin-lending/types';
-import { priceService } from '../services/price.js';
+import { priceService, ExtendedPriceData } from '../services/price.js';
 import { websocketService } from '../websocket/index.js';
 import { getAllTokenDefinitions } from '@memecoin-lending/config';
 
@@ -26,7 +26,7 @@ export async function priceMonitorJob(job: Job) {
       
       // Convert to array for WebSocket broadcast
       const priceUpdates = Array.from(prices.values()).map(priceData => {
-        const price = priceData as PriceData;
+        const price = priceData as ExtendedPriceData;
         return {
           mint: price.mint,
           usdPrice: price.usdPrice,

@@ -1,5 +1,5 @@
 import { PublicKey, Connection, Keypair } from '@solana/web3.js';
-import { BN } from '@coral-xyz/anchor';
+import BN from 'bn.js';
 import { 
   Loan, 
   LoanEstimate,

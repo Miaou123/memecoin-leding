@@ -7,7 +7,7 @@ pub mod utils;
 
 use instructions::*;
 
-declare_id!("11111111111111111111111111111112");
+declare_id!("8yrnAJZBNhU6Ae163oyN6tMzVs2Wg4o2dpPYVdt6H9Dt");
 
 #[program]
 pub mod memecoin_lending {

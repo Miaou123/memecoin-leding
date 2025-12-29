@@ -1,4 +1,5 @@
-import { Program, BN } from '@coral-xyz/anchor';
+import { Program } from '@coral-xyz/anchor';
+import BN from 'bn.js';
 import {
   PublicKey,
   TransactionSignature,

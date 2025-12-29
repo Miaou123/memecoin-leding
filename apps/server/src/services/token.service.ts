@@ -1,5 +1,5 @@
 import { PublicKey } from '@solana/web3.js';
-import { BN } from '@coral-xyz/anchor';
+import BN from 'bn.js';
 import { TokenStats, TokenTier } from '@memecoin-lending/types';
 import { prisma } from '../db/client.js';
 import { priceService } from './price.service.js';

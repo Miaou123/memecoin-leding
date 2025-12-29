@@ -1,7 +1,7 @@
 #!/usr/bin/env tsx
 
 import { config } from 'dotenv';
-import { Connection, Keypair, PublicKey, LAMPORTS_PER_SOL, SystemProgram, Transaction } from '@solana/web3.js';
+import { Connection, Keypair, PublicKey, LAMPORTS_PER_SOL, SystemProgram, Transaction, VersionedTransaction } from '@solana/web3.js';
 import { MemecoinLendingClient } from '@memecoin-lending/sdk';
 import { PROGRAM_ID, getNetworkConfig } from '@memecoin-lending/config';
 import chalk from 'chalk';
@@ -9,6 +9,35 @@ import { Command } from 'commander';
 import fs from 'fs';
 
 config();
+
+// Wallet wrapper for Keypair
+class NodeWallet {
+  constructor(readonly payer: Keypair) {}
+
+  async signTransaction<T extends Transaction | VersionedTransaction>(tx: T): Promise<T> {
+    if ('version' in tx) {
+      (tx as VersionedTransaction).sign([this.payer]);
+    } else {
+      (tx as Transaction).partialSign(this.payer);
+    }
+    return tx;
+  }
+
+  async signAllTransactions<T extends Transaction | VersionedTransaction>(txs: T[]): Promise<T[]> {
+    return txs.map((tx) => {
+      if ('version' in tx) {
+        (tx as VersionedTransaction).sign([this.payer]);
+      } else {
+        (tx as Transaction).partialSign(this.payer);
+      }
+      return tx;
+    });
+  }
+
+  get publicKey(): PublicKey {
+    return this.payer.publicKey;
+  }
+}
 
 const program = new Command();
 
@@ -22,17 +51,14 @@ program
     try {
       console.log(chalk.blue('💰 Funding protocol treasury...'));
       
-      // Load network configuration
       process.env.SOLANA_NETWORK = options.network;
       const networkConfig = getNetworkConfig(options.network);
       
       console.log(chalk.gray(`Network: ${options.network}`));
       console.log(chalk.gray(`Amount: ${options.amount} SOL`));
       
-      // Create connection
       const connection = new Connection(networkConfig.rpcUrl, 'confirmed');
       
-      // Load funder keypair
       if (!fs.existsSync(options.funderKeypair)) {
         throw new Error(`Funder keypair not found: ${options.funderKeypair}`);
       }
@@ -43,7 +69,6 @@ program
       
       console.log(chalk.gray(`Funder: ${funderKeypair.publicKey.toString()}`));
       
-      // Check funder balance
       const balance = await connection.getBalance(funderKeypair.publicKey);
       const requiredLamports = parseFloat(options.amount) * LAMPORTS_PER_SOL;
       
@@ -54,24 +79,29 @@ program
         throw new Error('Insufficient balance for funding');
       }
       
-      // Create SDK client
-      const idl = {}; // Load from target/idl/memecoin_lending.json
+      // Load the actual IDL
+      const idlPath = '../target/idl/memecoin_lending.json';
+      if (!fs.existsSync(idlPath)) {
+        throw new Error(`IDL not found: ${idlPath}`);
+      }
+      const idl = JSON.parse(fs.readFileSync(idlPath, 'utf8'));
+
+      // Create wallet wrapper
+      const wallet = new NodeWallet(funderKeypair);
+
       const client = new MemecoinLendingClient(
         connection,
-        funderKeypair as any,
+        wallet,
         PROGRAM_ID,
-        idl as any
+        idl
       );
       
-      // Get treasury PDA
       const [treasuryPDA] = client.getTreasuryPDA();
       console.log(chalk.gray(`Treasury: ${treasuryPDA.toString()}`));
       
-      // Get current treasury balance
       const treasuryBalance = await connection.getBalance(treasuryPDA);
       console.log(chalk.gray(`Current treasury balance: ${treasuryBalance / LAMPORTS_PER_SOL} SOL`));
       
-      // Create funding transaction
       console.log(chalk.blue('📤 Creating funding transaction...'));
       
       const transaction = new Transaction().add(
@@ -82,7 +112,6 @@ program
         })
       );
       
-      // Send transaction
       const signature = await connection.sendTransaction(
         transaction,
         [funderKeypair],
@@ -96,23 +125,20 @@ program
       console.log(chalk.green('✅ Treasury funded successfully!'));
       console.log(chalk.gray(`Transaction: ${signature}`));
       
-      // Check new treasury balance
       const newTreasuryBalance = await connection.getBalance(treasuryPDA);
       console.log(chalk.green(`New treasury balance: ${newTreasuryBalance / LAMPORTS_PER_SOL} SOL`));
       
-      // Update protocol state
       try {
         const protocolState = await client.getProtocolState();
         console.log(chalk.blue('\n📊 Protocol State:'));
+        console.log(chalk.gray(`  Admin: ${protocolState.admin}`));
         console.log(chalk.gray(`  Treasury Balance: ${protocolState.treasuryBalance} lamports`));
         console.log(chalk.gray(`  Total Loans Created: ${protocolState.totalLoansCreated}`));
-        console.log(chalk.gray(`  Total SOL Borrowed: ${protocolState.totalSolBorrowed}`));
       } catch (error) {
         console.log(chalk.yellow('Could not fetch updated protocol state'));
       }
       
       console.log(chalk.green('\n✅ Treasury funding completed!'));
-      console.log(chalk.gray('The protocol is now ready to accept loans.'));
       
     } catch (error) {
       console.error(chalk.red('❌ Treasury funding failed:'), error);

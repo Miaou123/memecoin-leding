@@ -22,11 +22,11 @@ export default function Home() {
       <div class="bg-bg-secondary border border-border p-6">
         <div class="text-xs text-text-dim mb-2">TERMINAL_PRO v1.0.0</div>
         <div class="text-xl font-bold text-accent-green mb-4">
-          > MEMECOIN_LENDING_PROTOCOL.init()
+          {"> "}MEMECOIN_LENDING_PROTOCOL.init()
         </div>
         <div class="text-text-primary mb-4">
-          DEPLOY_MEMECOIN_COLLATERAL > RECEIVE_SOL_LIQUIDITY<br/>
-          RISK_MANAGED_LENDING > PRICE_ORACLE_SECURED
+          DEPLOY_MEMECOIN_COLLATERAL {">"} RECEIVE_SOL_LIQUIDITY<br/>
+          RISK_MANAGED_LENDING {">"} PRICE_ORACLE_SECURED
         </div>
         <div class="flex gap-4">
           <A href="/borrow">
@@ -135,7 +135,7 @@ export default function Home() {
             </div>
             <div class="text-sm font-bold text-text-primary mb-2">DEPLOY_COLLATERAL</div>
             <div class="text-xs text-text-secondary">
-              TRANSFER_TOKEN > LOCK_IN_VAULT > VERIFY_VALUE
+              TRANSFER_TOKEN {">"} LOCK_IN_VAULT {">"} VERIFY_VALUE
             </div>
           </div>
           <div class="bg-bg-secondary border border-border p-4 text-center">
@@ -144,7 +144,7 @@ export default function Home() {
             </div>
             <div class="text-sm font-bold text-text-primary mb-2">RECEIVE_SOL</div>
             <div class="text-xs text-text-secondary">
-              CALCULATE_LTV > MINT_LOAN > TRANSFER_SOL
+              CALCULATE_LTV {">"} MINT_LOAN {">"} TRANSFER_SOL
             </div>
           </div>
           <div class="bg-bg-secondary border border-border p-4 text-center">
@@ -153,7 +153,7 @@ export default function Home() {
             </div>
             <div class="text-sm font-bold text-text-primary mb-2">REPAY_UNLOCK</div>
             <div class="text-xs text-text-secondary">
-              REPAY_SOL+INTEREST > BURN_LOAN > UNLOCK_COLLATERAL
+              REPAY_SOL+INTEREST {">"} BURN_LOAN {">"} UNLOCK_COLLATERAL
             </div>
           </div>
         </div>

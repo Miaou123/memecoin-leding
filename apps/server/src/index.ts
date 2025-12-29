@@ -153,13 +153,13 @@ server.listen(port, () => {
   // Test Jupiter API connection if API key is configured
   if (process.env.JUPITER_API_KEY) {
     import('./services/price.js').then(({ priceService }) => {
-      priceService.testPriceSource().then((result: { working: boolean; source: string; latency: number }) => {
+      priceService.testJupiterConnection().then((result: { working: boolean; latency: number }) => {
         if (result.working) {
-          console.log(`✅ ${result.source} price source connection successful (${result.latency}ms)`);
+          console.log(`✅ Jupiter price source connection successful (${result.latency}ms)`);
         } else {
-          console.log(`❌ ${result.source} price source connection failed`);
+          console.log(`❌ Jupiter price source connection failed`);
         }
-      }).catch(error => {
+      }).catch((error: any) => {
         console.log('⚠️  Could not test Jupiter API connection:', error.message);
       });
     });

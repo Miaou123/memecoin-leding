@@ -1,4 +1,4 @@
-import { BN } from '@coral-xyz/anchor';
+import BN from 'bn.js';
 import { PublicKey, SystemProgram, SYSVAR_RENT_PUBKEY } from '@solana/web3.js';
 import { 
   TOKEN_PROGRAM_ID,

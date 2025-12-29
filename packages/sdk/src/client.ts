@@ -1,5 +1,6 @@
 import { Connection, PublicKey, Keypair, TransactionSignature } from '@solana/web3.js';
-import { AnchorProvider, Program, BN, Idl, Wallet } from '@coral-xyz/anchor';
+import { AnchorProvider, Program, Idl, Wallet } from '@coral-xyz/anchor';
+import BN from 'bn.js';
 import {
   ProtocolState,
   TokenConfig,

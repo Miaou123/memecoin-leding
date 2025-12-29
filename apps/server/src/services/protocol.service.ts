@@ -1,5 +1,6 @@
 import { PublicKey, Connection, Keypair } from '@solana/web3.js';
-import { BN } from '@coral-xyz/anchor';
+import BN from 'bn.js';
+import BN from 'bn.js';
 import { ProtocolStats } from '@memecoin-lending/types';
 import { MemecoinLendingClient } from '@memecoin-lending/sdk';
 import { PROGRAM_ID, getNetworkConfig } from '@memecoin-lending/config';

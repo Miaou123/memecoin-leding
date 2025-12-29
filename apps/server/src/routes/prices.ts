@@ -251,20 +251,13 @@ app.get('/status', async (c) => {
         ...status,
         services: {
           jupiter: {
-            apiKey: status.jupiterApiKey,
+            apiKey: undefined,
             endpoint: 'https://api.jup.ag',
           },
           dexscreener: {
             endpoint: 'https://api.dexscreener.com/latest/dex',
           }
         },
-        recommendations: status.jupiterApiKey 
-          ? ['✅ Jupiter API key configured'] 
-          : [
-              '⚠️ Jupiter API key not configured',
-              '💡 Get your API key at: https://portal.jup.ag',
-              '📝 Add JUPITER_API_KEY to your .env file'
-            ]
       },
       timestamp: Date.now(),
     });
@@ -287,10 +280,10 @@ app.get('/test', async (c) => {
     const testResult = await priceService.testJupiterConnection();
     
     return c.json({
-      success: testResult.success,
+      success: testResult.working,
       data: {
         jupiter: testResult,
-        recommendations: testResult.success 
+        recommendations: testResult.working 
           ? ['✅ Jupiter API connection successful']
           : [
               '❌ Jupiter API connection failed',
@@ -302,7 +295,7 @@ app.get('/test', async (c) => {
             ]
       },
       timestamp: Date.now(),
-    }, testResult.success ? 200 : 502);
+    }, testResult.working ? 200 : 502);
 
   } catch (error) {
     logger.error('Jupiter API test error:', error);

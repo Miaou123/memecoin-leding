@@ -1,4 +1,5 @@
-import { Program, BN } from '@coral-xyz/anchor';
+import { Program } from '@coral-xyz/anchor';
+import BN from 'bn.js';
 import { PublicKey } from '@solana/web3.js';
 import {
   ProtocolState,
@@ -14,20 +15,23 @@ import * as pda from '../pda';
 export async function getProtocolState(program: Program): Promise<ProtocolState> {
   const [protocolStatePDA] = pda.getProtocolStatePDA(program.programId);
   
-  // Mock implementation - in real implementation, this would fetch from blockchain
+  // Use string-based account access for untyped IDL
+  const account = await (program.account as any).protocolState.fetch(protocolStatePDA);
+  
   return {
-    admin: '11111111111111111111111111111111',
-    buybackWallet: '11111111111111111111111111111111',
-    operationsWallet: '11111111111111111111111111111111',
-    paused: false,
-    totalLoansCreated: '0',
-    totalSolBorrowed: '0',
-    totalInterestEarned: '0',
-    activeLoansCount: '0',
-    protocolFeeBps: 100,
-    treasuryFeeBps: 9000,
-    buybackFeeBps: 500,
-    operationsFeeBps: 400,
+    admin: account.admin.toString(),
+    buybackWallet: account.buybackWallet.toString(),
+    operationsWallet: account.operationsWallet.toString(),
+    paused: account.paused,
+    totalLoansCreated: account.totalLoansCreated.toString(),
+    totalSolBorrowed: account.totalSolBorrowed.toString(),
+    totalInterestEarned: account.totalInterestEarned.toString(),
+    activeLoansCount: account.activeLoansCount.toString(),
+    protocolFeeBps: account.protocolFeeBps,
+    treasuryFeeBps: account.treasuryFeeBps,
+    buybackFeeBps: account.buybackFeeBps,
+    operationsFeeBps: account.operationsFeeBps,
+    treasuryBalance: account.treasuryBalance?.toString() || '0',
   };
 }
 

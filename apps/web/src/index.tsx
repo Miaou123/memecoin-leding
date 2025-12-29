@@ -1,3 +1,4 @@
+import "./polyfills";
 import { Buffer } from 'buffer';
 import { render } from 'solid-js/web';
 import { Router } from '@solidjs/router';

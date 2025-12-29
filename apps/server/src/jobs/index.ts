@@ -5,7 +5,10 @@ import { priceMonitorJob } from './price-monitor.job.js';
 import { syncJob } from './sync.job.js';
 import { notificationJob } from './notification.job.js';
 
-const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
+// BullMQ requires maxRetriesPerRequest: null for blocking operations
+const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', {
+  maxRetriesPerRequest: null
+});
 
 // Job queues
 export const liquidationQueue = new Queue('liquidation', { connection: redis });
