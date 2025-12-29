@@ -1,71 +1,160 @@
-import axios from 'axios';
+import { Connection, PublicKey, Keypair, Transaction, VersionedTransaction } from '@solana/web3.js';
+import { Program, AnchorProvider } from '@coral-xyz/anchor';
 import { TokenTier } from '@memecoin-lending/types';
 import {
   TokenVerificationResult,
   TokenVerificationCache,
-  DexScreenerResponse,
-  DexScreenerPair,
-  PumpFunTokenInfo,
 } from '@memecoin-lending/types';
+import { getNetworkConfig, PROGRAM_ID, NetworkType } from '@memecoin-lending/config';
 import { manualWhitelistService } from './manual-whitelist.service';
+import BN from 'bn.js';
+import fs from 'fs';
+import path from 'path';
+
+// NodeWallet wrapper for Keypair
+class NodeWallet {
+  constructor(readonly payer: Keypair) {}
+
+  get publicKey(): PublicKey {
+    return this.payer.publicKey;
+  }
+
+  async signTransaction<T extends Transaction | VersionedTransaction>(tx: T): Promise<T> {
+    if ('version' in tx) {
+      (tx as VersionedTransaction).sign([this.payer]);
+    } else {
+      (tx as Transaction).partialSign(this.payer);
+    }
+    return tx;
+  }
+
+  async signAllTransactions<T extends Transaction | VersionedTransaction>(txs: T[]): Promise<T[]> {
+    return txs.map(tx => {
+      if ('version' in tx) {
+        (tx as VersionedTransaction).sign([this.payer]);
+      } else {
+        (tx as Transaction).partialSign(this.payer);
+      }
+      return tx;
+    });
+  }
+}
 
 export class TokenVerificationService {
   private cache: TokenVerificationCache = {};
   private readonly cacheTimeout: number;
-  private readonly minLiquidityUsd: number;
-  private readonly dexScreenerTimeout: number;
+  private readonly minLiquidityUsd: number; // For future mainnet use
+  private readonly autoWhitelistEnabled: boolean;
+  private adminKeypair: Keypair | null = null;
+  private program: Program | null = null;
+  private connection: Connection | null = null;
+  private whitelistingLocks = new Map<string, Promise<boolean>>();
 
   constructor() {
     this.cacheTimeout = parseInt(process.env.TOKEN_CACHE_TTL_MS || '300000'); // 5 minutes
     this.minLiquidityUsd = parseInt(process.env.MIN_LIQUIDITY_USD || '0'); // 0 for testing
-    this.dexScreenerTimeout = parseInt(process.env.DEXSCREENER_API_TIMEOUT || '10000'); // 10 seconds
+    this.autoWhitelistEnabled = process.env.AUTO_WHITELIST_ENABLED === 'true';
+    
+    this.initializeAnchorProgram();
   }
 
   async verifyToken(mint: string): Promise<TokenVerificationResult> {
     try {
-      // Validate mint address format
+      console.log(`[TokenVerification] Verifying: ${mint.substring(0, 8)}...`);
+      
+      // 1. Validate mint address format
       if (!this.isValidMintAddress(mint)) {
         return this.createInvalidResult(mint, 'Invalid mint address format');
       }
 
-      // Check cache first
+      // 2. Check cache first
       const cached = this.getCachedResult(mint);
       if (cached) {
+        console.log(`[TokenVerification] Cache hit: ${mint.substring(0, 8)}...`);
         return cached;
       }
 
-      // Check manual whitelist first (takes priority)
+      // 3. Check manual whitelist (for non-pump tokens added by admin)
       const whitelistEntry = await manualWhitelistService.getWhitelistEntry(mint);
-      if (whitelistEntry && whitelistEntry.enabled) {
+      if (whitelistEntry?.enabled) {
         const result = this.createWhitelistResult(whitelistEntry);
-        // Cache the result
+        this.cacheResult(mint, result);
+        console.log(`[TokenVerification] Manual whitelist: ${whitelistEntry.symbol || mint.substring(0, 8)}...`);
+        return result;
+      }
+
+      // 4. Must end in "pump" (PumpFun token)
+      if (!mint.toLowerCase().endsWith('pump')) {
+        const result = this.createInvalidResult(mint, 'Token must be from PumpFun (address must end in "pump")');
         this.cacheResult(mint, result);
         return result;
       }
 
-      // If not in whitelist or disabled, check PumpFun via DexScreener API
-      const tokenData = await this.fetchTokenFromDexScreener(mint);
-      const result = this.processTokenData(mint, tokenData);
+      console.log(`[TokenVerification] Valid PumpFun token: ${mint.substring(0, 8)}... (ends in pump)`);
+
+      // 5. Check if already on-chain
+      const isOnChain = await this.isTokenOnChain(mint);
       
-      // Cache the result
+      if (!isOnChain && this.autoWhitelistEnabled && this.adminKeypair) {
+        console.log(`[TokenVerification] Not on-chain, auto-whitelisting...`);
+        try {
+          await this.autoWhitelistWithLock(mint, {
+            isValid: true,
+            mint,
+            tier: TokenTier.Bronze,
+            ltvBps: 5000,
+            interestRateBps: 1000,
+            dexId: 'pumpfun',
+            liquidity: 0,
+            verifiedAt: Date.now(),
+            isWhitelisted: false,
+          });
+          console.log(`[TokenVerification] Auto-whitelisted ${mint.substring(0, 8)}...`);
+        } catch (error: any) {
+          if (!error.message?.includes('already in use')) {
+            console.error(`[TokenVerification] Auto-whitelist failed:`, error.message);
+            return this.createInvalidResult(mint, 'Failed to whitelist token on-chain. Please try again.');
+          }
+        }
+      } else if (!isOnChain && !this.adminKeypair) {
+        console.log(`[TokenVerification] Auto-whitelist disabled: no admin keypair`);
+      } else if (isOnChain) {
+        console.log(`[TokenVerification] Token already on-chain`);
+      }
+
+      // 6. Return success
+      const result: TokenVerificationResult = {
+        isValid: true,
+        mint,
+        tier: TokenTier.Bronze,
+        ltvBps: 5000,
+        interestRateBps: 1000,
+        liquidity: 0,
+        dexId: 'pumpfun',
+        verifiedAt: Date.now(),
+        isWhitelisted: true,
+        whitelistSource: 'auto',
+      };
+      
       this.cacheResult(mint, result);
-      
+      console.log(`[TokenVerification] Verification complete: valid=true, source=${result.whitelistSource}`);
       return result;
+      
     } catch (error) {
-      console.error(`Error verifying token ${mint}:`, error);
+      console.error(`[TokenVerification] Error verifying token ${mint}:`, error);
       
       // Return cached data if available during error
-      const cached = this.getCachedResult(mint, true); // Allow expired cache
+      const cached = this.getCachedResult(mint, true);
       if (cached) {
         return cached;
       }
       
-      return this.createInvalidResult(mint, 'Failed to verify token - API error');
+      return this.createInvalidResult(mint, 'Failed to verify token');
     }
   }
 
   async getPumpFunTokens(minLiquidity = 0, limit = 50): Promise<TokenVerificationResult[]> {
-    // Get manually whitelisted tokens (they are considered valid regardless of source)
+    // Get manually whitelisted tokens
     const whitelistEntries = await manualWhitelistService.getWhitelistEntries({
       filters: { enabled: true },
       limit: Math.min(limit, 50),
@@ -73,125 +162,10 @@ export class TokenVerificationService {
       sortOrder: 'desc',
     });
 
-    // Convert whitelist entries to TokenVerificationResult
-    const whitelistedTokens = whitelistEntries.entries.map(entry => this.createWhitelistResult(entry));
-
-    // For now, we only return whitelisted tokens
-    // In the future, this could be extended to fetch popular PumpFun tokens from an external API
-    return whitelistedTokens;
-  }
-
-  private async fetchTokenFromDexScreener(mint: string): Promise<DexScreenerResponse | null> {
-    try {
-      const url = `https://api.dexscreener.com/latest/dex/tokens/${mint}`;
-      const response = await axios.get<DexScreenerResponse>(url, {
-        timeout: this.dexScreenerTimeout,
-        headers: {
-          'User-Agent': 'MemecoinLending/1.0',
-        },
-      });
-      
-      return response.data;
-    } catch (error) {
-      if (axios.isAxiosError(error)) {
-        if (error.code === 'ECONNABORTED') {
-          throw new Error('API request timeout');
-        }
-        if (error.response?.status === 404) {
-          return null; // Token not found
-        }
-      }
-      throw error;
-    }
-  }
-
-  private processTokenData(mint: string, data: DexScreenerResponse | null): TokenVerificationResult {
-    if (!data?.pairs || data.pairs.length === 0) {
-      return this.createInvalidResult(mint, 'Token not found on any DEX');
-    }
-
-    // Find PumpFun pairs first, then other valid pairs
-    const pumpFunPair = data.pairs.find(pair => this.isPumpFunPair(pair));
-    const validPair = pumpFunPair || data.pairs.find(pair => pair.liquidity?.usd);
-
-    if (!validPair) {
-      return this.createInvalidResult(mint, 'No valid trading pairs found');
-    }
-
-    if (!pumpFunPair) {
-      return this.createInvalidResult(mint, 'Token is not from PumpFun platform');
-    }
-
-    const liquidity = validPair.liquidity?.usd || 0;
-    
-    if (liquidity < this.minLiquidityUsd) {
-      return this.createInvalidResult(
-        mint, 
-        `Insufficient liquidity: $${liquidity.toFixed(2)} (minimum: $${this.minLiquidityUsd})`
-      );
-    }
-
-    const tier = this.determineTier(liquidity);
-    const ltvBps = this.getLtvForTier(tier);
-
-    return {
-      isValid: true,
-      mint,
-      symbol: validPair.baseToken.symbol,
-      name: validPair.baseToken.name,
-      liquidity,
-      dexId: validPair.dexId,
-      pairAddress: validPair.pairAddress,
-      tier,
-      ltvBps,
-      verifiedAt: Date.now(),
-      isWhitelisted: false,
-      whitelistSource: 'pumpfun',
-    };
-  }
-
-  private isPumpFunPair(pair: DexScreenerPair): boolean {
-    const pumpFunDexIds = ['pumpfun', 'pumpswap'];
-    
-    // Check if dexId matches PumpFun variants
-    if (pumpFunDexIds.includes(pair.dexId.toLowerCase())) {
-      return true;
-    }
-    
-    // Check if pair address ends with 'pump' (some PumpFun variants)
-    if (pair.pairAddress.toLowerCase().endsWith('pump')) {
-      return true;
-    }
-    
-    return false;
-  }
-
-  private determineTier(liquidity: number): TokenTier {
-    if (liquidity >= 1000000) {
-      return TokenTier.Gold; // >= $1M
-    } else if (liquidity >= 500000) {
-      return TokenTier.Silver; // >= $500K
-    } else {
-      return TokenTier.Bronze; // >= $0 (for testing)
-    }
-  }
-
-  private getLtvForTier(tier: TokenTier): number {
-    switch (tier) {
-      case TokenTier.Gold:
-        return 7000; // 70%
-      case TokenTier.Silver:
-        return 6000; // 60%
-      case TokenTier.Bronze:
-        return 5000; // 50%
-      default:
-        return 5000;
-    }
+    return whitelistEntries.entries.map(entry => this.createWhitelistResult(entry));
   }
 
   private isValidMintAddress(mint: string): boolean {
-    // Basic validation for Solana mint addresses
-    // Should be base58 encoded and between 32-44 characters
     const base58Regex = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
     return base58Regex.test(mint);
   }
@@ -224,7 +198,7 @@ export class TokenVerificationService {
       mint: entry.mint,
       symbol: entry.symbol,
       name: entry.name,
-      liquidity: 0, // Manual whitelist entries don't have liquidity data
+      liquidity: 0,
       tier: entry.tier,
       ltvBps: entry.ltvBps,
       verifiedAt: Date.now(),
@@ -245,29 +219,167 @@ export class TokenVerificationService {
     };
   }
 
-  // Utility method to convert PumpFun data
-  convertToPumpFunTokenInfo(result: TokenVerificationResult, pair: DexScreenerPair): PumpFunTokenInfo {
-    return {
-      mint: result.mint,
-      symbol: result.symbol || '',
-      name: result.name || '',
-      liquidity: result.liquidity,
-      volume24h: pair.volume?.h24 || 0,
-      priceUsd: pair.priceUsd || '0',
-      fdv: pair.fdv || 0,
-      pairAddress: result.pairAddress || '',
-      dexId: result.dexId || '',
-    };
+  private async initializeAnchorProgram(): Promise<void> {
+    try {
+      if (!this.autoWhitelistEnabled) {
+        console.log('[TokenVerification] Auto-whitelist disabled');
+        return;
+      }
+
+      const keypairPath = process.env.ADMIN_KEYPAIR_PATH;
+      if (!keypairPath) {
+        console.warn('[TokenVerification] ADMIN_KEYPAIR_PATH not set, auto-whitelist disabled');
+        return;
+      }
+
+      const resolvedPath = path.resolve(keypairPath);
+      if (!fs.existsSync(resolvedPath)) {
+        console.warn(`[TokenVerification] Admin keypair not found: ${resolvedPath}, auto-whitelist disabled`);
+        return;
+      }
+
+      this.adminKeypair = Keypair.fromSecretKey(
+        Uint8Array.from(JSON.parse(fs.readFileSync(resolvedPath, 'utf8')))
+      );
+
+      const network = (process.env.SOLANA_NETWORK as NetworkType) || 'devnet';
+      const networkConfig = getNetworkConfig(network);
+      this.connection = new Connection(networkConfig.rpcUrl, 'confirmed');
+
+      const possibleIdlPaths = [
+        path.resolve('../../target/idl/memecoin_lending.json'),
+        path.resolve('./target/idl/memecoin_lending.json'),
+        path.resolve('../target/idl/memecoin_lending.json'),
+        path.resolve('target/idl/memecoin_lending.json'),
+      ];
+      
+      let idlPath = null;
+      for (const testPath of possibleIdlPaths) {
+        if (fs.existsSync(testPath)) {
+          idlPath = testPath;
+          break;
+        }
+      }
+      
+      if (!idlPath) {
+        console.warn(`[TokenVerification] IDL not found, auto-whitelist disabled`);
+        this.adminKeypair = null;
+        return;
+      }
+
+      const idl = JSON.parse(fs.readFileSync(idlPath, 'utf8'));
+
+      const wallet = new NodeWallet(this.adminKeypair);
+      const provider = new AnchorProvider(this.connection, wallet, {
+        commitment: 'confirmed',
+      });
+      this.program = new Program(idl, provider);
+
+      console.log(`[TokenVerification] Auto-whitelist initialized with admin: ${this.adminKeypair.publicKey.toString().substring(0, 8)}...`);
+      
+    } catch (error) {
+      console.error('[TokenVerification] Failed to initialize Anchor program:', error);
+      this.adminKeypair = null;
+      this.program = null;
+    }
   }
 
-  // Cleanup expired cache entries periodically
-  private cleanupCache(): void {
-    const now = Date.now();
-    Object.keys(this.cache).forEach(mint => {
-      if (now - this.cache[mint].timestamp > this.cacheTimeout) {
-        delete this.cache[mint];
+  private async isTokenOnChain(mint: string): Promise<boolean> {
+    if (!this.program) {
+      return false;
+    }
+
+    try {
+      const programId = new PublicKey(PROGRAM_ID);
+      const mintPubkey = new PublicKey(mint);
+      
+      const [tokenConfigPDA] = PublicKey.findProgramAddressSync(
+        [Buffer.from('token_config'), mintPubkey.toBuffer()],
+        programId
+      );
+
+      await (this.program.account as any).tokenConfig.fetch(tokenConfigPDA);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private async autoWhitelistWithLock(mint: string, tokenData: TokenVerificationResult): Promise<boolean> {
+    const existingLock = this.whitelistingLocks.get(mint);
+    if (existingLock) {
+      return existingLock;
+    }
+
+    const whitelistPromise = this.autoWhitelistOnChain(mint, tokenData)
+      .finally(() => {
+        this.whitelistingLocks.delete(mint);
+      });
+
+    this.whitelistingLocks.set(mint, whitelistPromise);
+    return whitelistPromise;
+  }
+
+  private async autoWhitelistOnChain(mint: string, tokenData: TokenVerificationResult): Promise<boolean> {
+    if (!this.program || !this.adminKeypair) {
+      throw new Error('Auto-whitelist not initialized');
+    }
+
+    const programId = new PublicKey(PROGRAM_ID);
+    const mintPubkey = new PublicKey(mint);
+
+    const [protocolState] = PublicKey.findProgramAddressSync(
+      [Buffer.from('protocol_state')],
+      programId
+    );
+
+    const [tokenConfig] = PublicKey.findProgramAddressSync(
+      [Buffer.from('token_config'), mintPubkey.toBuffer()],
+      programId
+    );
+
+    // Tier: 0=bronze, 1=silver, 2=gold
+    const tierMap: Record<string, number> = { bronze: 0, silver: 1, gold: 2 };
+    const tier = tierMap[tokenData.tier?.toLowerCase() || 'bronze'] ?? 0;
+
+    // Pool type: 2=pumpfun
+    const poolType = 2;
+
+    try {
+      const tx = await (this.program.methods as any)
+        .whitelistToken(
+          tier,
+          mintPubkey, // pool address (use mint for pumpfun)
+          poolType,
+          new BN(1000000),       // min loan: 0.001 SOL
+          new BN(100000000000),  // max loan: 100 SOL
+        )
+        .accounts({
+          protocolState,
+          tokenConfig,
+          tokenMint: mintPubkey,
+          admin: this.adminKeypair.publicKey,
+          systemProgram: new PublicKey('11111111111111111111111111111111'),
+          rent: new PublicKey('SysvarRent111111111111111111111111111111111'),
+        })
+        .rpc();
+
+      console.log(`[TokenVerification] Auto-whitelisted - tx: ${tx.substring(0, 8)}...`);
+      return true;
+    } catch (error: any) {
+      if (error.message?.includes('already in use')) {
+        return true;
       }
-    });
+      throw error;
+    }
+  }
+
+  clearCache(mint?: string): void {
+    if (mint) {
+      delete this.cache[mint];
+    } else {
+      this.cache = {};
+    }
   }
 }
 

@@ -15,7 +15,6 @@ import * as pda from '../pda';
 export async function getProtocolState(program: Program): Promise<ProtocolState> {
   const [protocolStatePDA] = pda.getProtocolStatePDA(program.programId);
   
-  // Use string-based account access for untyped IDL
   const account = await (program.account as any).protocolState.fetch(protocolStatePDA);
   
   return {
@@ -41,82 +40,176 @@ export async function getTokenConfig(
 ): Promise<TokenConfig | null> {
   const [tokenConfigPDA] = pda.getTokenConfigPDA(mint, program.programId);
   
-  // Mock implementation - in real implementation, this would fetch from blockchain
-  return {
-    pubkey: tokenConfigPDA.toString(),
-    mint: mint.toString(),
-    tier: TokenTier.Bronze,
-    enabled: true,
-    poolAddress: '11111111111111111111111111111111',
-    poolType: PoolType.Raydium,
-    ltvBps: 7000,
-    interestRateBps: 1000,
-    liquidationBonusBps: 500,
-    minLoanAmount: '100000000',
-    maxLoanAmount: '10000000000',
-    activeLoansCount: '0',
-    totalVolume: '0',
-  };
+  try {
+    const account = await (program.account as any).tokenConfig.fetch(tokenConfigPDA);
+    
+    return {
+      pubkey: tokenConfigPDA.toString(),
+      mint: account.mint.toString(),
+      tier: parseTier(account.tier),
+      enabled: account.enabled,
+      poolAddress: account.poolAddress.toString(),
+      poolType: parsePoolType(account.poolType),
+      ltvBps: account.ltvBps,
+      interestRateBps: account.interestRateBps,
+      liquidationBonusBps: account.liquidationBonusBps,
+      minLoanAmount: account.minLoanAmount.toString(),
+      maxLoanAmount: account.maxLoanAmount.toString(),
+      activeLoansCount: account.activeLoansCount.toString(),
+      totalVolume: account.totalVolume.toString(),
+    };
+  } catch (error) {
+    // Account doesn't exist
+    return null;
+  }
 }
 
 export async function getLoan(
   program: Program,
   loanPubkey: PublicKey
 ): Promise<Loan | null> {
-  // Mock implementation - in real implementation, this would fetch from blockchain
-  return {
-    pubkey: loanPubkey.toString(),
-    borrower: '11111111111111111111111111111111',
-    tokenMint: 'So11111111111111111111111111111111111111112',
-    collateralAmount: '1000000000',
-    solBorrowed: '700000000',
-    entryPrice: '100000000',
-    liquidationPrice: '85000000',
-    interestRateBps: 1000,
-    createdAt: Date.now() / 1000,
-    dueAt: (Date.now() / 1000) + (30 * 24 * 60 * 60),
-    status: LoanStatus.Active,
-    index: 0,
-  };
+  try {
+    const account = await (program.account as any).loan.fetch(loanPubkey);
+    
+    return {
+      pubkey: loanPubkey.toString(),
+      borrower: account.borrower.toString(),
+      tokenMint: account.tokenMint.toString(),
+      collateralAmount: account.collateralAmount.toString(),
+      solBorrowed: account.solBorrowed.toString(),
+      entryPrice: account.entryPrice.toString(),
+      liquidationPrice: account.liquidationPrice.toString(),
+      interestRateBps: account.interestRateBps,
+      createdAt: account.createdAt.toNumber(),
+      dueAt: account.dueAt.toNumber(),
+      status: parseLoanStatus(account.status),
+      index: account.index.toNumber(),
+    };
+  } catch (error) {
+    return null;
+  }
 }
 
 export async function getActiveLoans(program: Program): Promise<Loan[]> {
-  // Mock implementation - in real implementation, this would fetch from blockchain
-  return [];
+  try {
+    const accounts = await (program.account as any).loan.all();
+    return accounts
+      .map((acc: any) => ({
+        pubkey: acc.publicKey.toString(),
+        borrower: acc.account.borrower.toString(),
+        tokenMint: acc.account.tokenMint.toString(),
+        collateralAmount: acc.account.collateralAmount.toString(),
+        solBorrowed: acc.account.solBorrowed.toString(),
+        entryPrice: acc.account.entryPrice.toString(),
+        liquidationPrice: acc.account.liquidationPrice.toString(),
+        interestRateBps: acc.account.interestRateBps,
+        createdAt: acc.account.createdAt.toNumber(),
+        dueAt: acc.account.dueAt.toNumber(),
+        status: parseLoanStatus(acc.account.status),
+        index: acc.account.index.toNumber(),
+      }))
+      .filter((loan: Loan) => loan.status === LoanStatus.Active);
+  } catch (error) {
+    return [];
+  }
 }
 
 export async function getLoansByBorrower(
   program: Program,
   borrower: PublicKey
 ): Promise<Loan[]> {
-  // Mock implementation - in real implementation, this would fetch from blockchain
-  return [];
+  try {
+    const accounts = await (program.account as any).loan.all([
+      { memcmp: { offset: 8, bytes: borrower.toBase58() } }
+    ]);
+    return accounts.map((acc: any) => ({
+      pubkey: acc.publicKey.toString(),
+      borrower: acc.account.borrower.toString(),
+      tokenMint: acc.account.tokenMint.toString(),
+      collateralAmount: acc.account.collateralAmount.toString(),
+      solBorrowed: acc.account.solBorrowed.toString(),
+      entryPrice: acc.account.entryPrice.toString(),
+      liquidationPrice: acc.account.liquidationPrice.toString(),
+      interestRateBps: acc.account.interestRateBps,
+      createdAt: acc.account.createdAt.toNumber(),
+      dueAt: acc.account.dueAt.toNumber(),
+      status: parseLoanStatus(acc.account.status),
+      index: acc.account.index.toNumber(),
+    }));
+  } catch (error) {
+    return [];
+  }
 }
 
 export async function getLoansByToken(
   program: Program,
   mint: PublicKey
 ): Promise<Loan[]> {
-  // Mock implementation - in real implementation, this would fetch from blockchain
-  return [];
+  try {
+    const accounts = await (program.account as any).loan.all([
+      { memcmp: { offset: 40, bytes: mint.toBase58() } }
+    ]);
+    return accounts.map((acc: any) => ({
+      pubkey: acc.publicKey.toString(),
+      borrower: acc.account.borrower.toString(),
+      tokenMint: acc.account.tokenMint.toString(),
+      collateralAmount: acc.account.collateralAmount.toString(),
+      solBorrowed: acc.account.solBorrowed.toString(),
+      entryPrice: acc.account.entryPrice.toString(),
+      liquidationPrice: acc.account.liquidationPrice.toString(),
+      interestRateBps: acc.account.interestRateBps,
+      createdAt: acc.account.createdAt.toNumber(),
+      dueAt: acc.account.dueAt.toNumber(),
+      status: parseLoanStatus(acc.account.status),
+      index: acc.account.index.toNumber(),
+    }));
+  } catch (error) {
+    return [];
+  }
 }
 
 export async function getLoansByStatus(
   program: Program,
   status: LoanStatus
 ): Promise<Loan[]> {
-  // Mock implementation - in real implementation, this would fetch from blockchain
-  return [];
+  const allLoans = await getActiveLoans(program);
+  return allLoans.filter(loan => loan.status === status);
 }
 
 export async function getAllTokenConfigs(program: Program): Promise<TokenConfig[]> {
-  // Mock implementation - in real implementation, this would fetch from blockchain
-  return [];
+  try {
+    const accounts = await (program.account as any).tokenConfig.all();
+    return accounts.map((acc: any) => ({
+      pubkey: acc.publicKey.toString(),
+      mint: acc.account.mint.toString(),
+      tier: parseTier(acc.account.tier),
+      enabled: acc.account.enabled,
+      poolAddress: acc.account.poolAddress.toString(),
+      poolType: parsePoolType(acc.account.poolType),
+      ltvBps: acc.account.ltvBps,
+      interestRateBps: acc.account.interestRateBps,
+      liquidationBonusBps: acc.account.liquidationBonusBps,
+      minLoanAmount: acc.account.minLoanAmount.toString(),
+      maxLoanAmount: acc.account.maxLoanAmount.toString(),
+      activeLoansCount: acc.account.activeLoansCount.toString(),
+      totalVolume: acc.account.totalVolume.toString(),
+    }));
+  } catch (error) {
+    return [];
+  }
 }
 
 export async function getWhitelistedTokens(program: Program): Promise<TokenConfig[]> {
-  // Mock implementation - in real implementation, this would fetch from blockchain
-  return [];
+  const allConfigs = await getAllTokenConfigs(program);
+  return allConfigs.filter(config => config.enabled);
+}
+
+// Helper to parse tier from on-chain data
+export function parseTier(tierData: any): TokenTier {
+  if (tierData.bronze) return TokenTier.Bronze;
+  if (tierData.silver) return TokenTier.Silver;
+  if (tierData.gold) return TokenTier.Gold;
+  return TokenTier.Bronze;
 }
 
 // Helper to parse pool type from on-chain data
@@ -125,7 +218,16 @@ export function parsePoolType(poolTypeData: any): PoolType {
   if (poolTypeData.orca) return PoolType.Orca;
   if (poolTypeData.pumpfun) return PoolType.Pumpfun;
   if (poolTypeData.pumpswap) return PoolType.PumpSwap;
-  return PoolType.Raydium; // default
+  return PoolType.Raydium;
+}
+
+// Helper to parse loan status from on-chain data
+export function parseLoanStatus(statusData: any): LoanStatus {
+  if (statusData.active) return LoanStatus.Active;
+  if (statusData.repaid) return LoanStatus.Repaid;
+  if (statusData.liquidatedTime) return LoanStatus.LiquidatedTime;
+  if (statusData.liquidatedPrice) return LoanStatus.LiquidatedPrice;
+  return LoanStatus.Active;
 }
 
 // Helper to convert pool type to on-chain format

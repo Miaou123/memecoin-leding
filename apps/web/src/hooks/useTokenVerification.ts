@@ -94,7 +94,7 @@ export function useTokenVerification(mint: string): UseTokenVerificationResult {
 
     try {
       // Get API endpoint from environment or default
-      const apiBase = process.env.REACT_APP_API_BASE_URL || 'http://localhost:3001';
+      const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001';
       
       const response = await fetch(`${apiBase}/api/tokens/verify`, {
         method: 'POST',
@@ -243,7 +243,7 @@ export function useBatchTokenVerification(mints: string[]) {
     setErrors([]);
 
     try {
-      const apiBase = process.env.REACT_APP_API_BASE_URL || 'http://localhost:3001';
+      const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001';
       
       const response = await fetch(`${apiBase}/api/tokens/batch-verify`, {
         method: 'POST',
@@ -319,7 +319,7 @@ export function useCanCreateLoan(mint: string) {
     setError(null);
 
     try {
-      const apiBase = process.env.REACT_APP_API_BASE_URL || 'http://localhost:3001';
+      const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001';
       
       const response = await fetch(`${apiBase}/api/tokens/${mint}/can-loan`);
 

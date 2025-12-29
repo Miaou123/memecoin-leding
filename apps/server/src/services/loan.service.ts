@@ -1,5 +1,7 @@
 import { PublicKey, Connection, Keypair } from '@solana/web3.js';
 import BN from 'bn.js';
+import fs from 'fs';
+import path from 'path';
 import { 
   Loan, 
   LoanEstimate,
@@ -21,18 +23,25 @@ class LoanService {
     if (!this.client) {
       const networkConfig = getNetworkConfig();
       const connection = new Connection(networkConfig.rpcUrl, 'confirmed');
-      const wallet = Keypair.fromSecretKey(
-        Buffer.from(JSON.parse(process.env.ADMIN_WALLET_PRIVATE_KEY || '[]'))
-      );
       
-      // TODO: Load IDL from file
-      const idl = {}; // Load from file
+      // Load wallet from file
+      const keypairPath = path.resolve(process.env.ADMIN_KEYPAIR_PATH || '../../scripts/keys/admin.json');
+      const keyData = JSON.parse(fs.readFileSync(keypairPath, 'utf8'));
+      const wallet = Keypair.fromSecretKey(Uint8Array.from(keyData));
+      
+      // Load IDL from target folder
+      const idlPath = path.resolve('../../target/idl/memecoin_lending.json');
+      const idl = JSON.parse(fs.readFileSync(idlPath, 'utf8'));
+      
+      const programId = typeof PROGRAM_ID === 'string' 
+        ? new PublicKey(PROGRAM_ID) 
+        : PROGRAM_ID;
       
       this.client = new MemecoinLendingClient(
         connection,
         wallet as any,
-        PROGRAM_ID,
-        idl as any
+        programId,
+        idl
       );
     }
     return this.client;

@@ -10,10 +10,11 @@ export interface TokenVerificationResult {
   pairAddress?: string;
   tier?: TokenTier;
   ltvBps?: number;
+  interestRateBps?: number;
   reason?: string;
   verifiedAt?: number;
   isWhitelisted?: boolean;
-  whitelistSource?: 'manual' | 'pumpfun' | 'auto';
+  whitelistSource?: 'manual' | 'auto';
   whitelistReason?: string;
 }
 

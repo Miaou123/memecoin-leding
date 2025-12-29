@@ -3,8 +3,6 @@ import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
 import { serve } from '@hono/node-server';
 import { config } from 'dotenv';
-import { WebSocketServer } from 'ws';
-import { createServer } from 'http';
 
 // Load environment variables
 config();
@@ -21,8 +19,6 @@ import adminWhitelistRouter from './routes/admin/whitelist.js';
 import { initializeJobs } from './jobs/index.js';
 import { initializeWebSocket } from './websocket/index.js';
 import { errorHandler } from './middleware/error.js';
-import { authMiddleware } from './middleware/auth.js';
-import { rateLimiter } from './middleware/rateLimit.js';
 import { prisma } from './db/client.js';
 
 // Create Hono app
@@ -30,7 +26,7 @@ const app = new Hono();
 
 // Global middleware
 app.use('/*', cors({
-  origin: process.env.CORS_ORIGIN?.split(',') || ['http://localhost:3000'],
+  origin: process.env.CORS_ORIGIN?.split(',') || ['http://localhost:3000', 'http://localhost:3001', 'http://localhost:5173'],
   credentials: true,
 }));
 app.use('/*', logger());
@@ -38,7 +34,6 @@ app.use('/*', logger());
 // Health check endpoint
 app.get('/health', async (c) => {
   try {
-    // Check database connection
     await prisma.$queryRaw`SELECT 1`;
     return c.json({ 
       status: 'ok',
@@ -75,68 +70,31 @@ app.notFound((c) => {
   }, 404);
 });
 
-// Create HTTP server
-const server = createServer((req, res) => {
-  // Handle regular HTTP requests with Hono
-  if (!req.url?.startsWith('/ws')) {
-    const result = app.fetch(req as any, { 
-      env: process.env,
-    });
-    
-    return Promise.resolve(result).then((response: any) => {
-      res.statusCode = response.status;
-      response.headers.forEach((value: any, key: any) => {
-        res.setHeader(key, value);
-      });
-      response.body?.pipeTo(
-        new WritableStream({
-          write(chunk) {
-            res.write(chunk);
-          },
-          close() {
-            res.end();
-          },
-        })
-      );
-    });
-  }
-});
-
-// Initialize WebSocket server
-const wss = initializeWebSocket(server);
-
 // Environment validation
 const validateEnvironment = () => {
   const warnings: string[] = [];
   const errors: string[] = [];
 
-  // Check Jupiter API key
   if (!process.env.JUPITER_API_KEY) {
     warnings.push('⚠️  JUPITER_API_KEY not set - using public endpoints (rate limited)');
-    warnings.push('   Get your API key at: https://portal.jup.ag');
   }
 
-  // Check database URL
   if (!process.env.DATABASE_URL) {
     errors.push('❌ DATABASE_URL is required');
   }
 
-  // Check Redis URL
   if (!process.env.REDIS_URL) {
     warnings.push('⚠️  REDIS_URL not set - background jobs may not work properly');
   }
 
-  // Print warnings
   if (warnings.length > 0) {
     console.log('\n🔶 Environment Warnings:');
     warnings.forEach(warning => console.log(`  ${warning}`));
   }
 
-  // Print errors and exit if any
   if (errors.length > 0) {
     console.log('\n🔴 Environment Errors:');
     errors.forEach(error => console.log(`  ${error}`));
-    console.log('\n💡 Copy .env.example to .env and configure your environment variables');
     process.exit(1);
   }
 
@@ -145,16 +103,18 @@ const validateEnvironment = () => {
   }
 };
 
-// Validate environment before starting
 validateEnvironment();
 
 // Start server
-const port = parseInt(process.env.PORT || '3001');
-server.listen(port, () => {
-  console.log(`🚀 Server running on http://localhost:${port}`);
-  console.log(`🔌 WebSocket server running on ws://localhost:${port}/ws`);
+const port = parseInt(process.env.PORT || '3002');
+
+const server = serve({
+  fetch: app.fetch,
+  port,
+}, (info) => {
+  console.log(`🚀 Server running on http://localhost:${info.port}`);
+  console.log(`🔌 WebSocket server running on ws://localhost:${info.port}/ws`);
   
-  // Test Jupiter API connection if API key is configured
   if (process.env.JUPITER_API_KEY) {
     import('./services/price.js').then(({ priceService }) => {
       priceService.testJupiterConnection().then((result: { working: boolean; latency: number }) => {
@@ -169,7 +129,6 @@ server.listen(port, () => {
     });
   }
   
-  // Initialize background jobs
   initializeJobs().then(() => {
     console.log('📋 Background jobs initialized');
   }).catch((error) => {
@@ -177,19 +136,15 @@ server.listen(port, () => {
   });
 });
 
+// Initialize WebSocket - pass the server, it creates WebSocketServer internally
+const wss = initializeWebSocket(server as any);
+
 // Graceful shutdown
 process.on('SIGTERM', async () => {
   console.log('SIGTERM received, shutting down gracefully...');
-  
-  // Close WebSocket server
   wss.close();
-  
-  // Close HTTP server
   server.close();
-  
-  // Close database connection
   await prisma.$disconnect();
-  
   process.exit(0);
 });
 

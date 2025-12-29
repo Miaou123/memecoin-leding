@@ -1,15 +1,44 @@
 #!/usr/bin/env tsx
 
 import { config } from 'dotenv';
-import { Connection, Keypair, PublicKey } from '@solana/web3.js';
+import { Connection, Keypair, PublicKey, Transaction, VersionedTransaction } from '@solana/web3.js';
 import { MemecoinLendingClient } from '@memecoin-lending/sdk';
-import { TokenTier } from '@memecoin-lending/types';
-import { PROGRAM_ID, getNetworkConfig, WHITELISTED_TOKENS } from '@memecoin-lending/config';
+import { PROGRAM_ID, getNetworkConfig } from '@memecoin-lending/config';
 import chalk from 'chalk';
 import { Command } from 'commander';
 import fs from 'fs';
+import BN from 'bn.js';
 
 config();
+
+// Wallet wrapper for Keypair
+class NodeWallet {
+  constructor(readonly payer: Keypair) {}
+
+  async signTransaction<T extends Transaction | VersionedTransaction>(tx: T): Promise<T> {
+    if ('version' in tx) {
+      (tx as VersionedTransaction).sign([this.payer]);
+    } else {
+      (tx as Transaction).partialSign(this.payer);
+    }
+    return tx;
+  }
+
+  async signAllTransactions<T extends Transaction | VersionedTransaction>(txs: T[]): Promise<T[]> {
+    return txs.map((tx) => {
+      if ('version' in tx) {
+        (tx as VersionedTransaction).sign([this.payer]);
+      } else {
+        (tx as Transaction).partialSign(this.payer);
+      }
+      return tx;
+    });
+  }
+
+  get publicKey(): PublicKey {
+    return this.payer.publicKey;
+  }
+}
 
 const program = new Command();
 
@@ -21,24 +50,18 @@ program
   .option('-m, --mint <address>', 'Token mint address')
   .option('-t, --tier <tier>', 'Token tier (bronze, silver, gold)')
   .option('-p, --pool <address>', 'Pool address for price feeds')
-  .option('-s, --symbol <symbol>', 'Token symbol')
-  .option('-N, --name <name>', 'Token name')
-  .option('-d, --decimals <number>', 'Token decimals', '9')
-  .option('--all', 'Whitelist all default tokens')
+  .option('--pool-type <type>', 'Pool type (raydium, orca, pumpfun, pumpswap)', 'pumpfun')
   .action(async (options) => {
     try {
       console.log(chalk.blue('📝 Whitelisting token(s)...'));
       
-      // Load network configuration
       process.env.SOLANA_NETWORK = options.network;
       const networkConfig = getNetworkConfig(options.network);
       
       console.log(chalk.gray(`Network: ${options.network}`));
       
-      // Create connection
       const connection = new Connection(networkConfig.rpcUrl, 'confirmed');
       
-      // Load admin keypair
       if (!fs.existsSync(options.adminKeypair)) {
         throw new Error(`Admin keypair not found: ${options.adminKeypair}`);
       }
@@ -49,93 +72,81 @@ program
       
       console.log(chalk.gray(`Admin: ${adminKeypair.publicKey.toString()}`));
       
-      // Create SDK client
-      const idl = {}; // Load from target/idl/memecoin_lending.json
+      // Load the actual IDL
+      const idlPath = '../target/idl/memecoin_lending.json';
+      if (!fs.existsSync(idlPath)) {
+        throw new Error(`IDL not found: ${idlPath}`);
+      }
+      const idl = JSON.parse(fs.readFileSync(idlPath, 'utf8'));
+
+      // Create wallet wrapper
+      const wallet = new NodeWallet(adminKeypair);
+
       const client = new MemecoinLendingClient(
         connection,
-        adminKeypair as any,
+        wallet,
         PROGRAM_ID,
-        idl as any
+        idl
       );
       
-      if (options.all) {
-        // Whitelist all default tokens
-        console.log(chalk.blue('📦 Whitelisting all default tokens...'));
-        
-        for (const [mint, tokenData] of Object.entries(WHITELISTED_TOKENS)) {
-          try {
-            console.log(chalk.gray(`Whitelisting ${tokenData.symbol}...`));
-            
-            const tierMap = {
-              [TokenTier.Bronze]: 0,
-              [TokenTier.Silver]: 1,
-              [TokenTier.Gold]: 2,
-            };
-            
-            await client.whitelistToken({
-              mint: new PublicKey(mint),
-              tier: tierMap[tokenData.tier],
-              poolAddress: new PublicKey(tokenData.poolAddress || mint), // Use mint as fallback
-            });
-            
-            console.log(chalk.green(`✅ ${tokenData.symbol} whitelisted`));
-            
-          } catch (error) {
-            console.error(chalk.red(`❌ Failed to whitelist ${tokenData.symbol}:`), error);
-          }
-          
-          // Small delay to avoid overwhelming the network
-          await new Promise(resolve => setTimeout(resolve, 1000));
-        }
-        
-      } else {
-        // Whitelist single token
-        if (!options.mint || !options.tier) {
-          throw new Error('Must specify --mint and --tier for single token whitelisting');
-        }
-        
-        const tierMap = {
-          'bronze': 0,
-          'silver': 1,
-          'gold': 2,
-        };
-        
-        if (!(options.tier in tierMap)) {
-          throw new Error('Invalid tier. Must be bronze, silver, or gold');
-        }
-        
-        console.log(chalk.blue(`📝 Whitelisting ${options.symbol || options.mint}...`));
-        
-        await client.whitelistToken({
-          mint: new PublicKey(options.mint),
-          tier: tierMap[options.tier as keyof typeof tierMap],
-          poolAddress: new PublicKey(options.pool || options.mint),
-        });
-        
-        console.log(chalk.green('✅ Token whitelisted successfully!'));
-        console.log(chalk.gray(`Mint: ${options.mint}`));
-        console.log(chalk.gray(`Tier: ${options.tier}`));
-        console.log(chalk.gray(`Pool: ${options.pool || options.mint}`));
+      if (!options.mint || !options.tier) {
+        console.log(chalk.yellow('Usage:'));
+        console.log(chalk.gray('  --mint <address>   Token mint address (required)'));
+        console.log(chalk.gray('  --tier <tier>      bronze, silver, or gold (required)'));
+        console.log(chalk.gray('  --pool <address>   Pool address (optional, defaults to mint)'));
+        console.log(chalk.gray('  --pool-type <type> raydium, orca, pumpfun, pumpswap (default: pumpfun)'));
+        console.log(chalk.gray('\nExample:'));
+        console.log(chalk.gray('  npx tsx whitelist-token.ts --mint ABC123... --tier gold --network devnet'));
+        return;
       }
       
-      // List all whitelisted tokens
-      console.log(chalk.blue('\n📊 Current whitelisted tokens:'));
+      const tierMap: Record<string, number> = {
+        'bronze': 0,
+        'silver': 1,
+        'gold': 2,
+      };
       
-      try {
-        const tokens = await client.getWhitelistedTokens();
-        
-        if (tokens.length === 0) {
-          console.log(chalk.yellow('No tokens whitelisted yet'));
-        } else {
-          tokens.forEach((token, index) => {
-            console.log(chalk.gray(`${index + 1}. ${token.mint} (${token.tier})`));
-          });
-        }
-      } catch (error) {
-        console.log(chalk.yellow('Could not fetch whitelisted tokens'));
+      const poolTypeMap: Record<string, number> = {
+        'raydium': 0,
+        'orca': 1,
+        'pumpfun': 2,
+        'pumpswap': 3,
+      };
+      
+      if (!(options.tier.toLowerCase() in tierMap)) {
+        throw new Error('Invalid tier. Must be bronze, silver, or gold');
       }
       
-      console.log(chalk.green('\n✅ Token whitelisting completed!'));
+      const tier = tierMap[options.tier.toLowerCase()];
+      const poolType = poolTypeMap[options.poolType?.toLowerCase() || 'pumpfun'] ?? 2;
+      
+      console.log(chalk.blue(`\n📝 Whitelisting token...`));
+      console.log(chalk.gray(`  Mint: ${options.mint}`));
+      console.log(chalk.gray(`  Tier: ${options.tier} (${tier})`));
+      console.log(chalk.gray(`  Pool Type: ${options.poolType || 'pumpfun'} (${poolType})`));
+      
+      const txSignature = await client.whitelistToken({
+        mint: new PublicKey(options.mint),
+        tier: tier,
+        poolAddress: new PublicKey(options.pool || options.mint),
+        poolType: poolType,
+        minLoanAmount: new BN(1000000),      // 0.001 SOL min
+        maxLoanAmount: new BN(100000000000), // 100 SOL max
+      });
+      
+      console.log(chalk.green('\n✅ Token whitelisted successfully!'));
+      console.log(chalk.gray(`Transaction: ${txSignature}`));
+      
+      // Show tier info
+      const tierInfo: Record<number, { ltv: string; apr: string }> = {
+        0: { ltv: '50%', apr: '10%' },
+        1: { ltv: '60%', apr: '7%' },
+        2: { ltv: '70%', apr: '5%' },
+      };
+      
+      console.log(chalk.blue('\n📊 Token Config:'));
+      console.log(chalk.gray(`  LTV: ${tierInfo[tier].ltv}`));
+      console.log(chalk.gray(`  Interest Rate: ${tierInfo[tier].apr}`));
       
     } catch (error) {
       console.error(chalk.red('❌ Whitelisting failed:'), error);

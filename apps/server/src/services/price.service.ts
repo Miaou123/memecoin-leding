@@ -1,9 +1,11 @@
 import { Connection, PublicKey } from '@solana/web3.js';
 import { PriceData } from '@memecoin-lending/types';
 import { prisma } from '../db/client.js';
-import { getNetworkConfig } from '@memecoin-lending/config';
+import { getNetworkConfig, NetworkType } from '@memecoin-lending/config';
 import { logger } from '../utils/logger.js';
 import Redis from 'ioredis';
+import { PumpFunSDK } from 'pumpdotfun-sdk';
+import { AnchorProvider } from '@coral-xyz/anchor';
 
 const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
 
@@ -75,6 +77,7 @@ interface DexScreenerResponse {
 // Service status tracking
 interface ServiceStatus {
   jupiterAvailable: boolean;
+  pumpFunAvailable: boolean;
   dexScreenerAvailable: boolean;
   lastCheck: number;
   cacheSize: number;
@@ -87,11 +90,14 @@ class PriceService {
   private readonly CACHE_TTL = 10 * 1000; // 10 seconds
   private serviceStartTime = Date.now();
   private jupiterAvailable = true;
+  private pumpFunAvailable = true;
   private dexScreenerAvailable = true;
   private lastHealthCheck = 0;
+  private pumpFunSDK: PumpFunSDK | null = null;
   
   constructor() {
-    const networkConfig = getNetworkConfig();
+    const network = (process.env.SOLANA_NETWORK as NetworkType) || 'devnet';
+    const networkConfig = getNetworkConfig(network);
     this.connection = new Connection(networkConfig.rpcUrl, 'confirmed');
   }
 
@@ -124,7 +130,7 @@ class PriceService {
       return results;
     }
 
-    // Try Jupiter first
+    // 1. Try Jupiter first
     try {
       const jupiterPrices = await this.fetchFromJupiter(uncachedMints);
       for (const [mint, price] of jupiterPrices) {
@@ -142,14 +148,35 @@ class PriceService {
       logger.warn('Failed to fetch from Jupiter:', error);
     }
 
-    // Try DexScreener for remaining
-    for (const mint of uncachedMints) {
+    // 2. Try PumpFun for remaining (especially pump tokens)
+    for (const mint of [...uncachedMints]) {
+      // Try PumpFun for all remaining tokens (not just those ending in 'pump')
+      // since some valid PumpFun tokens may not follow that pattern
+      try {
+        const price = await this.fetchFromPumpFun(mint);
+        if (price) {
+          results.set(mint, price);
+          this.cache.set(mint, { data: price, timestamp: Date.now() });
+          await redis.setex(`price:${mint}`, 10, JSON.stringify(price));
+          // Remove from uncached list
+          const index = uncachedMints.indexOf(mint);
+          if (index > -1) uncachedMints.splice(index, 1);
+        }
+      } catch (error) {
+        logger.warn(`Failed to fetch ${mint} from PumpFun:`, error);
+      }
+    }
+
+    // 3. Try DexScreener for remaining
+    for (const mint of [...uncachedMints]) {
       try {
         const price = await this.fetchFromDexScreener(mint);
         if (price) {
           results.set(mint, price);
           this.cache.set(mint, { data: price, timestamp: Date.now() });
           await redis.setex(`price:${mint}`, 10, JSON.stringify(price));
+          const index = uncachedMints.indexOf(mint);
+          if (index > -1) uncachedMints.splice(index, 1);
         }
       } catch (error) {
         logger.warn(`Failed to fetch ${mint} from DexScreener:`, error);
@@ -185,6 +212,78 @@ class PriceService {
       timestamp: extPrice.timestamp,
       source: extPrice.source as 'raydium' | 'orca' | 'jupiter',
     };
+  }
+
+  /**
+   * Get or initialize PumpFun SDK
+   */
+  private async getPumpFunSDK(): Promise<PumpFunSDK> {
+    if (!this.pumpFunSDK) {
+      try {
+        // Create a read-only provider (no wallet needed for price queries)
+        const provider = new AnchorProvider(
+          this.connection,
+          {
+            publicKey: PublicKey.default,
+            signTransaction: async (tx) => tx,
+            signAllTransactions: async (txs) => txs,
+          },
+          { commitment: 'confirmed' }
+        );
+        this.pumpFunSDK = new PumpFunSDK(provider);
+      } catch (error) {
+        logger.error('Failed to initialize PumpFun SDK:', error);
+        this.pumpFunAvailable = false;
+        throw error;
+      }
+    }
+    return this.pumpFunSDK;
+  }
+
+  /**
+   * Fetch price from PumpFun SDK
+   */
+  private async fetchFromPumpFun(mint: string): Promise<ExtendedPriceData | null> {
+    try {
+      const sdk = await this.getPumpFunSDK();
+      const mintPubkey = new PublicKey(mint);
+      
+      // Get bonding curve data
+      const bondingCurveAccount = await sdk.getBondingCurveAccount(mintPubkey);
+      
+      if (!bondingCurveAccount) {
+        return null;
+      }
+      
+      // Calculate price from bonding curve
+      // Price in SOL = virtualSolReserves / virtualTokenReserves
+      const virtualSolReserves = Number(bondingCurveAccount.virtualSolReserves);
+      const virtualTokenReserves = Number(bondingCurveAccount.virtualTokenReserves);
+      
+      if (virtualTokenReserves === 0) {
+        return null;
+      }
+      
+      const priceInSol = virtualSolReserves / virtualTokenReserves;
+      
+      // Get SOL price in USD to calculate USD price
+      const solUsdPrice = await this.getSolPrice();
+      const priceInUsd = priceInSol * solUsdPrice;
+      
+      logger.info(`[PumpFun] ${mint}: ${priceInSol.toFixed(10)} SOL ($${priceInUsd.toFixed(6)})`);
+      
+      return {
+        mint,
+        usdPrice: priceInUsd,
+        solPrice: priceInSol,
+        source: 'pumpfun',
+        timestamp: Date.now(),
+      };
+    } catch (error) {
+      logger.warn(`Failed to fetch ${mint} from PumpFun:`, error);
+      this.pumpFunAvailable = false;
+      return null;
+    }
   }
 
   /**
@@ -416,6 +515,7 @@ class PriceService {
   getServiceStatus(): ServiceStatus {
     return {
       jupiterAvailable: this.jupiterAvailable,
+      pumpFunAvailable: this.pumpFunAvailable,
       dexScreenerAvailable: this.dexScreenerAvailable,
       lastCheck: this.lastHealthCheck,
       cacheSize: this.cache.size,
