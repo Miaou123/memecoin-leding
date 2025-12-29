@@ -169,6 +169,18 @@ class ApiClient {
     return this.fetch(`/user/${wallet}/stats`);
   }
 
+  // Dashboard-specific methods
+  async getRecentLoans(params: { limit?: number } = {}): Promise<Loan[]> {
+    const query = new URLSearchParams();
+    if (params.limit) query.append('limit', params.limit.toString());
+    
+    return this.fetch(`/loans/recent?${query.toString()}`);
+  }
+
+  async getTopCollateralToken(): Promise<TokenStats> {
+    return this.fetch('/tokens/top-collateral');
+  }
+
   // Token Verification Methods
   async verifyToken(mint: string): Promise<TokenVerificationResult> {
     return this.fetch('/tokens/verify', {

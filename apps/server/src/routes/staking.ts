@@ -190,4 +190,14 @@ stakingRoutes.post('/claim', async (c) => {
   }
 });
 
+// Get fee configuration and breakdown
+stakingRoutes.get('/fees/breakdown', async (c) => {
+  try {
+    const breakdown = stakingService.getFeeBreakdown();
+    return c.json({ success: true, data: breakdown });
+  } catch (error: any) {
+    return c.json({ success: false, error: error.message }, 500);
+  }
+});
+
 export { stakingRoutes };

@@ -1,5 +1,27 @@
 use anchor_lang::prelude::*;
 
+// === PROTOCOL FEE ===
+pub const PROTOCOL_FEE_BPS: u16 = 200; // 2% flat fee for all tiers
+
+// === LOAN FEE DISTRIBUTION (out of 10000) ===
+// These define how the 2% loan fee is split
+pub const LOAN_FEE_TREASURY_BPS: u16 = 5000;     // 50% of fee → Treasury (1.0% of loan)
+pub const LOAN_FEE_STAKING_BPS: u16 = 2500;      // 25% of fee → Staking (0.5% of loan)
+pub const LOAN_FEE_OPERATIONS_BPS: u16 = 2500;   // 25% of fee → Operations (0.5% of loan)
+
+// === CREATOR FEE DISTRIBUTION (out of 10000) ===
+// Staker-focused split for PumpFun creator fees
+pub const CREATOR_FEE_TREASURY_BPS: u16 = 4000;     // 40%
+pub const CREATOR_FEE_STAKING_BPS: u16 = 4000;      // 40%
+pub const CREATOR_FEE_OPERATIONS_BPS: u16 = 2000;   // 20%
+
+// === LIQUIDATION FEE DISTRIBUTION (out of 10000) ===
+pub const LIQUIDATION_TREASURY_BPS: u16 = 9500;     // 95%
+pub const LIQUIDATION_OPERATIONS_BPS: u16 = 500;    // 5%
+
+// === BASIS POINTS ===
+pub const BPS_DIVISOR: u64 = 10_000;
+
 /// Global protocol state
 #[account]
 #[derive(Default)]
@@ -339,27 +361,27 @@ impl UserStake {
 /// Fee receiver account for collecting pumpfun creator fees
 #[account]
 pub struct FeeReceiver {
-    /// Authority who can distribute fees
+    /// Authority who can update config
     pub authority: Pubkey,
     
-    /// Treasury wallet (50%)
+    /// Treasury wallet (40% of creator fees)
     pub treasury_wallet: Pubkey,
     
-    /// Dev wallet (25%)
-    pub dev_wallet: Pubkey,
+    /// Operations wallet (20% of creator fees) - RENAMED from dev_wallet
+    pub operations_wallet: Pubkey,
     
-    /// Staking reward vault (25%)
+    /// Staking reward vault PDA (40% of creator fees)
     pub staking_reward_vault: Pubkey,
     
     /// Fee splits in basis points (must sum to 10000)
-    pub treasury_split_bps: u16,
-    pub staking_split_bps: u16,
-    pub dev_split_bps: u16,
+    pub treasury_split_bps: u16,      // Default: 4000 (40%)
+    pub staking_split_bps: u16,       // Default: 4000 (40%)
+    pub operations_split_bps: u16,    // Default: 2000 (20%)
     
-    /// Total fees received
+    /// Total fees received all-time
     pub total_fees_received: u64,
     
-    /// Total fees distributed
+    /// Total fees distributed all-time
     pub total_fees_distributed: u64,
     
     /// Bump seed
@@ -373,11 +395,11 @@ impl FeeReceiver {
     pub const LEN: usize = 8 +  // discriminator
         32 +    // authority
         32 +    // treasury_wallet
-        32 +    // dev_wallet
+        32 +    // operations_wallet (renamed from dev_wallet)
         32 +    // staking_reward_vault
         2 +     // treasury_split_bps
         2 +     // staking_split_bps
-        2 +     // dev_split_bps
+        2 +     // operations_split_bps
         8 +     // total_fees_received
         8 +     // total_fees_distributed
         1 +     // bump

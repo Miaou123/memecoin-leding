@@ -1,6 +1,6 @@
 import { Connection, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import BN from 'bn.js';
-import { StakingStats, UserStake } from '@memecoin-lending/types';
+import { StakingStats, UserStake, DEFAULT_FEE_CONFIG, FeeDistributionConfig } from '@memecoin-lending/types';
 
 class StakingService {
   async getStakingStats(): Promise<StakingStats> {
@@ -29,6 +29,31 @@ class StakingService {
     return {
       pending: mockPending.toString(),
       pendingSol: mockPending / LAMPORTS_PER_SOL,
+    };
+  }
+
+  // Fee configuration methods
+  getFeeConfig(): FeeDistributionConfig {
+    return DEFAULT_FEE_CONFIG;
+  }
+  
+  getFeeBreakdown() {
+    return {
+      loanFee: {
+        totalPercent: 2.0,
+        treasury: { percent: 1.0, description: '50% of 2% fee' },
+        staking: { percent: 0.5, description: '25% of 2% fee' },
+        operations: { percent: 0.5, description: '25% of 2% fee' },
+      },
+      creatorFee: {
+        treasury: { percent: 40, description: '40% of creator fees' },
+        staking: { percent: 40, description: '40% of creator fees' },
+        operations: { percent: 20, description: '20% of creator fees' },
+      },
+      liquidation: {
+        treasury: { percent: 95, description: '95% of surplus' },
+        operations: { percent: 5, description: '5% of surplus' },
+      },
     };
   }
 }

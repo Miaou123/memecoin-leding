@@ -184,18 +184,18 @@ pub mod memecoin_lending {
         )
     }
 
-    /// Initialize fee receiver for creator fees
+    /// Initialize fee receiver for creator fees (40/40/20 staker-focused split)
     pub fn initialize_fee_receiver(
         ctx: Context<InitializeFeeReceiver>,
         treasury_split_bps: u16,
         staking_split_bps: u16,
-        dev_split_bps: u16,
+        operations_split_bps: u16,  // Renamed from dev_split_bps
     ) -> Result<()> {
         instructions::fee_distribution::initialize_fee_receiver_handler(
             ctx,
             treasury_split_bps,
             staking_split_bps,
-            dev_split_bps,
+            operations_split_bps,
         )
     }
 

@@ -274,25 +274,36 @@ export default function Staking() {
         </div>
       </div>
 
-      {/* Fee Distribution */}
+      {/* Fee Distribution Info */}
       <div class="space-y-4">
-        <div class="text-xs text-text-dim">CREATOR_FEE_DISTRIBUTION:</div>
+        <div class="text-xs text-text-dim">FEE_DISTRIBUTION_SYSTEM:</div>
         <div class="bg-bg-secondary border border-border p-6">
-          <div class="grid grid-cols-3 gap-4">
-            <div class="text-center">
-              <div class="text-2xl font-bold text-accent-green mb-2">50%</div>
-              <div class="text-xs text-text-dim">TREASURY</div>
-              <div class="text-xs text-text-secondary">Protocol Operations</div>
+          <h3 class="font-mono text-sm text-accent-yellow mb-4">REVENUE_STREAMS</h3>
+          
+          <div class="grid md:grid-cols-2 gap-6 text-sm">
+            <div>
+              <div class="text-text-dim font-mono mb-2">LOAN_FEES (2% per loan)</div>
+              <div class="space-y-1 text-text-secondary">
+                <div>• Treasury: 50% (1.0%)</div>
+                <div>• <span class="text-accent-green">Staking Rewards: 25% (0.5%)</span></div>
+                <div>• Operations: 25% (0.5%)</div>
+              </div>
             </div>
-            <div class="text-center">
-              <div class="text-2xl font-bold text-accent-blue mb-2">25%</div>
-              <div class="text-xs text-text-dim">STAKING_POOL</div>
-              <div class="text-xs text-text-secondary">Reward Distribution</div>
+            
+            <div>
+              <div class="text-text-dim font-mono mb-2">CREATOR_FEES (PumpFun/Swap)</div>
+              <div class="space-y-1 text-text-secondary">
+                <div>• Treasury: 40%</div>
+                <div>• <span class="text-accent-green">Staking Rewards: 40%</span></div>
+                <div>• Operations: 20%</div>
+              </div>
             </div>
-            <div class="text-center">
-              <div class="text-2xl font-bold text-accent-yellow mb-2">25%</div>
-              <div class="text-xs text-text-dim">DEVELOPMENT</div>
-              <div class="text-xs text-text-secondary">Team & Growth</div>
+          </div>
+          
+          <div class="mt-4 pt-4 border-t border-border">
+            <div class="text-xs text-text-dim">
+              Note: Stakers receive yield from BOTH loan fees AND creator fees, 
+              making this a staker-focused protocol.
             </div>
           </div>
         </div>

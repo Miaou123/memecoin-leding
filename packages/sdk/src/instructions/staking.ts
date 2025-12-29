@@ -179,20 +179,20 @@ export async function updateStakingConfig(
 export async function initializeFeeReceiver(
   program: Program,
   treasuryWallet: PublicKey,
-  devWallet: PublicKey,
+  operationsWallet: PublicKey,  // RENAMED from devWallet
   treasurySplitBps: number,
   stakingSplitBps: number,
-  devSplitBps: number
+  operationsSplitBps: number    // RENAMED from devSplitBps
 ): Promise<TransactionSignature> {
   const [feeReceiver] = pda.getFeeReceiverPDA(program.programId);
   const [stakingRewardVault] = pda.getRewardVaultPDA(program.programId);
   
   return program.methods
-    .initializeFeeReceiver(treasurySplitBps, stakingSplitBps, devSplitBps)
+    .initializeFeeReceiver(treasurySplitBps, stakingSplitBps, operationsSplitBps)
     .accounts({
       feeReceiver,
       treasuryWallet,
-      devWallet,
+      operationsWallet,  // RENAMED
       stakingRewardVault,
       authority: program.provider.publicKey\!,
       systemProgram: SystemProgram.programId,
@@ -214,7 +214,7 @@ export async function distributeCreatorFees(
     .accounts({
       feeReceiver,
       treasuryWallet: feeReceiverAccount.treasuryWallet,
-      devWallet: feeReceiverAccount.devWallet,
+      operationsWallet: feeReceiverAccount.operationsWallet,  // RENAMED
       stakingRewardVault: rewardVault,
       caller: program.provider.publicKey\!,
       systemProgram: SystemProgram.programId,
