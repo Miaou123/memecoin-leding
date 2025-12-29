@@ -4,8 +4,10 @@ import { zValidator } from '@hono/zod-validator';
 import { ApiResponse, TokenStats, PriceData } from '@memecoin-lending/types';
 import { tokenService } from '../services/token.service.js';
 import { priceService } from '../services/price.service.js';
+import { tokenVerificationService } from '../services/token-verification.service.js';
 import { prisma } from '../db/client.js';
 import { apiRateLimit } from '../middleware/rateLimit.js';
+import { logger } from '../utils/logger.js';
 
 const tokensRouter = new Hono();
 
@@ -125,6 +127,198 @@ tokensRouter.get('/:mint/liquidity', async (c) => {
       success: false,
       error: error.message,
     }, 400);
+  }
+});
+
+// Token verification endpoints
+
+// Validation schemas for verification
+const verifyTokenSchema = z.object({
+  mint: z.string()
+    .min(32, 'Mint address too short')
+    .max(44, 'Mint address too long')
+    .regex(/^[1-9A-HJ-NP-Za-km-z]+$/, 'Invalid base58 format'),
+});
+
+const batchVerifySchema = z.object({
+  mints: z.array(z.string().min(32).max(44).regex(/^[1-9A-HJ-NP-Za-km-z]+$/))
+    .min(1, 'At least one mint required')
+    .max(10, 'Maximum 10 mints allowed'),
+});
+
+// POST /tokens/verify - Verify a specific token
+tokensRouter.post(
+  '/verify',
+  zValidator('json', verifyTokenSchema),
+  async (c) => {
+    try {
+      const { mint } = c.req.valid('json');
+
+      logger.info(`Token verification request for: ${mint}`);
+
+      // Verify the token
+      const result = await tokenVerificationService.verifyToken(mint);
+
+      return c.json({
+        success: true,
+        data: result,
+      });
+    } catch (error) {
+      logger.error('Token verification error:', error);
+      return c.json({
+        success: false,
+        error: 'Internal server error',
+        message: error instanceof Error ? error.message : 'Unknown error',
+      }, 500);
+    }
+  }
+);
+
+// GET /tokens/pumpfun - Get list of PumpFun tokens
+const getPumpFunTokensSchema = z.object({
+  minLiquidity: z.string().optional().transform((val) => val ? parseFloat(val) : 0),
+  limit: z.string().optional().transform((val) => val ? parseInt(val) : 50),
+});
+
+tokensRouter.get(
+  '/pumpfun',
+  zValidator('query', getPumpFunTokensSchema),
+  async (c) => {
+    try {
+      const { minLiquidity, limit } = c.req.valid('query');
+
+      logger.info(`PumpFun tokens request - minLiquidity: ${minLiquidity}, limit: ${limit}`);
+
+      // Get PumpFun tokens
+      const tokens = await tokenVerificationService.getPumpFunTokens(minLiquidity || 0, limit || 50);
+
+      return c.json({
+        success: true,
+        data: {
+          tokens,
+          total: tokens.length,
+        },
+      });
+    } catch (error) {
+      logger.error('Get PumpFun tokens error:', error);
+      return c.json({
+        success: false,
+        error: 'Internal server error',
+        message: error instanceof Error ? error.message : 'Unknown error',
+      }, 500);
+    }
+  }
+);
+
+// POST /tokens/batch-verify - Verify multiple tokens
+tokensRouter.post(
+  '/batch-verify',
+  zValidator('json', batchVerifySchema),
+  async (c) => {
+    try {
+      const { mints } = c.req.valid('json');
+
+      logger.info(`Batch verification request for ${mints.length} tokens`);
+
+      // Verify all tokens in parallel
+      const verificationPromises = mints.map(mint => 
+        tokenVerificationService.verifyToken(mint)
+      );
+
+      const results = await Promise.all(verificationPromises);
+
+      return c.json({
+        success: true,
+        data: {
+          results,
+          total: results.length,
+        },
+      });
+    } catch (error) {
+      logger.error('Batch verification error:', error);
+      return c.json({
+        success: false,
+        error: 'Internal server error',
+        message: error instanceof Error ? error.message : 'Unknown error',
+      }, 500);
+    }
+  }
+);
+
+// GET /tokens/:mint/can-loan - Check if token can be used for loans
+tokensRouter.get('/:mint/can-loan', async (c) => {
+  try {
+    const mint = c.req.param('mint');
+
+    // Basic mint validation
+    if (!mint || mint.length < 32 || mint.length > 44) {
+      return c.json({
+        success: false,
+        error: 'Invalid mint address',
+      }, 400);
+    }
+
+    logger.info(`Can create loan check for: ${mint}`);
+
+    // Verify the token
+    const verification = await tokenVerificationService.verifyToken(mint);
+
+    const response = {
+      allowed: verification.isValid,
+      reason: verification.reason,
+      tier: verification.tier,
+    };
+
+    return c.json({
+      success: true,
+      data: response,
+    });
+  } catch (error) {
+    logger.error('Can create loan check error:', error);
+    return c.json({
+      success: false,
+      error: 'Internal server error',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    }, 500);
+  }
+});
+
+// GET /tokens/:mint/verify - Get verification info for a token
+tokensRouter.get('/:mint/verify', async (c) => {
+  try {
+    const mint = c.req.param('mint');
+
+    // Basic mint validation
+    if (!mint || mint.length < 32 || mint.length > 44) {
+      return c.json({
+        success: false,
+        error: 'Invalid mint address',
+      }, 400);
+    }
+
+    logger.info(`Token verification info request for: ${mint}`);
+
+    // Get token verification with full details
+    const verification = await tokenVerificationService.verifyToken(mint);
+
+    return c.json({
+      success: true,
+      data: {
+        verification,
+        metadata: {
+          checkedAt: new Date().toISOString(),
+          cacheable: true,
+          cacheExpiry: new Date(Date.now() + 300000).toISOString(), // 5 minutes
+        },
+      },
+    });
+  } catch (error) {
+    logger.error('Get token verification info error:', error);
+    return c.json({
+      success: false,
+      error: 'Internal server error',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    }, 500);
   }
 });
 

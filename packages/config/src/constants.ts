@@ -61,6 +61,7 @@ export const API_ENDPOINTS = {
   MAINNET: process.env.API_URL || 'https://api.memecoin-lending.com',
   DEVNET: 'https://api-devnet.memecoin-lending.com',
   LOCALNET: 'http://localhost:3001',
+  DEFAULT_API_BASE_URL: 'http://localhost:3001',
 };
 
 // WebSocket endpoints

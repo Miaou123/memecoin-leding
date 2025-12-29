@@ -1,4 +1,4 @@
-import { Show, For, createResource } from 'solid-js';
+import { Show, createMemo } from 'solid-js';
 import { A } from '@solidjs/router';
 import { createQuery } from '@tanstack/solid-query';
 import { Button } from '@/components/ui/Button';
@@ -15,6 +15,15 @@ export default function Home() {
     queryKey: ['tokens'],
     queryFn: () => api.getTokens(),
   }));
+
+  // Find most used token by total loans or volume
+  const topToken = createMemo(() => {
+    if (!tokens.data || tokens.data.length === 0) return null;
+    // Sort by total loans count (or you could use volume)
+    return [...tokens.data].sort((a, b) => 
+      (b.totalLoans || 0) - (a.totalLoans || 0)
+    )[0];
+  });
   
   return (
     <div class="space-y-8 font-mono">
@@ -22,7 +31,7 @@ export default function Home() {
       <div class="bg-bg-secondary border border-border p-6">
         <div class="text-xs text-text-dim mb-2">TERMINAL_PRO v1.0.0</div>
         <div class="text-xl font-bold text-accent-green mb-4">
-          {"> "}MEMECOIN_LENDING_PROTOCOL.init()
+          {">"} MEMECOIN_LENDING_PROTOCOL.init()
         </div>
         <div class="text-text-primary mb-4">
           DEPLOY_MEMECOIN_COLLATERAL {">"} RECEIVE_SOL_LIQUIDITY<br/>
@@ -39,89 +48,136 @@ export default function Home() {
       </div>
       
       {/* Protocol Stats Grid */}
-      <Show when={protocolStats.data}>
-        <div class="space-y-4">
-          <div class="text-xs text-text-dim">PROTOCOL_METRICS_REAL_TIME:</div>
-          <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div class="bg-bg-secondary border border-border p-4">
-              <div class="text-xs text-text-dim mb-1">TVL_LOCKED</div>
-              <div class="text-lg font-bold text-accent-green">
-                {formatSOL(protocolStats.data?.totalValueLocked || '0')}
-              </div>
-              <div class="text-xs text-text-secondary">SOL</div>
+      <div class="space-y-4">
+        <div class="text-xs text-text-dim">PROTOCOL_METRICS_REAL_TIME:</div>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div class="bg-bg-secondary border border-border p-4">
+            <div class="text-xs text-text-dim mb-1">TREASURY_BALANCE</div>
+            <div class="text-lg font-bold text-accent-green">
+              {protocolStats.isLoading ? '---' : formatSOL(protocolStats.data?.treasuryBalance || '0')}
             </div>
-            <div class="bg-bg-secondary border border-border p-4">
-              <div class="text-xs text-text-dim mb-1">ACTIVE_LOANS</div>
-              <div class="text-lg font-bold text-text-primary">
-                {formatNumber(protocolStats.data?.totalLoansActive || 0)}
-              </div>
-              <div class="text-xs text-text-secondary">COUNT</div>
+            <div class="text-xs text-text-secondary">SOL</div>
+          </div>
+          <div class="bg-bg-secondary border border-border p-4">
+            <div class="text-xs text-text-dim mb-1">TVL_LOCKED</div>
+            <div class="text-lg font-bold text-accent-blue">
+              {protocolStats.isLoading ? '---' : formatSOL(protocolStats.data?.totalValueLocked || '0')}
             </div>
-            <div class="bg-bg-secondary border border-border p-4">
-              <div class="text-xs text-text-dim mb-1">VOL_24H</div>
-              <div class="text-lg font-bold text-accent-blue">
-                {formatSOL(protocolStats.data?.volume24h || '0')}
-              </div>
-              <div class="text-xs text-text-secondary">SOL</div>
+            <div class="text-xs text-text-secondary">SOL</div>
+          </div>
+          <div class="bg-bg-secondary border border-border p-4">
+            <div class="text-xs text-text-dim mb-1">ACTIVE_LOANS</div>
+            <div class="text-lg font-bold text-accent-yellow">
+              {protocolStats.isLoading ? '---' : formatNumber(protocolStats.data?.totalLoansActive || 0)}
             </div>
-            <div class="bg-bg-secondary border border-border p-4">
-              <div class="text-xs text-text-dim mb-1">LIQ_24H</div>
-              <div class="text-lg font-bold text-accent-red">
-                {formatNumber(protocolStats.data?.liquidations24h || 0)}
-              </div>
-              <div class="text-xs text-text-secondary">COUNT</div>
+            <div class="text-xs text-text-secondary">COUNT</div>
+          </div>
+          <div class="bg-bg-secondary border border-border p-4">
+            <div class="text-xs text-text-dim mb-1">TOTAL_LOANS</div>
+            <div class="text-lg font-bold text-text-primary">
+              {protocolStats.isLoading ? '---' : formatNumber(protocolStats.data?.totalLoansIssued || 0)}
             </div>
+            <div class="text-xs text-text-secondary">ALL_TIME</div>
           </div>
         </div>
-      </Show>
-      
-      {/* Supported Tokens */}
+
+        {/* Second Row - More Stats */}
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div class="bg-bg-secondary border border-border p-4">
+            <div class="text-xs text-text-dim mb-1">VOL_24H</div>
+            <div class="text-lg font-bold text-accent-green">
+              {protocolStats.isLoading ? '---' : formatSOL(protocolStats.data?.volume24h || '0')}
+            </div>
+            <div class="text-xs text-text-secondary">SOL</div>
+          </div>
+          <div class="bg-bg-secondary border border-border p-4">
+            <div class="text-xs text-text-dim mb-1">FEES_EARNED</div>
+            <div class="text-lg font-bold text-accent-blue">
+              {protocolStats.isLoading ? '---' : formatSOL(protocolStats.data?.totalFeesEarned || '0')}
+            </div>
+            <div class="text-xs text-text-secondary">SOL</div>
+          </div>
+          <div class="bg-bg-secondary border border-border p-4">
+            <div class="text-xs text-text-dim mb-1">LIQUIDATIONS</div>
+            <div class="text-lg font-bold text-accent-red">
+              {protocolStats.isLoading ? '---' : formatNumber(protocolStats.data?.totalLiquidations || 0)}
+            </div>
+            <div class="text-xs text-text-secondary">COUNT</div>
+          </div>
+          <div class="bg-bg-secondary border border-border p-4">
+            <div class="text-xs text-text-dim mb-1">AVG_LTV</div>
+            <div class="text-lg font-bold text-text-primary">
+              {protocolStats.isLoading ? '---' : formatPercentage(protocolStats.data?.averageLtv || 0)}
+            </div>
+            <div class="text-xs text-text-secondary">RATIO</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Top Collateral Token */}
       <div class="space-y-4">
-        <div class="text-xs text-text-dim">SUPPORTED_COLLATERAL_TOKENS:</div>
-        <Show when={tokens.data}>
-          <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            <For each={tokens.data}>
-              {(token) => (
-                <div class="bg-bg-secondary border border-border p-4 hover:border-accent-green transition-colors">
-                  <div class="flex items-center justify-between mb-3 border-b border-border pb-2">
-                    <div>
-                      <div class="text-sm font-bold text-text-primary">{token.symbol}</div>
-                      <div class="text-xs text-text-dim">{token.name}</div>
+        <div class="text-xs text-text-dim">TOP_COLLATERAL_TOKEN:</div>
+        <Show 
+          when={!tokens.isLoading && topToken()} 
+          fallback={
+            <div class="bg-bg-secondary border border-border p-6 text-center text-text-dim">
+              {tokens.isLoading ? 'LOADING...' : 'NO_TOKEN_DATA'}
+            </div>
+          }
+        >
+          {(token) => (
+            <div class="bg-bg-secondary border-2 border-accent-green p-6">
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-4">
+                  <div class="w-12 h-12 bg-accent-green/20 border border-accent-green flex items-center justify-center">
+                    <span class="text-xl font-bold text-accent-green">
+                      {topToken()?.symbol?.slice(0, 2) || '??'}
+                    </span>
+                  </div>
+                  <div>
+                    <div class="text-lg font-bold text-text-primary">{topToken()?.symbol || 'UNKNOWN'}</div>
+                    <div class="text-xs text-text-dim">{topToken()?.name || 'Unknown Token'}</div>
+                    <div class="text-xs text-text-secondary mt-1">
+                      MINT: {topToken()?.mint?.slice(0, 8)}...{topToken()?.mint?.slice(-4)}
                     </div>
-                    <div class="text-right">
-                      <div class="text-sm font-bold text-accent-yellow">${formatNumber(token.currentPrice)}</div>
-                      <div class={`text-xs ${
-                        token.priceChange24h >= 0 ? 'text-accent-green' : 'text-accent-red'
-                      }`}>
-                        {token.priceChange24h >= 0 ? '+' : ''}{formatPercentage(token.priceChange24h)}%
+                  </div>
+                </div>
+                <div class="text-right">
+                  <div class="grid grid-cols-2 gap-6">
+                    <div>
+                      <div class="text-xs text-text-dim">TOTAL_LOANS</div>
+                      <div class="text-lg font-bold text-accent-green">
+                        {formatNumber(topToken()?.totalLoans || 0)}
+                      </div>
+                    </div>
+                    <div>
+                      <div class="text-xs text-text-dim">LTV_RATIO</div>
+                      <div class="text-lg font-bold text-accent-blue">
+                        {formatPercentage(topToken()?.ltvRatio || 0.5)}
+                      </div>
+                    </div>
+                    <div>
+                      <div class="text-xs text-text-dim">CURRENT_PRICE</div>
+                      <div class="text-lg font-bold text-text-primary">
+                        ${topToken()?.price?.toFixed(6) || '0.00'}
+                      </div>
+                    </div>
+                    <div>
+                      <div class="text-xs text-text-dim">24H_CHANGE</div>
+                      <div class={`text-lg font-bold ${(topToken()?.priceChange24h || 0) >= 0 ? 'text-accent-green' : 'text-accent-red'}`}>
+                        {(topToken()?.priceChange24h || 0) >= 0 ? '+' : ''}{formatPercentage(topToken()?.priceChange24h || 0)}
                       </div>
                     </div>
                   </div>
-                  
-                  <div class="space-y-2 text-xs mb-3">
-                    <div class="flex justify-between">
-                      <span class="text-text-dim">ACTIVE_LOANS:</span>
-                      <span class="text-text-primary">{token.activeLoans}</span>
-                    </div>
-                    <div class="flex justify-between">
-                      <span class="text-text-dim">BORROWED_SOL:</span>
-                      <span class="text-text-primary">{formatSOL(token.totalBorrowed)}</span>
-                    </div>
-                    <div class="flex justify-between">
-                      <span class="text-text-dim">AVAILABLE_LIQ:</span>
-                      <span class="text-accent-green">{formatSOL(token.availableLiquidity)}</span>
-                    </div>
-                  </div>
-                  
-                  <A href={`/borrow?token=${token.mint}`}>
-                    <Button variant="outline" size="sm" class="w-full">
-                      [BORROW_{token.symbol}]
-                    </Button>
-                  </A>
                 </div>
-              )}
-            </For>
-          </div>
+              </div>
+              <div class="mt-4 pt-4 border-t border-border flex gap-4">
+                <A href={`/borrow?token=${topToken()?.mint}`} class="flex-1">
+                  <Button size="lg" class="w-full">[BORROW_WITH_{topToken()?.symbol}]</Button>
+                </A>
+              </div>
+            </div>
+          )}
         </Show>
       </div>
       

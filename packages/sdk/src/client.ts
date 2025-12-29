@@ -9,6 +9,16 @@ import {
   CreateLoanParams,
   LoanTermsParams,
   LoanTerms,
+  TokenVerificationResult,
+  GetPumpFunTokensResponse,
+  CanCreateLoanResponse,
+  ManualWhitelistEntry,
+  CreateWhitelistEntryRequest,
+  UpdateWhitelistEntryRequest,
+  GetWhitelistEntriesRequest,
+  GetWhitelistEntriesResponse,
+  WhitelistStats,
+  WhitelistAuditLog,
 } from '@memecoin-lending/types';
 import { PROGRAM_ID, API_ENDPOINTS } from '@memecoin-lending/config';
 import * as instructions from './instructions';
@@ -30,6 +40,7 @@ export class MemecoinLendingClient {
   readonly provider: AnchorProvider;
   readonly program: Program;
   readonly priceClient: PriceClient;
+  private apiEndpoint: string;
 
   constructor(
     connection: Connection,
@@ -50,6 +61,7 @@ export class MemecoinLendingClient {
     }
     
     this.program = new Program(idl, this.provider);
+    this.apiEndpoint = apiEndpoint || API_ENDPOINTS.DEFAULT_API_BASE_URL;
     this.priceClient = new PriceClient(apiEndpoint);
   }
 
@@ -383,6 +395,602 @@ export class MemecoinLendingClient {
       priceDropToLiquidation,
       timeToExpiry,
       recommendations,
+    };
+  }
+
+  // Token Verification Methods
+
+  /**
+   * Verify if a token is a valid PumpFun token with sufficient liquidity
+   */
+  async verifyToken(mint: string): Promise<TokenVerificationResult> {
+    try {
+      const response = await fetch(`${this.apiEndpoint}/api/tokens/verify`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ mint }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const data = await response.json() as { success: boolean; data: TokenVerificationResult; error?: string };
+      
+      if (!data.success) {
+        throw new Error(data.error || 'Token verification failed');
+      }
+
+      return data.data;
+    } catch (error) {
+      console.error('Token verification error:', error);
+      throw new Error(`Failed to verify token ${mint}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  /**
+   * Get a list of verified PumpFun tokens
+   */
+  async getPumpFunTokens(minLiquidity?: number, limit?: number): Promise<TokenVerificationResult[]> {
+    try {
+      const queryParams = new URLSearchParams();
+      if (minLiquidity !== undefined) queryParams.set('minLiquidity', minLiquidity.toString());
+      if (limit !== undefined) queryParams.set('limit', limit.toString());
+
+      const response = await fetch(`${this.apiEndpoint}/api/tokens/pumpfun?${queryParams.toString()}`);
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const data = await response.json() as { success: boolean; data: GetPumpFunTokensResponse; error?: string };
+      
+      if (!data.success) {
+        throw new Error(data.error || 'Failed to fetch PumpFun tokens');
+      }
+
+      return data.data.tokens;
+    } catch (error) {
+      console.error('Get PumpFun tokens error:', error);
+      throw new Error(`Failed to fetch PumpFun tokens: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  /**
+   * Check if a token can be used for loan creation
+   */
+  async canCreateLoan(mint: string): Promise<{ allowed: boolean; reason?: string; tier?: string }> {
+    try {
+      const response = await fetch(`${this.apiEndpoint}/api/tokens/${mint}/can-loan`);
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const data = await response.json() as { success: boolean; data: CanCreateLoanResponse; error?: string };
+      
+      if (!data.success) {
+        throw new Error(data.error || 'Failed to check loan eligibility');
+      }
+
+      return data.data;
+    } catch (error) {
+      console.error('Can create loan check error:', error);
+      throw new Error(`Failed to check loan eligibility for ${mint}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  /**
+   * Batch verify multiple tokens
+   */
+  async batchVerifyTokens(mints: string[]): Promise<TokenVerificationResult[]> {
+    if (mints.length === 0) {
+      return [];
+    }
+
+    if (mints.length > 10) {
+      throw new Error('Maximum 10 tokens allowed for batch verification');
+    }
+
+    try {
+      const response = await fetch(`${this.apiEndpoint}/api/tokens/batch-verify`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ mints }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const data = await response.json() as { success: boolean; data: { results: TokenVerificationResult[]; total: number }; error?: string };
+      
+      if (!data.success) {
+        throw new Error(data.error || 'Batch verification failed');
+      }
+
+      return data.data.results;
+    } catch (error) {
+      console.error('Batch verification error:', error);
+      throw new Error(`Failed to batch verify tokens: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  /**
+   * Get detailed token verification information
+   */
+  async getTokenVerificationInfo(mint: string): Promise<{
+    verification: TokenVerificationResult;
+    metadata: {
+      checkedAt: string;
+      cacheable: boolean;
+      cacheExpiry: string;
+    };
+  }> {
+    try {
+      const response = await fetch(`${this.apiEndpoint}/api/tokens/${mint}/verify`);
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const data = await response.json() as { 
+        success: boolean; 
+        data: {
+          verification: TokenVerificationResult;
+          metadata: {
+            checkedAt: string;
+            cacheable: boolean;
+            cacheExpiry: string;
+          };
+        }; 
+        error?: string 
+      };
+      
+      if (!data.success) {
+        throw new Error(data.error || 'Failed to get token verification info');
+      }
+
+      return data.data;
+    } catch (error) {
+      console.error('Get token verification info error:', error);
+      throw new Error(`Failed to get verification info for ${mint}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  /**
+   * Enhanced loan creation with token verification
+   */
+  async createLoanWithVerification(params: CreateLoanParams): Promise<{
+    transactionSignature: TransactionSignature;
+    verification: TokenVerificationResult;
+  }> {
+    // First verify the token
+    const verification = await this.verifyToken(params.tokenMint);
+    
+    if (!verification.isValid) {
+      throw new Error(`Token verification failed: ${verification.reason}`);
+    }
+
+    // Create the loan
+    const transactionSignature = await this.createLoan(params);
+
+    return {
+      transactionSignature,
+      verification,
+    };
+  }
+
+  /**
+   * Validate token for loan creation (convenience method)
+   */
+  async validateTokenForLoan(mint: string): Promise<{
+    isValid: boolean;
+    canCreateLoan: boolean;
+    verification: TokenVerificationResult;
+    loanEligibility: CanCreateLoanResponse;
+    errors: string[];
+    warnings: string[];
+  }> {
+    const errors: string[] = [];
+    const warnings: string[] = [];
+
+    try {
+      // Parallel verification and loan eligibility check
+      const [verification, loanEligibility] = await Promise.all([
+        this.verifyToken(mint),
+        this.canCreateLoan(mint),
+      ]);
+
+      // Check verification
+      if (!verification.isValid) {
+        errors.push(verification.reason || 'Token verification failed');
+      }
+
+      // Check loan eligibility
+      if (!loanEligibility.allowed) {
+        errors.push(loanEligibility.reason || 'Token not eligible for loans');
+      }
+
+      // Add warnings for low-tier tokens
+      if (verification.tier === 'bronze') {
+        warnings.push('Bronze tier token - higher risk, lower LTV (50%)');
+      } else if (verification.tier === 'silver') {
+        warnings.push('Silver tier token - moderate risk, medium LTV (60%)');
+      }
+
+      // Add liquidity warnings
+      if (verification.liquidity < 100000) {
+        warnings.push(`Low liquidity: $${verification.liquidity.toFixed(2)}`);
+      }
+
+      return {
+        isValid: verification.isValid,
+        canCreateLoan: verification.isValid && loanEligibility.allowed,
+        verification,
+        loanEligibility,
+        errors,
+        warnings,
+      };
+    } catch (error) {
+      errors.push(`Validation failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+
+      return {
+        isValid: false,
+        canCreateLoan: false,
+        verification: {
+          isValid: false,
+          mint,
+          liquidity: 0,
+          reason: 'Validation failed',
+          verifiedAt: Date.now(),
+        },
+        loanEligibility: {
+          allowed: false,
+          reason: 'Validation failed',
+        },
+        errors,
+        warnings,
+      };
+    }
+  }
+
+  // Manual Whitelist Management Methods (Admin only)
+
+  /**
+   * Add a token to the manual whitelist
+   */
+  async addToWhitelist(
+    request: CreateWhitelistEntryRequest,
+    adminHeaders: Record<string, string>
+  ): Promise<ManualWhitelistEntry> {
+    try {
+      const response = await fetch(`${this.apiEndpoint}/api/admin/whitelist`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...adminHeaders,
+        },
+        body: JSON.stringify(request),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const data = await response.json() as { success: boolean; data: ManualWhitelistEntry; error?: string };
+
+      if (!data.success) {
+        throw new Error(data.error || 'Failed to add to whitelist');
+      }
+
+      return data.data;
+    } catch (error) {
+      console.error('Add to whitelist error:', error);
+      throw new Error(`Failed to add token to whitelist: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  /**
+   * Update a whitelist entry
+   */
+  async updateWhitelistEntry(
+    mint: string,
+    request: UpdateWhitelistEntryRequest,
+    adminHeaders: Record<string, string>
+  ): Promise<ManualWhitelistEntry> {
+    try {
+      const response = await fetch(`${this.apiEndpoint}/api/admin/whitelist/${mint}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          ...adminHeaders,
+        },
+        body: JSON.stringify(request),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const data = await response.json() as { success: boolean; data: ManualWhitelistEntry; error?: string };
+
+      if (!data.success) {
+        throw new Error(data.error || 'Failed to update whitelist entry');
+      }
+
+      return data.data;
+    } catch (error) {
+      console.error('Update whitelist entry error:', error);
+      throw new Error(`Failed to update whitelist entry: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  /**
+   * Remove a token from the whitelist
+   */
+  async removeFromWhitelist(
+    mint: string,
+    reason: string,
+    adminHeaders: Record<string, string>
+  ): Promise<void> {
+    try {
+      const response = await fetch(`${this.apiEndpoint}/api/admin/whitelist/${mint}`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          ...adminHeaders,
+        },
+        body: JSON.stringify({ reason }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const data = await response.json() as { success: boolean; error?: string };
+
+      if (!data.success) {
+        throw new Error(data.error || 'Failed to remove from whitelist');
+      }
+    } catch (error) {
+      console.error('Remove from whitelist error:', error);
+      throw new Error(`Failed to remove token from whitelist: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  /**
+   * Enable a whitelist entry
+   */
+  async enableWhitelistEntry(
+    mint: string,
+    adminHeaders: Record<string, string>
+  ): Promise<void> {
+    try {
+      const response = await fetch(`${this.apiEndpoint}/api/admin/whitelist/${mint}/enable`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...adminHeaders,
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const data = await response.json() as { success: boolean; error?: string };
+
+      if (!data.success) {
+        throw new Error(data.error || 'Failed to enable whitelist entry');
+      }
+    } catch (error) {
+      console.error('Enable whitelist entry error:', error);
+      throw new Error(`Failed to enable whitelist entry: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  /**
+   * Disable a whitelist entry
+   */
+  async disableWhitelistEntry(
+    mint: string,
+    reason: string,
+    adminHeaders: Record<string, string>
+  ): Promise<void> {
+    try {
+      const response = await fetch(`${this.apiEndpoint}/api/admin/whitelist/${mint}/disable`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...adminHeaders,
+        },
+        body: JSON.stringify({ reason }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const data = await response.json() as { success: boolean; error?: string };
+
+      if (!data.success) {
+        throw new Error(data.error || 'Failed to disable whitelist entry');
+      }
+    } catch (error) {
+      console.error('Disable whitelist entry error:', error);
+      throw new Error(`Failed to disable whitelist entry: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  /**
+   * Get whitelist entries with filters
+   */
+  async getWhitelistEntries(
+    request: GetWhitelistEntriesRequest,
+    adminHeaders: Record<string, string>
+  ): Promise<GetWhitelistEntriesResponse> {
+    try {
+      const queryParams = new URLSearchParams();
+      
+      if (request.filters?.mint) queryParams.set('mint', request.filters.mint);
+      if (request.filters?.tier) queryParams.set('tier', request.filters.tier);
+      if (request.filters?.enabled !== undefined) queryParams.set('enabled', request.filters.enabled.toString());
+      if (request.filters?.addedBy) queryParams.set('addedBy', request.filters.addedBy);
+      if (request.filters?.tags) queryParams.set('tags', request.filters.tags.join(','));
+      if (request.filters?.search) queryParams.set('search', request.filters.search);
+      if (request.sortBy) queryParams.set('sortBy', request.sortBy);
+      if (request.sortOrder) queryParams.set('sortOrder', request.sortOrder);
+      if (request.page) queryParams.set('page', request.page.toString());
+      if (request.limit) queryParams.set('limit', request.limit.toString());
+
+      const response = await fetch(`${this.apiEndpoint}/api/admin/whitelist?${queryParams.toString()}`, {
+        headers: {
+          ...adminHeaders,
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const data = await response.json() as { success: boolean; data: GetWhitelistEntriesResponse; error?: string };
+
+      if (!data.success) {
+        throw new Error(data.error || 'Failed to get whitelist entries');
+      }
+
+      return data.data;
+    } catch (error) {
+      console.error('Get whitelist entries error:', error);
+      throw new Error(`Failed to get whitelist entries: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  /**
+   * Get a specific whitelist entry
+   */
+  async getWhitelistEntry(
+    mint: string,
+    adminHeaders: Record<string, string>
+  ): Promise<ManualWhitelistEntry> {
+    try {
+      const response = await fetch(`${this.apiEndpoint}/api/admin/whitelist/${mint}`, {
+        headers: {
+          ...adminHeaders,
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const data = await response.json() as { success: boolean; data: ManualWhitelistEntry; error?: string };
+
+      if (!data.success) {
+        throw new Error(data.error || 'Failed to get whitelist entry');
+      }
+
+      return data.data;
+    } catch (error) {
+      console.error('Get whitelist entry error:', error);
+      throw new Error(`Failed to get whitelist entry: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  /**
+   * Get whitelist statistics
+   */
+  async getWhitelistStats(
+    adminHeaders: Record<string, string>
+  ): Promise<WhitelistStats> {
+    try {
+      const response = await fetch(`${this.apiEndpoint}/api/admin/whitelist/stats`, {
+        headers: {
+          ...adminHeaders,
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const data = await response.json() as { success: boolean; data: WhitelistStats; error?: string };
+
+      if (!data.success) {
+        throw new Error(data.error || 'Failed to get whitelist stats');
+      }
+
+      return data.data;
+    } catch (error) {
+      console.error('Get whitelist stats error:', error);
+      throw new Error(`Failed to get whitelist stats: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  /**
+   * Get audit logs for whitelist changes
+   */
+  async getWhitelistAuditLogs(
+    mint?: string,
+    adminAddress?: string,
+    limit?: number,
+    adminHeaders?: Record<string, string>
+  ): Promise<WhitelistAuditLog[]> {
+    try {
+      let url = `${this.apiEndpoint}/api/admin/whitelist/audit-logs/all`;
+      
+      if (mint) {
+        url = `${this.apiEndpoint}/api/admin/whitelist/${mint}/audit-logs`;
+      }
+
+      const queryParams = new URLSearchParams();
+      if (adminAddress) queryParams.set('adminAddress', adminAddress);
+      if (limit) queryParams.set('limit', limit.toString());
+
+      if (queryParams.toString()) {
+        url += `?${queryParams.toString()}`;
+      }
+
+      const response = await fetch(url, {
+        headers: {
+          ...(adminHeaders || {}),
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const data = await response.json() as { success: boolean; data: WhitelistAuditLog[]; error?: string };
+
+      if (!data.success) {
+        throw new Error(data.error || 'Failed to get audit logs');
+      }
+
+      return data.data;
+    } catch (error) {
+      console.error('Get audit logs error:', error);
+      throw new Error(`Failed to get audit logs: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  /**
+   * Helper method to create admin authentication headers
+   */
+  createAdminHeaders(adminPrivateKey: string): Record<string, string> {
+    // This would implement signature-based authentication
+    // For now, return basic headers structure
+    const adminAddress = 'ADMIN_ADDRESS_FROM_PRIVATE_KEY'; // TODO: derive from private key
+    
+    return {
+      'x-admin-address': adminAddress,
+      'x-signature': 'SIGNATURE_FROM_MESSAGE', // TODO: implement message signing
+      'x-timestamp': Date.now().toString(),
     };
   }
 }

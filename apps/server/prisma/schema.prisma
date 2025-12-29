@@ -120,3 +120,46 @@ model ProtocolStats {
   liquidations24h      Int
   updatedAt            DateTime @updatedAt
 }
+
+model ManualWhitelist {
+  id                   String   @id @default(uuid())
+  mint                 String   @unique
+  symbol               String?
+  name                 String?
+  tier                 String   // 'bronze', 'silver', 'gold'
+  ltvBps               Int
+  interestRateBps      Int
+  minLoanAmount        String
+  maxLoanAmount        String
+  enabled              Boolean  @default(true)
+  addedBy              String   // admin wallet address
+  addedAt              DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  reason               String?
+  notes                String?
+  externalUrl          String?
+  logoUrl              String?
+  tags                 String[] // Array of tags for categorization
+  
+  auditLogs            WhitelistAuditLog[]
+  
+  @@index([mint])
+  @@index([enabled])
+  @@index([tier])
+  @@index([addedBy])
+}
+
+model WhitelistAuditLog {
+  id                   String         @id @default(uuid())
+  entryId              String
+  entry                ManualWhitelist @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  action               String         // 'add', 'update', 'enable', 'disable', 'remove'
+  adminAddress         String
+  changes              Json?          // Store what changed
+  timestamp            DateTime       @default(now())
+  reason               String?
+  
+  @@index([entryId])
+  @@index([adminAddress])
+  @@index([timestamp])
+}

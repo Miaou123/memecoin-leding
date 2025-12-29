@@ -1,0 +1,287 @@
+#!/usr/bin/env tsx
+
+import { execSync } from 'child_process';
+import fs from 'fs';
+import path from 'path';
+import chalk from 'chalk';
+import { Command } from 'commander';
+
+const ROOT_DIR = path.resolve(__dirname, '..');
+
+interface DeployConfig {
+  network: 'devnet' | 'mainnet' | 'localnet';
+  skipKeygen: boolean;
+  skipInit: boolean;
+  fundAmount: number;
+  adminKeypair: string;
+}
+
+function exec(cmd: string, options: { cwd?: string; silent?: boolean } = {}): string {
+  const { cwd = ROOT_DIR, silent = false } = options;
+  if (!silent) {
+    console.log(chalk.gray(`$ ${cmd}`));
+  }
+  try {
+    return execSync(cmd, { 
+      cwd, 
+      encoding: 'utf8',
+      stdio: silent ? 'pipe' : 'inherit'
+    }) as string;
+  } catch (error: any) {
+    if (silent) {
+      return error.stdout || '';
+    }
+    throw error;
+  }
+}
+
+function execCapture(cmd: string, cwd = ROOT_DIR): string {
+  console.log(chalk.gray(`$ ${cmd}`));
+  return execSync(cmd, { cwd, encoding: 'utf8' }).toString().trim();
+}
+
+function updateProgramId(oldId: string, newId: string) {
+  console.log(chalk.blue(`\n📝 Updating program ID: ${oldId} → ${newId}\n`));
+  
+  const filesToUpdate = [
+    'packages/config/src/constants.ts',
+    'packages/config/src/networks.ts',
+    'Anchor.toml',
+    'programs/memecoin-lending/src/lib.rs',
+    'apps/web/.env',
+    'apps/web/.env.local',
+    'apps/server/.env',
+    'apps/server/.env.local',
+    '.env',
+  ];
+  
+  for (const file of filesToUpdate) {
+    const filePath = path.join(ROOT_DIR, file);
+    if (fs.existsSync(filePath)) {
+      let content = fs.readFileSync(filePath, 'utf8');
+      if (content.includes(oldId)) {
+        content = content.replace(new RegExp(oldId, 'g'), newId);
+        fs.writeFileSync(filePath, content);
+        console.log(chalk.green(`  ✓ Updated ${file}`));
+      }
+    }
+  }
+  
+  // Also update any occurrence of placeholder ID
+  const placeholderId = 'MCLend1111111111111111111111111111111111111';
+  for (const file of filesToUpdate) {
+    const filePath = path.join(ROOT_DIR, file);
+    if (fs.existsSync(filePath)) {
+      let content = fs.readFileSync(filePath, 'utf8');
+      if (content.includes(placeholderId)) {
+        content = content.replace(new RegExp(placeholderId, 'g'), newId);
+        fs.writeFileSync(filePath, content);
+        console.log(chalk.green(`  ✓ Updated placeholder in ${file}`));
+      }
+    }
+  }
+}
+
+function getCurrentProgramId(): string | null {
+  const keypairPath = path.join(ROOT_DIR, 'target/deploy/memecoin_lending-keypair.json');
+  if (fs.existsSync(keypairPath)) {
+    try {
+      return execCapture(`solana address -k ${keypairPath}`);
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+function closeExistingProgram(programId: string, network: string): boolean {
+  console.log(chalk.blue(`\n🗑️  Attempting to close existing program: ${programId}\n`));
+  try {
+    exec(`solana program close ${programId} --url ${network} --bypass-warning`, { silent: true });
+    console.log(chalk.green(`  ✓ Closed program and recovered SOL`));
+    return true;
+  } catch {
+    console.log(chalk.yellow(`  ⚠ Could not close program (may not exist or already closed)`));
+    return false;
+  }
+}
+
+async function deploy(config: DeployConfig) {
+  const startTime = Date.now();
+  
+  console.log(chalk.blue.bold('\n🚀 FULL DEPLOYMENT SCRIPT\n'));
+  console.log(chalk.gray('─'.repeat(60)));
+  console.log(chalk.white(`  Network:      ${config.network}`));
+  console.log(chalk.white(`  Skip Keygen:  ${config.skipKeygen}`));
+  console.log(chalk.white(`  Skip Init:    ${config.skipInit}`));
+  console.log(chalk.white(`  Fund Amount:  ${config.fundAmount} SOL`));
+  console.log(chalk.gray('─'.repeat(60)));
+
+  const networkUrl = {
+    devnet: 'https://api.devnet.solana.com',
+    mainnet: 'https://api.mainnet-beta.solana.com',
+    localnet: 'http://localhost:8899',
+  }[config.network];
+
+  // Step 1: Get current program ID (if exists)
+  const oldProgramId = getCurrentProgramId();
+  console.log(chalk.blue(`\n📍 Current Program ID: ${oldProgramId || 'None'}\n`));
+
+  // Step 2: Close existing program (optional, to recover SOL)
+  if (oldProgramId && !config.skipKeygen && config.network !== 'mainnet') {
+    closeExistingProgram(oldProgramId, networkUrl);
+  }
+
+  // Step 3: Generate new keypair
+  let newProgramId: string;
+  if (config.skipKeygen && oldProgramId) {
+    newProgramId = oldProgramId;
+    console.log(chalk.yellow(`\n⏭️  Skipping keygen, using existing: ${newProgramId}\n`));
+  } else {
+    console.log(chalk.blue('\n🔑 Generating new program keypair...\n'));
+    exec('solana-keygen new -o target/deploy/memecoin_lending-keypair.json --force --no-bip39-passphrase');
+    newProgramId = execCapture('solana address -k target/deploy/memecoin_lending-keypair.json');
+    console.log(chalk.green(`  ✓ New Program ID: ${newProgramId}`));
+  }
+
+  // Step 4: Sync anchor keys
+  console.log(chalk.blue('\n🔄 Syncing Anchor keys...\n'));
+  exec('anchor keys sync');
+
+  // Step 5: Update program ID in all files
+  if (oldProgramId && oldProgramId !== newProgramId) {
+    updateProgramId(oldProgramId, newProgramId);
+  }
+
+  // Step 6: Build the program
+  console.log(chalk.blue('\n🔨 Building Anchor program...\n'));
+  exec('anchor build');
+
+  // Step 7: Build packages
+  console.log(chalk.blue('\n📦 Building TypeScript packages...\n'));
+  exec('pnpm build', { cwd: path.join(ROOT_DIR, 'packages/config') });
+  exec('pnpm build', { cwd: path.join(ROOT_DIR, 'packages/sdk') });
+
+  // Step 8: Deploy
+  console.log(chalk.blue(`\n🚀 Deploying to ${config.network}...\n`));
+  exec(`anchor deploy --provider.cluster ${config.network}`);
+
+  // Step 9: Verify deployment
+  console.log(chalk.blue('\n✅ Verifying deployment...\n'));
+  try {
+    const result = execCapture(`solana program show ${newProgramId} --url ${networkUrl}`);
+    console.log(chalk.green('  ✓ Program deployed successfully'));
+    console.log(chalk.gray(result));
+  } catch {
+    console.log(chalk.red('  ✗ Could not verify deployment'));
+  }
+
+  // Step 10: Initialize protocol
+  if (!config.skipInit) {
+    console.log(chalk.blue('\n🔧 Initializing protocol...\n'));
+    try {
+      exec(`npx tsx initialize-protocol.ts --network ${config.network}`, {
+        cwd: path.join(ROOT_DIR, 'scripts'),
+      });
+    } catch (error) {
+      console.log(chalk.yellow('  ⚠ Protocol may already be initialized'));
+    }
+  }
+
+  // Step 11: Fund treasury
+  if (config.fundAmount > 0) {
+    console.log(chalk.blue(`\n💰 Funding treasury with ${config.fundAmount} SOL...\n`));
+    try {
+      exec(`npx tsx fund-treasury.ts --network ${config.network} --amount ${config.fundAmount}`, {
+        cwd: path.join(ROOT_DIR, 'scripts'),
+      });
+    } catch (error) {
+      console.log(chalk.yellow('  ⚠ Could not fund treasury'));
+    }
+  }
+
+  // Step 12: Save deployment info
+  const deploymentInfo = {
+    programId: newProgramId,
+    network: config.network,
+    deployedAt: new Date().toISOString(),
+    previousProgramId: oldProgramId,
+    fundAmount: config.fundAmount,
+  };
+
+  const deploymentsDir = path.join(ROOT_DIR, 'deployments');
+  if (!fs.existsSync(deploymentsDir)) {
+    fs.mkdirSync(deploymentsDir);
+  }
+
+  const deploymentFile = path.join(deploymentsDir, `${config.network}-latest.json`);
+  fs.writeFileSync(deploymentFile, JSON.stringify(deploymentInfo, null, 2));
+
+  const historyFile = path.join(deploymentsDir, `${config.network}-history.json`);
+  let history: any[] = [];
+  if (fs.existsSync(historyFile)) {
+    history = JSON.parse(fs.readFileSync(historyFile, 'utf8'));
+  }
+  history.push(deploymentInfo);
+  fs.writeFileSync(historyFile, JSON.stringify(history, null, 2));
+
+  // Summary
+  const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+  
+  console.log(chalk.blue.bold('\n' + '═'.repeat(60)));
+  console.log(chalk.green.bold('  ✅ DEPLOYMENT COMPLETE'));
+  console.log(chalk.blue.bold('═'.repeat(60)));
+  console.log('');
+  console.log(chalk.white(`  Program ID:    ${newProgramId}`));
+  console.log(chalk.white(`  Network:       ${config.network}`));
+  console.log(chalk.white(`  Duration:      ${duration}s`));
+  console.log(chalk.white(`  Deployment:    ${deploymentFile}`));
+  console.log('');
+  console.log(chalk.gray('  Explorer:'));
+  console.log(chalk.cyan(`  https://explorer.solana.com/address/${newProgramId}?cluster=${config.network}`));
+  console.log('');
+  console.log(chalk.blue.bold('═'.repeat(60) + '\n'));
+
+  // Return info for programmatic use
+  return deploymentInfo;
+}
+
+// CLI
+const program = new Command();
+
+program
+  .name('deploy-full')
+  .description('Full deployment script for memecoin-lending protocol')
+  .option('-n, --network <network>', 'Network: devnet, mainnet, localnet', 'devnet')
+  .option('--skip-keygen', 'Skip keypair generation, use existing', false)
+  .option('--skip-init', 'Skip protocol initialization', false)
+  .option('--fund <amount>', 'Amount of SOL to fund treasury', '0.5')
+  .option('--no-fund', 'Skip treasury funding')
+  .option('-k, --admin-keypair <path>', 'Path to admin keypair', './keys/admin.json')
+  .action(async (options) => {
+    // Safety check for mainnet
+    if (options.network === 'mainnet') {
+      console.log(chalk.red.bold('\n⚠️  WARNING: You are deploying to MAINNET!\n'));
+      console.log(chalk.yellow('This will use real SOL. Are you sure?'));
+      console.log(chalk.gray('Add --confirm-mainnet to proceed\n'));
+      
+      if (!process.argv.includes('--confirm-mainnet')) {
+        process.exit(1);
+      }
+    }
+
+    try {
+      await deploy({
+        network: options.network,
+        skipKeygen: options.skipKeygen,
+        skipInit: options.skipInit,
+        fundAmount: options.fund === false ? 0 : parseFloat(options.fund),
+        adminKeypair: options.adminKeypair,
+      });
+    } catch (error) {
+      console.error(chalk.red('\n❌ Deployment failed:'), error);
+      process.exit(1);
+    }
+  });
+
+program.parse();
