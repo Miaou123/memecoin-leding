@@ -42,8 +42,8 @@ export function useTokenVerification(mint: string): UseTokenVerificationResult {
   const [data, setData] = useState<TokenVerificationResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   
-  const debounceTimeoutRef = useRef<NodeJS.Timeout>();
-  const abortControllerRef = useRef<AbortController>();
+  const debounceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   const verifyToken = useCallback(async (mintToVerify: string, forceRefresh = false) => {
     if (!mintToVerify.trim()) {

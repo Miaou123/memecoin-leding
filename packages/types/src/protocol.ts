@@ -99,6 +99,7 @@ export interface LoanTermsParams {
   durationSeconds: number;
   currentPrice: string;
   tokenConfig: TokenConfig;
+  tokenDecimals?: number; // Default to 6 for PumpFun tokens
 }
 
 export interface LoanTerms {

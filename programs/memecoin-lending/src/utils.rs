@@ -35,7 +35,13 @@ impl SafeMath {
     }
 
     pub fn mul(a: u64, b: u64) -> Result<u64> {
-        a.checked_mul(b).ok_or(LendingError::MathOverflow.into())
+        // Use u128 to prevent overflow
+        let result = (a as u128).checked_mul(b as u128)
+            .ok_or(LendingError::MathOverflow)?;
+        if result > u64::MAX as u128 {
+            return Err(LendingError::MathOverflow.into());
+        }
+        Ok(result as u64)
     }
 
     pub fn div(a: u64, b: u64) -> Result<u64> {
@@ -70,8 +76,26 @@ impl LoanCalculator {
         token_price: u64,
         ltv_bps: u16,
     ) -> Result<u64> {
-        let collateral_value = SafeMath::mul(collateral_amount, token_price)?;
-        SafeMath::mul_div(collateral_value, ltv_bps as u64, BPS_DIVISOR)
+        // Use u128 for the entire calculation to prevent overflow
+        const PRICE_SCALE: u128 = 1_000_000_000; // 10^9 - matches read_pumpfun_price scaling // 10^6
+        
+        let collateral_u128 = collateral_amount as u128;
+        let price_u128 = token_price as u128;
+        let ltv_u128 = ltv_bps as u128;
+        let bps_divisor_u128 = BPS_DIVISOR as u128;
+        
+        // Calculate: (collateral_amount * token_price * ltv_bps) / (PRICE_SCALE * BPS_DIVISOR)
+        let loan_amount = collateral_u128
+            .checked_mul(price_u128).ok_or(LendingError::MathOverflow)?
+            .checked_mul(ltv_u128).ok_or(LendingError::MathOverflow)?
+            .checked_div(PRICE_SCALE).ok_or(LendingError::DivisionByZero)?
+            .checked_div(bps_divisor_u128).ok_or(LendingError::DivisionByZero)?;
+        
+        if loan_amount > u64::MAX as u128 {
+            return Err(LendingError::MathOverflow.into());
+        }
+        
+        Ok(loan_amount as u64)
     }
 
     /// Calculate interest owed on a loan
@@ -186,8 +210,8 @@ impl PriceFeedUtils {
 
     /// Read price from Pumpfun bonding curve
     pub fn read_pumpfun_price(pool_data: &[u8]) -> Result<u64> {
-        const VIRTUAL_SOL_OFFSET: usize = 8;
-        const VIRTUAL_TOKEN_OFFSET: usize = 16;
+        const VIRTUAL_SOL_OFFSET: usize = 16;
+        const VIRTUAL_TOKEN_OFFSET: usize = 8;
         
         require!(pool_data.len() >= 24, LendingError::InvalidPriceFeed);
         
@@ -200,13 +224,20 @@ impl PriceFeedUtils {
         
         require!(virtual_token > 0, LendingError::InvalidPriceFeed);
         
+        // Calculate price per token in lamports
+        // Price = virtual_sol_reserves * 10^6 / virtual_token_reserves
+        // This gives us lamports per smallest token unit (matches SDK calculation)
         let price = (virtual_sol as u128)
-            .checked_mul(1_000_000_000)
+            .checked_mul(1_000_000_000) // 10^9 to match PRICE_SCALE in calculate_loan_amount
             .ok_or(LendingError::MathOverflow)?
             .checked_div(virtual_token as u128)
-            .ok_or(LendingError::DivisionByZero)? as u64;
+            .ok_or(LendingError::DivisionByZero)?;
         
-        Ok(price)
+        if price > u64::MAX as u128 {
+            return Err(LendingError::MathOverflow.into());
+        }
+        
+        Ok(price as u64)
     }
 
     /// Unified price reader based on pool type

@@ -165,6 +165,39 @@ loansRouter.post(
   }
 );
 
+// Create loan (unsigned) - no pre-auth required since transaction signature proves ownership
+const createLoanUnsignedSchema = z.object({
+  tokenMint: z.string(),
+  collateralAmount: z.string(),
+  durationSeconds: z.coerce.number().min(43200).max(604800), // 12h - 7d
+  borrower: z.string(), // Wallet address passed directly
+});
+
+loansRouter.post(
+  '/unsigned', 
+  createLoanRateLimit,
+  zValidator('json', createLoanUnsignedSchema),
+  async (c) => {
+    const body = c.req.valid('json');
+    
+    try {
+      const result = await loanService.createLoan(body);
+      
+      return c.json<ApiResponse<{ transaction: string }>>({
+        success: true,
+        data: {
+          transaction: result.transaction,  // Base64 encoded unsigned TX
+        },
+      }, 201);
+    } catch (error: any) {
+      return c.json<ApiResponse<null>>({
+        success: false,
+        error: error.message,
+      }, 400);
+    }
+  }
+);
+
 // Repay loan (requires auth)
 loansRouter.post('/:pubkey/repay', requireAuth, async (c) => {
   const pubkey = c.req.param('pubkey');

@@ -48,9 +48,13 @@ export default function Borrow() {
         return null;
       }
       
+      // Convert UI amount to raw units (multiply by 10^decimals)
+      const tokenDecimals = 6; // PumpFun tokens use 6 decimals
+      const rawCollateralAmount = (parseFloat(amount || '0') * Math.pow(10, tokenDecimals)).toString();
+      
       return api.estimateLoan({
         tokenMint: token,
-        collateralAmount: amount,
+        collateralAmount: rawCollateralAmount,
         durationSeconds: dur,
       });
     },
@@ -76,37 +80,37 @@ export default function Borrow() {
         }
       }
       
-      // Sign authentication message
-      const timestamp = Date.now();
-      const message = `Sign in to Memecoin Lending Protocol\nTimestamp: ${timestamp}`;
-      const messageBytes = new TextEncoder().encode(message);
-      const authSignature = await wallet.signMessage(messageBytes);
+      // 1. Get unsigned transaction from server (no pre-auth needed)
+      // Convert UI amount to raw units (multiply by 10^decimals)
+      const tokenDecimals = 6; // PumpFun tokens use 6 decimals
+      const rawCollateralAmount = (parseFloat(collateralAmount() || '0') * Math.pow(10, tokenDecimals)).toString();
       
-      const authHeaders = {
-        'X-Signature': btoa(String.fromCharCode(...authSignature)),
-        'X-Public-Key': wallet.publicKey()!.toString(),
-        'X-Timestamp': timestamp.toString(),
-      };
-      
-      // 1. Get unsigned transaction from server
-      const response = await api.createLoan({
+      const response = await api.createLoanUnsigned({
         tokenMint: selectedToken()!,
-        collateralAmount: collateralAmount(),
+        collateralAmount: rawCollateralAmount,
         durationSeconds: duration(),
-      }, authHeaders);
+        borrower: wallet.publicKey()!.toString(),
+      });
       
-      // 2. Deserialize transaction
+      // 2. Deserialize and prepare transaction
       const tx = Transaction.from(Buffer.from(response.transaction, 'base64'));
+      const connection = new Connection(import.meta.env.VITE_SOLANA_RPC_URL || 'https://api.devnet.solana.com');
+      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
+      tx.recentBlockhash = blockhash;
+      tx.feePayer = wallet.publicKey()!;
       
-      // 3. Sign with user's wallet
+      // 3. Sign with user's wallet (this proves ownership)
       const signedTx = await wallet.signTransaction!(tx);
       
       // 4. Send to Solana
-      const connection = new Connection(import.meta.env.VITE_SOLANA_RPC_URL || 'https://api.devnet.solana.com');
       const signature = await connection.sendRawTransaction(signedTx.serialize());
       
-      // 5. Confirm
-      await connection.confirmTransaction(signature);
+      // 5. Confirm transaction
+      await connection.confirmTransaction({
+        signature,
+        blockhash,
+        lastValidBlockHeight,
+      });
       
       return { signature };
     },

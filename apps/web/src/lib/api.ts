@@ -101,6 +101,15 @@ class ApiClient {
       body: JSON.stringify(params),
     });
   }
+
+  async createLoanUnsigned(
+    params: CreateLoanRequest & { borrower: string }
+  ): Promise<{ transaction: string }> {
+    return this.fetch('/loans/unsigned', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    });
+  }
   
   async repayLoan(
     loanPubkey: string,

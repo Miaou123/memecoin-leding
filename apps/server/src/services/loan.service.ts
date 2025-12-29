@@ -142,6 +142,7 @@ class LoanService {
       durationSeconds: params.durationSeconds,
       currentPrice: priceInLamports,
       tokenConfig,
+      tokenDecimals: token.decimals || 6, // Use decimals from DB token record
     });
     
     return {

@@ -1,5 +1,5 @@
 import { createContext, createSignal, useContext, onMount, ParentComponent } from 'solid-js';
-import { Connection, PublicKey } from '@solana/web3.js';
+import { Connection, PublicKey, Transaction } from '@solana/web3.js';
 import { getNetworkConfig } from '@memecoin-lending/config';
 
 interface WalletContextType {
@@ -9,6 +9,7 @@ interface WalletContextType {
   connect: () => Promise<void>;
   disconnect: () => void;
   signMessage: (message: Uint8Array) => Promise<Uint8Array>;
+  signTransaction: (transaction: Transaction) => Promise<Transaction>;
 }
 
 const WalletContext = createContext<WalletContextType>();
@@ -81,6 +82,15 @@ export const WalletProvider: ParentComponent = (props) => {
     const { signature } = await wallet.signMessage(message);
     return signature;
   };
+
+  const signTransaction = async (transaction: Transaction): Promise<Transaction> => {
+    if (!wallet || !connected()) {
+      throw new Error('Wallet not connected');
+    }
+    
+    const signedTransaction = await wallet.signTransaction(transaction);
+    return signedTransaction;
+  };
   
   onMount(() => {
     // Check if wallet is already connected
@@ -101,6 +111,7 @@ export const WalletProvider: ParentComponent = (props) => {
     connect,
     disconnect,
     signMessage,
+    signTransaction,
   };
   
   return (

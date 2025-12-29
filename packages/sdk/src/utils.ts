@@ -17,14 +17,23 @@ export function calculateLoanTerms(params: LoanTermsParams): LoanTerms {
     durationSeconds,
     currentPrice,
     tokenConfig,
+    tokenDecimals = 6, // Default to 6 for PumpFun tokens
   } = params;
 
   const collateralBN = new BN(collateralAmount);
   const priceBN = new BN(currentPrice);
   const durationBN = new BN(durationSeconds);
+  
+  // Token decimals divisor (10^6 for PumpFun)
+  const DECIMALS_DIVISOR = new BN(10).pow(new BN(tokenDecimals));
 
+  // Calculate collateral value in lamports
+  // collateralAmount is in smallest units (raw)
+  // currentPrice is in lamports per WHOLE token
+  // So: value = collateralAmount * price / 10^decimals
+  const collateralValue = collateralBN.mul(priceBN).div(DECIMALS_DIVISOR);
+  
   // Calculate SOL amount based on LTV
-  const collateralValue = collateralBN.mul(priceBN).div(new BN(LAMPORTS_PER_SOL));
   const solAmount = collateralValue.mul(new BN(tokenConfig.ltvBps)).div(new BN(BPS_DIVISOR));
 
   // Calculate interest
@@ -42,13 +51,16 @@ export function calculateLoanTerms(params: LoanTermsParams): LoanTerms {
   // Total owed
   const totalOwed = solAmount.add(interest).add(protocolFee);
 
-  // Calculate liquidation price (price at which LTV exceeds threshold)
+  // Calculate liquidation price
+  // Liquidation happens when collateral value falls below totalOwed / (LTV + buffer)
   const liquidationLtv = new BN(tokenConfig.ltvBps + 500); // Add 5% buffer
-  const liquidationPrice = totalOwed
-    .mul(new BN(BPS_DIVISOR))
-    .mul(new BN(LAMPORTS_PER_SOL))
-    .div(collateralBN)
-    .div(liquidationLtv);
+  const liquidationPrice = collateralBN.isZero() 
+    ? new BN(0)
+    : totalOwed
+        .mul(DECIMALS_DIVISOR)
+        .mul(new BN(BPS_DIVISOR))
+        .div(collateralBN)
+        .div(liquidationLtv);
 
   return {
     solAmount: solAmount.toString(),
