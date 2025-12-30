@@ -61,6 +61,13 @@ class ApiClient {
     return this.fetch(`/tokens/${mint}/price`);
   }
   
+  async getBatchPrices(mints: string[]): Promise<Record<string, { price: string; timestamp: number }>> {
+    if (mints.length === 0) return {};
+    
+    const query = new URLSearchParams({ mints: mints.join(',') });
+    return this.fetch(`/prices?${query.toString()}`);
+  }
+  
   async getLoans(params: {
     page?: number;
     pageSize?: number;

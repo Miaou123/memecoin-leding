@@ -3,12 +3,12 @@ import { useSearchParams, useNavigate } from '@solidjs/router';
 import { createQuery, createMutation } from '@tanstack/solid-query';
 import { useWallet } from '@/components/wallet/WalletProvider';
 import { Button } from '@/components/ui/Button';
-import { TokenSelector } from '@/components/tokens/TokenSelector';
-import TokenInputSolid from '@/components/TokenVerification/TokenInputSolid';
 import { createTokenVerification, createCanCreateLoan } from '@/hooks/useTokenVerificationSolid';
 import { formatSOL, formatNumber, formatPercentage } from '@/lib/utils';
 import { api } from '@/lib/api';
 import { useTokenBalance } from '@/hooks/useTokenBalance';
+import { useWalletPumpTokens } from '@/hooks/useWalletPumpTokens';
+import { TokenSelectionUnified } from '@/components/tokens/TokenSelectionUnified';
 import { Connection, Transaction, PublicKey } from '@solana/web3.js';
 import BN from 'bn.js';
 import { SuccessModal } from '@/components/ui/SuccessModal';
@@ -19,9 +19,9 @@ export default function Borrow() {
   const navigate = useNavigate();
   
   const [selectedToken, setSelectedToken] = createSignal(searchParams.token || '');
+  const [manualTokenValue, setManualTokenValue] = createSignal(searchParams.token || '');
   const [collateralAmount, setCollateralAmount] = createSignal('');
   const [duration, setDuration] = createSignal(12 * 60 * 60); // 12 hours default
-  const [tokenVerificationEnabled, setTokenVerificationEnabled] = createSignal(true);
   
   // Success modal state
   const [showSuccessModal, setShowSuccessModal] = createSignal(false);
@@ -34,15 +34,8 @@ export default function Borrow() {
   // Token balance hook
   const tokenBalance = useTokenBalance(() => selectedToken() || null);
   
-  const tokens = createQuery(() => ({
-    queryKey: ['tokens'],
-    queryFn: () => api.getTokens(),
-  }));
-  
-  const selectedTokenData = createMemo(() => {
-    const token = selectedToken();
-    return tokens.data?.find(t => t.mint === token);
-  });
+  // Wallet tokens hook
+  const walletPumpTokens = useWalletPumpTokens();
   
   const loanEstimate = createQuery(() => ({
     queryKey: ['loan-estimate', selectedToken(), collateralAmount(), duration()],
@@ -74,17 +67,15 @@ export default function Borrow() {
         throw new Error('Missing required data');
       }
 
-      // Check token verification if enabled
-      if (tokenVerificationEnabled()) {
-        const verification = tokenVerification.data();
-        if (!verification?.isValid) {
-          throw new Error(`Token verification failed: ${verification?.reason || 'Invalid token'}`);
-        }
+      // Check token verification (always required)
+      const verification = tokenVerification.data();
+      if (!verification?.isValid) {
+        throw new Error(`Token verification failed: ${verification?.reason || 'Invalid token'}`);
+      }
 
-        const canLoan = loanEligibility.canCreate();
-        if (canLoan === false) {
-          throw new Error(`Loan not allowed: ${loanEligibility.reason() || 'Token not eligible'}`);
-        }
+      const canLoan = loanEligibility.canCreate();
+      if (canLoan === false) {
+        throw new Error(`Loan not allowed: ${loanEligibility.reason() || 'Token not eligible'}`);
       }
       
       // 1. Get unsigned transaction from server (no pre-auth needed)
@@ -160,36 +151,18 @@ export default function Borrow() {
       
       <div class="bg-card p-6 rounded-lg border space-y-6">
         {/* Token Selection */}
-        <div>
-          <div class="flex justify-between items-center mb-2">
-            <span class="text-sm font-medium">Collateral Token</span>
-            <button
-              class="text-xs text-blue-600 hover:text-blue-700 underline"
-              onClick={() => setTokenVerificationEnabled(!tokenVerificationEnabled())}
-            >
-              {tokenVerificationEnabled() ? 'Use Token Selector' : 'Use Manual Entry'}
-            </button>
-          </div>
-          
-          <Show when={!tokenVerificationEnabled()}>
-            <TokenSelector 
-              value={selectedToken()}
-              onChange={setSelectedToken}
-              tokens={tokens.data}
-            />
-          </Show>
-          
-          <Show when={tokenVerificationEnabled()}>
-            <TokenInputSolid
-              value={selectedToken()}
-              onChange={setSelectedToken}
-              placeholder="Enter PumpFun token mint address..."
-              label=""
-              required={true}
-              showVerification={true}
-            />
-          </Show>
-        </div>
+        <TokenSelectionUnified
+          walletTokens={walletPumpTokens.tokens()}
+          isLoadingWalletTokens={walletPumpTokens.isLoading()}
+          onSelect={(mint) => {
+            setSelectedToken(mint);
+            setManualTokenValue(mint);
+          }}
+          selectedMint={selectedToken()}
+          manualValue={manualTokenValue()}
+          onManualChange={setManualTokenValue}
+          walletConnected={wallet.connected()}
+        />
         
         {/* Amount Input */}
         <div>
@@ -197,7 +170,7 @@ export default function Borrow() {
             <label class="block text-sm font-medium">Collateral Amount</label>
             <Show when={selectedToken() && wallet.connected()}>
               <div class="text-xs text-muted-foreground">
-                Balance: {tokenBalance.isLoading() ? '...' : tokenBalance.uiBalance() || '0'} {selectedTokenData()?.symbol || 'tokens'}
+                Balance: {tokenBalance.isLoading() ? '...' : tokenBalance.uiBalance() || '0'} tokens
               </div>
             </Show>
           </div>
@@ -221,16 +194,13 @@ export default function Borrow() {
                 </button>
               </Show>
               <div class="text-sm text-muted-foreground">
-                {selectedTokenData()?.symbol}
+                tokens
               </div>
             </div>
           </div>
-          <Show when={selectedTokenData()}>
+          <Show when={selectedToken() && collateralAmount()}>
             <div class="text-xs text-muted-foreground mt-1">
-              ≈ ${formatNumber(
-                parseFloat(collateralAmount() || '0') * 
-                parseFloat(selectedTokenData()?.currentPrice || '0')
-              )}
+              Value calculation available after token verification
             </div>
           </Show>
           <Show when={tokenBalance.error()}>
@@ -298,7 +268,7 @@ export default function Borrow() {
         </Show>
         
         {/* Token Verification Status */}
-        <Show when={tokenVerificationEnabled() && selectedToken()}>
+        <Show when={selectedToken()}>
           <div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
             <div class="flex items-center space-x-2">
               <svg class="w-5 h-5 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -365,18 +335,6 @@ export default function Borrow() {
               }}
             </Show>
             
-            <div class="mt-3 flex items-center space-x-2">
-              <input
-                type="checkbox"
-                id="token-verification"
-                checked={tokenVerificationEnabled()}
-                onChange={(e) => setTokenVerificationEnabled((e.target as HTMLInputElement).checked)}
-                class="rounded border-gray-300 text-blue-600 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50"
-              />
-              <label for="token-verification" class="text-sm text-blue-700">
-                Require token verification (recommended for security)
-              </label>
-            </div>
           </div>
         </Show>
 
@@ -387,13 +345,14 @@ export default function Borrow() {
           disabled={
             !wallet.connected() || 
             !loanEstimate.data ||
-            (tokenVerificationEnabled() && (!tokenVerification.data()?.isValid || loanEligibility.canCreate() === false))
+            !tokenVerification.data()?.isValid || 
+            loanEligibility.canCreate() === false
           }
           class="w-full"
           size="lg"
         >
           <Show when={!wallet.connected()} fallback={
-            <Show when={tokenVerificationEnabled() && tokenVerification.data() && !tokenVerification.data()?.isValid} fallback="Create Loan">
+            <Show when={tokenVerification.data() && !tokenVerification.data()?.isValid} fallback="Create Loan">
               Token Not Verified
             </Show>
           }>
@@ -419,7 +378,7 @@ export default function Borrow() {
         subtitle="Your loan has been created and your collateral has been locked"
         details={loanResult() ? [
           { label: "Principal Amount", value: formatSOL(loanResult().estimate.solAmount) + " SOL", highlight: true },
-          { label: "Collateral Locked", value: formatNumber(collateralAmount()) + " " + selectedTokenData()?.symbol },
+          { label: "Collateral Locked", value: formatNumber(collateralAmount()) + " tokens" },
           { label: "Protocol Fee", value: "1.0%" },
           { label: "Duration", value: formatDuration(duration()) },
           { label: "Due Date", value: new Date(Date.now() + duration() * 1000).toLocaleDateString() },
