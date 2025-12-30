@@ -21,7 +21,7 @@ export interface CreateLoanRequest {
 
 export interface LoanEstimate {
   solAmount: string;
-  interestRate: number;
+  protocolFeeBps: number;
   totalOwed: string;
   liquidationPrice: string;
   ltv: number;
@@ -35,7 +35,7 @@ export interface ProtocolStats {
   totalValueLocked: string;
   totalLoansActive: number;
   totalLoansCreated: number;
-  totalInterestEarned: string;
+  totalFeesEarned: string;
   treasuryBalance: string;
   volume24h: string;
   liquidations24h: number;
@@ -59,7 +59,7 @@ export interface UserStats {
   activeLoans: number;
   totalBorrowed: string;
   totalRepaid: string;
-  totalInterestPaid: string;
+  totalFeesPaid: string;
   liquidations: number;
 }
 

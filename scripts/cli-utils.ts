@@ -7,6 +7,10 @@ import chalk from 'chalk';
 import fs from 'fs';
 import path from 'path';
 
+import { fileURLToPath } from 'url';
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 // Wallet wrapper for Keypair (needed for SDK)
 export class NodeWallet {
   constructor(readonly payer: Keypair) {}
@@ -49,13 +53,13 @@ export function loadKeypair(keypairPath: string): Keypair {
 // Load IDL from target folder
 export function loadIdl(): any {
   const possiblePaths = [
-    '../target/idl/memecoin_lending.json',
-    './target/idl/memecoin_lending.json',
-    '../../target/idl/memecoin_lending.json',
+    path.join(__dirname, '../target/idl/memecoin_lending.json'),
+    path.join(__dirname, './target/idl/memecoin_lending.json'),
+    path.join(__dirname, '../../target/idl/memecoin_lending.json'),
   ];
   
   for (const idlPath of possiblePaths) {
-    const resolvedPath = path.resolve(idlPath);
+    const resolvedPath = idlPath;
     if (fs.existsSync(resolvedPath)) {
       return JSON.parse(fs.readFileSync(resolvedPath, 'utf8'));
     }

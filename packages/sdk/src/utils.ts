@@ -36,7 +36,7 @@ export function calculateLoanTerms(params: LoanTermsParams): LoanTerms {
   // Calculate SOL amount based on LTV
   const solAmount = collateralValue.mul(new BN(tokenConfig.ltvBps)).div(new BN(BPS_DIVISOR));
 
-  // Calculate protocol fee (1% flat)
+  // Calculate protocol fee (2% flat)
   const protocolFee = solAmount.mul(new BN(PROTOCOL_FEE_BPS)).div(new BN(BPS_DIVISOR));
 
   // Total owed
@@ -55,7 +55,7 @@ export function calculateLoanTerms(params: LoanTermsParams): LoanTerms {
 
   return {
     solAmount: solAmount.toString(),
-    protocolFeeRate: 1, // Always 1%
+    protocolFeeBps: 200, // Always 2% (200 basis points)
     totalOwed: totalOwed.toString(),
     liquidationPrice: liquidationPrice.toString(),
     ltv: tokenConfig.ltvBps / 100,

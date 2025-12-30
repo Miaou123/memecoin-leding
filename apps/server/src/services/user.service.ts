@@ -18,7 +18,6 @@ class UserService {
         select: {
           solBorrowed: true,
           status: true,
-          interestRateBps: true,
           createdAt: true,
           repaidAt: true,
           liquidatedAt: true,
@@ -35,23 +34,18 @@ class UserService {
     // Calculate totals manually using BigInt
     let totalBorrowed = BigInt(0);
     let totalRepaid = BigInt(0);
-    let totalInterestPaid = BigInt(0);
+    let totalFeesPaid = BigInt(0);
     
     for (const loan of allLoans) {
       const principal = BigInt(loan.solBorrowed);
       totalBorrowed += principal;
       
-      // For repaid loans, calculate total repayment with interest
+      // For repaid loans, calculate total repayment with flat 2% protocol fee
       if (loan.status === 'repaid' && loan.repaidAt) {
-        const duration = loan.repaidAt.getTime() - loan.createdAt.getTime();
-        const durationInSeconds = Math.floor(duration / 1000);
-        const annualSeconds = 365 * 24 * 60 * 60;
+        const protocolFee = (principal * BigInt(200)) / BigInt(10000); // 2% flat fee
         
-        const interest = (principal * BigInt(loan.interestRateBps) * BigInt(durationInSeconds)) / 
-          (BigInt(10000) * BigInt(annualSeconds));
-        
-        totalRepaid += principal + interest;
-        totalInterestPaid += interest;
+        totalRepaid += principal + protocolFee;
+        totalFeesPaid += protocolFee;
       }
     }
     
@@ -61,7 +55,7 @@ class UserService {
       activeLoans,
       totalBorrowed: totalBorrowed.toString(),
       totalRepaid: totalRepaid.toString(),
-      totalInterestPaid: totalInterestPaid.toString(),
+      totalFeesPaid: totalFeesPaid.toString(),
       liquidations: liquidationCount,
     };
   }

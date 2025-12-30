@@ -127,6 +127,30 @@ async function deploy(config: DeployConfig) {
     localnet: 'http://localhost:8899',
   }[config.network];
 
+  // Ensure keys directory and admin keypair exist
+  const keysDir = path.join(ROOT_DIR, 'keys');
+  const adminKeypairPath = path.join(keysDir, 'admin.json');
+
+  if (!fs.existsSync(keysDir)) {
+    fs.mkdirSync(keysDir, { recursive: true });
+  }
+
+  if (!fs.existsSync(adminKeypairPath)) {
+    console.log(chalk.blue('\n🔑 Creating admin keypair...\n'));
+    exec(`solana-keygen new -o ${adminKeypairPath} --no-bip39-passphrase`);
+    
+    // Airdrop some SOL for devnet
+    if (config.network === 'devnet') {
+      const adminAddress = execCapture(`solana address -k ${adminKeypairPath}`);
+      console.log(chalk.yellow(`  Airdropping 2 SOL to admin: ${adminAddress}`));
+      try {
+        exec(`solana airdrop 2 ${adminAddress} --url devnet`, { silent: true });
+      } catch {
+        console.log(chalk.yellow('  ⚠ Airdrop failed, you may need to fund manually'));
+      }
+    }
+  }
+
   // Step 1: Get current program ID (if exists)
   const oldProgramId = getCurrentProgramId();
   console.log(chalk.blue(`\n📍 Current Program ID: ${oldProgramId || 'None'}\n`));
@@ -168,7 +192,16 @@ async function deploy(config: DeployConfig) {
 
   // Step 8: Deploy
   console.log(chalk.blue(`\n🚀 Deploying to ${config.network}...\n`));
-  exec(`anchor deploy --provider.cluster ${config.network}`);
+  try {
+    exec(`anchor deploy --provider.cluster ${config.network}`);
+  } catch (error: any) {
+    // Check if it's just an IDL error (program deployed successfully)
+    if (error.message?.includes('IDL') || error.message?.includes('already in use')) {
+      console.log(chalk.yellow('  ⚠ Program deployed but IDL upload failed (may already exist)'));
+    } else {
+      throw error; // Re-throw if it's a real deployment failure
+    }
+  }
 
   // Step 9: Verify deployment
   console.log(chalk.blue('\n✅ Verifying deployment...\n'));

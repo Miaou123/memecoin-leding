@@ -7,7 +7,6 @@ export interface ManualWhitelistEntry {
   name?: string;
   tier: TokenTier;
   ltvBps: number;
-  interestRateBps: number;
   minLoanAmount: string;
   maxLoanAmount: string;
   enabled: boolean;
@@ -27,7 +26,6 @@ export interface CreateWhitelistEntryRequest {
   name?: string;
   tier: TokenTier;
   ltvBps?: number;
-  interestRateBps?: number;
   minLoanAmount?: string;
   maxLoanAmount?: string;
   reason?: string;
@@ -42,7 +40,6 @@ export interface UpdateWhitelistEntryRequest {
   name?: string;
   tier?: TokenTier;
   ltvBps?: number;
-  interestRateBps?: number;
   minLoanAmount?: string;
   maxLoanAmount?: string;
   enabled?: boolean;

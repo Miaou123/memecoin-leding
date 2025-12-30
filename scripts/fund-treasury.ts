@@ -7,6 +7,11 @@ import { PROGRAM_ID, getNetworkConfig } from '@memecoin-lending/config';
 import chalk from 'chalk';
 import { Command } from 'commander';
 import fs from 'fs';
+import path from 'path';
+
+import { fileURLToPath } from 'url';
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 config();
 
@@ -80,7 +85,7 @@ program
       }
       
       // Load the actual IDL
-      const idlPath = '../target/idl/memecoin_lending.json';
+      const idlPath = path.join(__dirname, '../target/idl/memecoin_lending.json');
       if (!fs.existsSync(idlPath)) {
         throw new Error(`IDL not found: ${idlPath}`);
       }

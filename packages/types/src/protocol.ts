@@ -101,7 +101,7 @@ export interface LoanTermsParams {
 
 export interface LoanTerms {
   solAmount: string;
-  protocolFeeRate: number; // Always 1%
+  protocolFeeBps: number; // Always 200 (2%)
   totalOwed: string;
   liquidationPrice: string;
   ltv: number;

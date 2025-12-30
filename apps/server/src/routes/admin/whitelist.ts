@@ -40,7 +40,6 @@ const createWhitelistSchema = z.object({
   name: z.string().optional(),
   tier: z.enum(['bronze', 'silver', 'gold']),
   ltvBps: z.number().min(1000).max(9000).optional(), // 10% to 90%
-  interestRateBps: z.number().min(100).max(2000).optional(), // 1% to 20%
   minLoanAmount: z.string().optional(),
   maxLoanAmount: z.string().optional(),
   reason: z.string().optional(),
@@ -55,7 +54,6 @@ const updateWhitelistSchema = z.object({
   name: z.string().optional(),
   tier: z.enum(['bronze', 'silver', 'gold']).optional(),
   ltvBps: z.number().min(1000).max(9000).optional(),
-  interestRateBps: z.number().min(100).max(2000).optional(),
   minLoanAmount: z.string().optional(),
   maxLoanAmount: z.string().optional(),
   enabled: z.boolean().optional(),

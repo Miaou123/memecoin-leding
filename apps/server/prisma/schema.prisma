@@ -128,7 +128,6 @@ model ManualWhitelist {
   name                 String?
   tier                 String   // 'bronze', 'silver', 'gold'
   ltvBps               Int
-  liquidationBonusBps  Int      @default(500) // 5% liquidation bonus
   minLoanAmount        String
   maxLoanAmount        String
   enabled              Boolean  @default(true)
