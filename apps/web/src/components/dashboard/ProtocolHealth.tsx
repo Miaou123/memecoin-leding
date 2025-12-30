@@ -20,7 +20,6 @@ export function ProtocolHealth(props: ProtocolHealthProps) {
 
   return (
     <div class="bg-bg-secondary border border-border p-6">
-      <div class="text-xs text-text-dim mb-4">PROTOCOL_HEALTH:</div>
       
       {/* Utilization Percentage */}
       <div class="mb-4">
@@ -54,16 +53,6 @@ export function ProtocolHealth(props: ProtocolHealthProps) {
             {formatSOL(props.borrowed)}
           </div>
           <div class="text-xs text-text-secondary">SOL</div>
-        </div>
-      </div>
-      
-      {/* Health Status */}
-      <div class="mt-4 pt-4 border-t border-border">
-        <div class="text-xs text-text-dim">
-          STATUS: <span class={`text-${getUtilizationColor()}`}>
-            {props.utilization < 50 ? 'HEALTHY' : 
-             props.utilization < 80 ? 'MODERATE' : 'HIGH_UTILIZATION'}
-          </span>
         </div>
       </div>
     </div>

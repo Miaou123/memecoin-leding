@@ -34,15 +34,28 @@ export const TokenSelectionUnified: Component<TokenSelectionUnifiedProps> = (pro
 
     setIsLoadingPrices(true);
     try {
+      const protocolTokenMint = '6KHL8uUXFie8Xdy3EBvw6EgruiU3duc9fvGrWoZ9pump';
+      
+      // Always include the protocol token even if user doesn't hold it
+      const tokensToProcess = [...tokens];
+      if (!tokens.some(t => t.mint === protocolTokenMint)) {
+        tokensToProcess.unshift({
+          mint: protocolTokenMint,
+          balance: '0',
+          uiBalance: '0',
+          decimals: 6,
+        });
+      }
+      
       // Get all unique mints
-      const mints = tokens.map(t => t.mint);
+      const mints = tokensToProcess.map(t => t.mint);
       const pricesResponse = await api.getBatchPrices(mints);
       
       // The API returns the prices nested in the response
       const prices = pricesResponse;
 
       // Combine tokens with prices and calculate USD values
-      const enrichedTokens: TokenWithPrice[] = tokens.map(token => {
+      const enrichedTokens: TokenWithPrice[] = tokensToProcess.map(token => {
         const priceData = prices[token.mint];
         // Handle both price formats - direct price string or object with usdPrice
         const price = priceData?.usdPrice || priceData?.price || '0';
@@ -66,13 +79,28 @@ export const TokenSelectionUnified: Component<TokenSelectionUnifiedProps> = (pro
         };
       });
 
-      // Sort by USD value (highest first)
-      enrichedTokens.sort((a, b) => (b.usdValue || 0) - (a.usdValue || 0));
+      // Sort by USD value (highest first), but always prioritize the protocol token
+      enrichedTokens.sort((a, b) => {
+        // Always show protocol token first
+        if (a.mint === protocolTokenMint) return -1;
+        if (b.mint === protocolTokenMint) return 1;
+        // Then sort by USD value
+        return (b.usdValue || 0) - (a.usdValue || 0);
+      });
       setTokensWithPrices(enrichedTokens);
     } catch (error) {
       console.error('Error fetching token prices:', error);
-      // Still show tokens without prices
-      setTokensWithPrices(tokens);
+      // Still show tokens without prices, including protocol token
+      const tokensToShow = [...tokens];
+      if (!tokens.some(t => t.mint === protocolTokenMint)) {
+        tokensToShow.unshift({
+          mint: protocolTokenMint,
+          balance: '0',
+          uiBalance: '0',
+          decimals: 6,
+        });
+      }
+      setTokensWithPrices(tokensToShow);
     } finally {
       setIsLoadingPrices(false);
     }

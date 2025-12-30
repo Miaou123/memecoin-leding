@@ -43,7 +43,7 @@ export default function Home() {
   });
   
   return (
-    <div class="max-w-4xl mx-auto space-y-8 font-mono">
+    <div class="max-w-4xl mx-auto space-y-4 font-mono">
       {/* Hero Section */}
       <div class="text-center py-8">
         <div class="text-2xl font-bold text-accent-green mb-2">
@@ -59,6 +59,22 @@ export default function Home() {
           <A href="/loans">
             <Button variant="outline" size="lg">[VIEW_LOANS]</Button>
           </A>
+        </div>
+        
+        {/* Protocol Token */}
+        <div class="text-center mt-8">
+          <div class="bg-bg-secondary border border-border p-3 mx-auto max-w-fit">
+            <button 
+              onClick={() => {
+                const tokenMint = '6KHL8uUXFie8Xdy3EBvw6EgruiU3duc9fvGrWoZ9pump';
+                navigator.clipboard.writeText(tokenMint);
+              }}
+              class="font-mono text-sm text-text-primary hover:text-accent-green transition-colors cursor-pointer"
+              title="Click to copy"
+            >
+              6KHL8uUXFie8Xdy3EBvw6EgruiU3duc9fvGrWoZ9pump
+            </button>
+          </div>
         </div>
       </div>
 
@@ -124,7 +140,7 @@ export default function Home() {
                       tokenSymbol: loan.tokenSymbol || 'UNKNOWN',
                       tokenName: loan.tokenName || 'Unknown Token',
                       amount: loan.solBorrowed?.toString() || '0',
-                      status: loan.status === 'Active' ? 'Active' : 
+                      status: loan.status === 'active' ? 'Active' : 
                               loan.healthScore && loan.healthScore < 50 ? 'AtRisk' : 'Active',
                       createdAt: loan.createdAt || Math.floor(Date.now() / 1000)
                     }}
@@ -166,8 +182,8 @@ export default function Home() {
                       <div class="text-xs text-text-dim">
                         {topToken.data?.name || 'Unknown Token'}
                       </div>
-                      <div class="text-xs text-text-secondary">
-                        {topToken.data?.mint?.slice(0, 8)}...{topToken.data?.mint?.slice(-4)}
+                      <div class="text-xs text-text-secondary font-mono break-all">
+                        {topToken.data?.mint}
                       </div>
                     </div>
                   </div>
@@ -192,7 +208,13 @@ export default function Home() {
 
           {/* Protocol Health */}
           <div class="space-y-4">
-            <div class="text-xs text-text-dim">PROTOCOL_HEALTH:</div>
+            <div class="flex items-center justify-between">
+              <div class="text-xs text-text-dim">PROTOCOL_HEALTH:</div>
+              <div class="text-xs text-accent-green">
+                {protocolHealth() && protocolHealth()!.utilization < 50 ? '[HEALTHY]' : 
+                 protocolHealth() && protocolHealth()!.utilization < 80 ? '[MODERATE]' : '[HIGH_UTIL]'}
+              </div>
+            </div>
             <Show 
               when={protocolHealth()}
               fallback={

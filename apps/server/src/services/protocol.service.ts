@@ -71,6 +71,16 @@ class ProtocolService {
         where: { status: 'active' },
       });
 
+      // Get total SOL borrowed (sum of all active loans)
+      const activeLoans = await prisma.loan.findMany({
+        where: { status: 'active' },
+        select: { solBorrowed: true },
+      });
+
+      const totalSolBorrowed = activeLoans.reduce((sum, loan) => {
+        return sum + BigInt(loan.solBorrowed || '0');
+      }, BigInt(0)).toString();
+
       // Get total loans created from database instead of on-chain
       const totalLoansCreated = await prisma.loan.count();
 
@@ -109,6 +119,7 @@ class ProtocolService {
       // Update cached stats
       const stats = {
         totalValueLocked: treasuryBalance,
+        totalSolBorrowed,
         totalLoansActive,
         totalLoansCreated,
         totalFeesEarned,

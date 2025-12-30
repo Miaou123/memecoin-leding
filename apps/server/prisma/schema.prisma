@@ -112,6 +112,7 @@ model Notification {
 model ProtocolStats {
   id                   String   @id @default("current")
   totalValueLocked     String
+  totalSolBorrowed     String   @default("0")
   totalLoansActive     Int
   totalLoansCreated    Int
   totalFeesEarned      String   // Renamed from totalInterestEarned
