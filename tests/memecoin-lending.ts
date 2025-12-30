@@ -9,14 +9,10 @@ import {
   sendAndConfirmTransaction,
 } from "@solana/web3.js";
 import {
-  TOKEN_PROGRAM_ID,
-  ASSOCIATED_TOKEN_PROGRAM_ID,
   createMint,
-  createAccount,
   createAssociatedTokenAccount,
   mintTo,
   getAccount,
-  getOrCreateAssociatedTokenAccount,
 } from "@solana/spl-token";
 import { assert, expect } from "chai";
 import { MemecoinLending } from "../target/types/memecoin_lending";
@@ -67,11 +63,6 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
   let loanBump: number;
   let vaultPda: PublicKey;
   let vaultBump: number;
-  
-  // User Exposure PDAs
-  let borrowerExposurePda: PublicKey;
-  let borrower2ExposurePda: PublicKey;
-  let liquidatorExposurePda: PublicKey;
 
   // Test constants
   const LAMPORTS_FOR_TESTING = 100 * LAMPORTS_PER_SOL;
@@ -168,22 +159,6 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
       program.programId
     );
 
-    // Derive User Exposure PDAs
-    [borrowerExposurePda] = PublicKey.findProgramAddressSync(
-      [Buffer.from("user_exposure"), borrower.publicKey.toBuffer()],
-      program.programId
-    );
-
-    [borrower2ExposurePda] = PublicKey.findProgramAddressSync(
-      [Buffer.from("user_exposure"), borrower2.publicKey.toBuffer()],
-      program.programId
-    );
-
-    [liquidatorExposurePda] = PublicKey.findProgramAddressSync(
-      [Buffer.from("user_exposure"), liquidator.publicKey.toBuffer()],
-      program.programId
-    );
-
     // Create token accounts for borrowers
     borrowerGoldTokenAccount = await createAssociatedTokenAccount(
       connection,
@@ -276,6 +251,7 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
 
   describe("🔧 Protocol Initialization", () => {
     it("should initialize the protocol successfully", async () => {
+      // protocolState and treasury are auto-derived from seeds
       const tx = await program.methods
         .initialize(
           admin.publicKey,
@@ -283,10 +259,7 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
           operationsWallet.publicKey
         )
         .accounts({
-          protocolState: protocolStatePda,
-          treasury: treasuryPda,
           payer: admin.publicKey,
-          systemProgram: SystemProgram.programId,
         })
         .signers([admin])
         .rpc();
@@ -319,10 +292,7 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
             operationsWallet.publicKey
           )
           .accounts({
-            protocolState: protocolStatePda,
-            treasury: treasuryPda,
             payer: admin.publicKey,
-            systemProgram: SystemProgram.programId,
           })
           .signers([admin])
           .rpc();
@@ -335,13 +305,11 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
     it("should fund the treasury", async () => {
       const fundAmount = new BN(100 * LAMPORTS_PER_SOL);
 
+      // protocolState and treasury are auto-derived
       const tx = await program.methods
         .fundTreasury(fundAmount)
         .accounts({
-          protocolState: protocolStatePda,
-          treasury: treasuryPda,
           funder: funder.publicKey,
-          systemProgram: SystemProgram.programId,
         })
         .signers([funder])
         .rpc();
@@ -361,21 +329,18 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
 
   describe("🏷️ Token Management", () => {
     it("should whitelist Gold tier token", async () => {
+      // protocolState is auto-derived, tokenConfig is derived from tokenMint seed
       const tx = await program.methods
         .whitelistToken(
           2, // Gold tier
-          goldPool.publicKey,
+          goldPool.publicKey, // pool_address argument
           0, // Raydium pool type
           new BN(1 * LAMPORTS_PER_SOL),   // min: 1 SOL
           new BN(100 * LAMPORTS_PER_SOL) // max: 100 SOL
         )
         .accounts({
-          protocolState: protocolStatePda,
-          tokenConfig: goldTokenConfigPda,
           tokenMint: goldTokenMint,
-          poolAccount: goldPool.publicKey,
           admin: admin.publicKey,
-          systemProgram: SystemProgram.programId,
         })
         .signers([admin])
         .rpc();
@@ -395,18 +360,14 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
       const tx = await program.methods
         .whitelistToken(
           1, // Silver tier
-          silverPool.publicKey,
+          silverPool.publicKey, // pool_address argument
           0, // Raydium pool type
           new BN(0.5 * LAMPORTS_PER_SOL),
           new BN(50 * LAMPORTS_PER_SOL)
         )
         .accounts({
-          protocolState: protocolStatePda,
-          tokenConfig: silverTokenConfigPda,
           tokenMint: silverTokenMint,
-          poolAccount: silverPool.publicKey,
           admin: admin.publicKey,
-          systemProgram: SystemProgram.programId,
         })
         .signers([admin])
         .rpc();
@@ -424,18 +385,14 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
       const tx = await program.methods
         .whitelistToken(
           0, // Bronze tier
-          bronzePool.publicKey,
+          bronzePool.publicKey, // pool_address argument
           0, // Raydium pool type
           new BN(0.1 * LAMPORTS_PER_SOL),
           new BN(25 * LAMPORTS_PER_SOL)
         )
         .accounts({
-          protocolState: protocolStatePda,
-          tokenConfig: bronzeTokenConfigPda,
           tokenMint: bronzeTokenMint,
-          poolAccount: bronzePool.publicKey,
           admin: admin.publicKey,
-          systemProgram: SystemProgram.programId,
         })
         .signers([admin])
         .rpc();
@@ -450,13 +407,14 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
     });
 
     it("should update token configuration", async () => {
+      // tokenConfig is derived from the token mint stored in the config
+      // protocolState is auto-derived
       const tx = await program.methods
         .updateTokenConfig(
           true,   // enabled
           6500,   // ltv_bps (65%)
         )
         .accounts({
-          protocolState: protocolStatePda,
           tokenConfig: goldTokenConfigPda,
           admin: admin.publicKey,
         })
@@ -488,12 +446,8 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
             new BN(100 * LAMPORTS_PER_SOL)
           )
           .accounts({
-            protocolState: protocolStatePda,
-            tokenConfig: bronzeTokenConfigPda,
             tokenMint: bronzeTokenMint,
-            poolAccount: bronzePool.publicKey,
             admin: fakeAdmin.publicKey,
-            systemProgram: SystemProgram.programId,
           })
           .signers([fakeAdmin])
           .rpc();
@@ -536,23 +490,16 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
       console.log(`Borrower SOL before: ${borrowerBalanceBefore / LAMPORTS_PER_SOL}`);
       console.log(`Borrower tokens before: ${borrowerTokensBefore.amount.toString()}`);
 
+      // CreateLoan - pass accounts that can't be auto-derived or need explicit values
       const tx = await program.methods
         .createLoan(collateralAmount, durationSeconds)
         .accounts({
-          protocolState: protocolStatePda,
-          tokenConfig: goldTokenConfigPda,
-          loan: loan1Pda,
-          treasury: treasuryPda,
+          loan: loan1Pda,  // Needs explicit derivation due to index from protocol state
           borrower: borrower.publicKey,
           borrowerTokenAccount: borrowerGoldTokenAccount,
-          vault: loan1VaultPda,
-          poolAccount: goldPool.publicKey,
+          vault: loan1VaultPda,  // Derived from loan PDA
+          poolAccount: goldPool.publicKey,  // External account
           tokenMint: goldTokenMint,
-          userExposure: borrowerExposurePda,
-          tokenProgram: TOKEN_PROGRAM_ID,
-          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
-          systemProgram: SystemProgram.programId,
-          rent: web3.SYSVAR_RENT_PUBKEY,
         })
         .signers([borrower])
         .rpc();
@@ -613,20 +560,12 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
         await program.methods
           .createLoan(tinyAmount, new BN(24 * 60 * 60))
           .accounts({
-            protocolState: protocolStatePda,
-            tokenConfig: goldTokenConfigPda,
             loan: loan2Pda,
-            treasury: treasuryPda,
             borrower: borrower.publicKey,
             borrowerTokenAccount: borrowerGoldTokenAccount,
             vault: loan2VaultPda,
             poolAccount: goldPool.publicKey,
             tokenMint: goldTokenMint,
-            userExposure: borrowerExposurePda,
-            tokenProgram: TOKEN_PROGRAM_ID,
-            associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
-            systemProgram: SystemProgram.programId,
-            rent: web3.SYSVAR_RENT_PUBKEY,
           })
           .signers([borrower])
           .rpc();
@@ -646,27 +585,17 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
 
       // Fetch protocol state to get operations wallet
       const protocolStateAccount = await program.account.protocolState.fetch(protocolStatePda);
-      const [stakingRewardVault] = PublicKey.findProgramAddressSync(
-        [Buffer.from("reward_vault")],
-        program.programId
-      );
 
+      // RepayLoan accounts - most PDAs are auto-derived
       const tx = await program.methods
         .repayLoan()
         .accounts({
-          protocolState: protocolStatePda,
-          tokenConfig: goldTokenConfigPda,
           loan: loan1Pda,
-          treasury: treasuryPda,
           operationsWallet: protocolStateAccount.operationsWallet,
-          stakingRewardVault,
           borrower: borrower.publicKey,
           borrowerTokenAccount: borrowerGoldTokenAccount,
           vaultTokenAccount: loan1VaultPda,
           tokenMint: goldTokenMint,
-          userExposure: borrowerExposurePda,
-          tokenProgram: TOKEN_PROGRAM_ID,
-          systemProgram: SystemProgram.programId,
         })
         .signers([borrower])
         .rpc();
@@ -697,27 +626,16 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
       try {
         // Re-fetch to get the latest state
         const protocolStateAccount = await program.account.protocolState.fetch(protocolStatePda);
-        const [stakingRewardVault] = PublicKey.findProgramAddressSync(
-          [Buffer.from("reward_vault")],
-          program.programId
-        );
 
         await program.methods
           .repayLoan()
           .accounts({
-            protocolState: protocolStatePda,
-            tokenConfig: goldTokenConfigPda,
             loan: loan1Pda,
-            treasury: treasuryPda,
             operationsWallet: protocolStateAccount.operationsWallet,
-            stakingRewardVault,
             borrower: borrower.publicKey,
             borrowerTokenAccount: borrowerGoldTokenAccount,
             vaultTokenAccount: loan1VaultPda,
             tokenMint: goldTokenMint,
-            userExposure: borrowerExposurePda,
-            tokenProgram: TOKEN_PROGRAM_ID,
-            systemProgram: SystemProgram.programId,
           })
           .signers([borrower])
           .rpc();
@@ -732,6 +650,7 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
   describe("⚡ Liquidation Tests", () => {
     let liquidationLoanPda: PublicKey;
     let liquidationVaultPda: PublicKey;
+    let liquidationVaultAuthority: PublicKey;
 
     before(async () => {
       // Create another loan for liquidation testing
@@ -745,10 +664,14 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
         program.programId
       );
 
+      // Vault token account
       [liquidationVaultPda] = PublicKey.findProgramAddressSync(
         [Buffer.from("vault"), liquidationLoanPda.toBuffer()],
         program.programId
       );
+
+      // Vault authority is the same as vault PDA for this implementation
+      liquidationVaultAuthority = liquidationVaultPda;
     });
 
     it.skip("should create loan for liquidation testing", async () => {
@@ -758,20 +681,12 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
       const tx = await program.methods
         .createLoan(collateralAmount, shortDuration)
         .accounts({
-          protocolState: protocolStatePda,
-          tokenConfig: goldTokenConfigPda,
           loan: liquidationLoanPda,
-          treasury: treasuryPda,
           borrower: borrower.publicKey,
           borrowerTokenAccount: borrowerGoldTokenAccount,
           vault: liquidationVaultPda,
           poolAccount: goldPool.publicKey,
           tokenMint: goldTokenMint,
-          userExposure: borrowerExposurePda,
-          tokenProgram: TOKEN_PROGRAM_ID,
-          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
-          systemProgram: SystemProgram.programId,
-          rent: web3.SYSVAR_RENT_PUBKEY,
         })
         .signers([borrower])
         .rpc();
@@ -787,22 +702,23 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
       const liquidatorBalanceBefore = await connection.getBalance(liquidator.publicKey);
       const liquidatorTokensBefore = await getAccount(connection, liquidatorGoldTokenAccount);
 
+      // Fetch protocol state to get operations wallet
+      const protocolStateAccount = await program.account.protocolState.fetch(protocolStatePda);
+
+      // Liquidate - most PDAs are auto-derived
       const tx = await program.methods
-        .liquidate()
+        .liquidate(
+          new BN(0), // min_sol_output
+          null       // jupiter_swap_data (null for PumpFun or time-based liquidation)
+        )
         .accounts({
-          protocolState: protocolStatePda,
-          tokenConfig: goldTokenConfigPda,
           loan: liquidationLoanPda,
-          treasury: treasuryPda,
-          liquidator: liquidator.publicKey,
-          liquidatorTokenAccount: liquidatorGoldTokenAccount,
+          operationsWallet: protocolStateAccount.operationsWallet,
           vaultTokenAccount: liquidationVaultPda,
-          vaultAuthority: liquidationVaultPda,
+          vaultAuthority: liquidationVaultAuthority,
           tokenMint: goldTokenMint,
-          poolProgram: SystemProgram.programId,
           poolAccount: goldPool.publicKey,
-          tokenProgram: TOKEN_PROGRAM_ID,
-          systemProgram: SystemProgram.programId,
+          payer: liquidator.publicKey,
         })
         .signers([liquidator])
         .rpc();
@@ -811,7 +727,7 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
 
       // Verify loan status
       const loan = await program.account.loan.fetch(liquidationLoanPda);
-      expect(loan.status.liquidatedTime || loan.status.liquidatedPrice).to.be.true;
+      expect(loan.status.liquidatedTime || loan.status.liquidatedPrice).to.exist;
 
       // Verify liquidator received collateral + bonus
       const liquidatorTokensAfter = await getAccount(connection, liquidatorGoldTokenAccount);
@@ -845,42 +761,30 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
       await program.methods
         .createLoan(new BN(5_000 * 10 ** TOKEN_DECIMALS), new BN(168 * 60 * 60)) // 1 week in seconds
         .accounts({
-          protocolState: protocolStatePda,
-          tokenConfig: goldTokenConfigPda,
           loan: healthyLoanPda,
-          treasury: treasuryPda,
           borrower: borrower.publicKey,
           borrowerTokenAccount: borrowerGoldTokenAccount,
           vault: healthyVaultPda,
           poolAccount: goldPool.publicKey,
           tokenMint: goldTokenMint,
-          userExposure: borrowerExposurePda,
-          tokenProgram: TOKEN_PROGRAM_ID,
-          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
-          systemProgram: SystemProgram.programId,
-          rent: web3.SYSVAR_RENT_PUBKEY,
         })
         .signers([borrower])
         .rpc();
 
       // Try to liquidate immediately (should fail)
       try {
+        const protocolStateAccount = await program.account.protocolState.fetch(protocolStatePda);
+
         await program.methods
-          .liquidate()
+          .liquidate(new BN(0), null)
           .accounts({
-            protocolState: protocolStatePda,
-            tokenConfig: goldTokenConfigPda,
             loan: healthyLoanPda,
-            treasury: treasuryPda,
-            liquidator: liquidator.publicKey,
-            liquidatorTokenAccount: liquidatorGoldTokenAccount,
+            operationsWallet: protocolStateAccount.operationsWallet,
             vaultTokenAccount: healthyVaultPda,
             vaultAuthority: healthyVaultPda,
             tokenMint: goldTokenMint,
-            poolProgram: SystemProgram.programId,
             poolAccount: goldPool.publicKey,
-            tokenProgram: TOKEN_PROGRAM_ID,
-            systemProgram: SystemProgram.programId,
+            payer: liquidator.publicKey,
           })
           .signers([liquidator])
           .rpc();
@@ -894,11 +798,10 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
 
   describe("🔧 Admin Functions", () => {
     it("should pause and resume protocol", async () => {
-      // Pause
+      // Pause - protocolState is auto-derived from seeds, only pass admin
       let tx = await program.methods
         .pauseProtocol()
         .accounts({
-          protocolState: protocolStatePda,
           admin: admin.publicKey,
         })
         .signers([admin])
@@ -911,7 +814,6 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
       tx = await program.methods
         .resumeProtocol()
         .accounts({
-          protocolState: protocolStatePda,
           admin: admin.publicKey,
         })
         .signers([admin])
@@ -932,7 +834,6 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
           500   // liquidation operations: 5%
         )
         .accounts({
-          protocolState: protocolStatePda,
           admin: admin.publicKey,
         })
         .signers([admin])
@@ -957,7 +858,6 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
             2000  // 20% - Total splits: 95%, should fail (must sum to 10000)
           )
           .accounts({
-            protocolState: protocolStatePda,
             admin: admin.publicKey,
           })
           .signers([admin])
@@ -980,7 +880,6 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
           newOperations.publicKey
         )
         .accounts({
-          protocolState: protocolStatePda,
           admin: admin.publicKey,
         })
         .signers([admin])
@@ -997,13 +896,11 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
       const withdrawAmount = new BN(10 * LAMPORTS_PER_SOL);
       const adminBalanceBefore = await connection.getBalance(admin.publicKey);
 
+      // treasury is also auto-derived from seeds
       const tx = await program.methods
         .withdrawTreasury(withdrawAmount)
         .accounts({
-          protocolState: protocolStatePda,
-          treasury: treasuryPda,
           admin: admin.publicKey,
-          systemProgram: SystemProgram.programId,
         })
         .signers([admin])
         .rpc();
@@ -1022,7 +919,6 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
         await program.methods
           .pauseProtocol()
           .accounts({
-            protocolState: protocolStatePda,
             admin: fakeAdmin.publicKey,
           })
           .signers([fakeAdmin])
@@ -1072,7 +968,6 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
       await program.methods
         .pauseProtocol()
         .accounts({
-          protocolState: protocolStatePda,
           admin: admin.publicKey,
         })
         .signers([admin])
@@ -1098,20 +993,12 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
         await program.methods
           .createLoan(new BN(1000 * 10 ** TOKEN_DECIMALS), new BN(24 * 60 * 60))
           .accounts({
-            protocolState: protocolStatePda,
-            tokenConfig: goldTokenConfigPda,
             loan: pausedLoanPda,
-            treasury: treasuryPda,
             borrower: borrower.publicKey,
             borrowerTokenAccount: borrowerGoldTokenAccount,
             vault: pausedVaultPda,
             poolAccount: goldPool.publicKey,
             tokenMint: goldTokenMint,
-            userExposure: borrowerExposurePda,
-            tokenProgram: TOKEN_PROGRAM_ID,
-            associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
-            systemProgram: SystemProgram.programId,
-            rent: web3.SYSVAR_RENT_PUBKEY,
           })
           .signers([borrower])
           .rpc();
@@ -1125,7 +1012,6 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
       await program.methods
         .resumeProtocol()
         .accounts({
-          protocolState: protocolStatePda,
           admin: admin.publicKey,
         })
         .signers([admin])
@@ -1175,10 +1061,7 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
       const tx = await program.methods
         .fundTreasury(fundAmount)
         .accounts({
-          protocolState: protocolStatePda,
-          treasury: treasuryPda,
           funder: funder.publicKey,
-          systemProgram: SystemProgram.programId,
         })
         .signers([funder])
         .rpc();
@@ -1198,7 +1081,6 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
       await program.methods
         .updateFees(newProtocolFee, newTreasuryFee, newBuybackFee, newOperationsFee)
         .accounts({
-          protocolState: protocolStatePda,
           admin: admin.publicKey,
         })
         .signers([admin])
@@ -1218,7 +1100,6 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
         await program.methods
           .updateFees(null, 5000, 3000, 3000) // Keep protocol fee, splits sum = 11000 (should be 10000)
           .accounts({
-            protocolState: protocolStatePda,
             admin: admin.publicKey,
           })
           .signers([admin])
@@ -1226,7 +1107,7 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
         
         expect.fail("Should have failed with invalid fee split");
       } catch (err) {
-        expect(err.message).to.include("InvalidFeeConfiguration");
+        expect((err as Error).message).to.include("InvalidFeeConfiguration");
         console.log("✅ Invalid fee split correctly rejected");
       }
     });
@@ -1248,7 +1129,6 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
           null  // Keep operations fee unchanged
         )
         .accounts({
-          protocolState: protocolStatePda,
           admin: admin.publicKey,
         })
         .signers([admin])
@@ -1264,7 +1144,6 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
       await program.methods
         .updateFees(null, null, null, null)
         .accounts({
-          protocolState: protocolStatePda,
           admin: admin.publicKey,
         })
         .signers([admin])
@@ -1284,7 +1163,6 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
       await program.methods
         .resumeProtocol()
         .accounts({
-          protocolState: protocolStatePda,
           admin: admin.publicKey,
         })
         .signers([admin])
@@ -1309,15 +1187,12 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
         program.programId
       );
       
+      // Note: pool_address is passed as argument, not as account
       await program.methods
         .whitelistToken(0, testPool.publicKey, poolType, minLoanAmount, maxLoanAmount) // Bronze tier
         .accounts({
-          protocolState: protocolStatePda,
-          tokenConfig: tokenConfigPda,
           tokenMint: testTokenMint,
-          poolAccount: testPool.publicKey,
           admin: admin.publicKey,
-          systemProgram: SystemProgram.programId,
         })
         .signers([admin])
         .rpc();
@@ -1357,20 +1232,12 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
         await program.methods
           .createLoan(collateralAmount, new BN(shortDuration))
           .accounts({
-            protocolState: protocolStatePda,
-            tokenConfig: goldTokenConfigPda,
             loan: testLoanPda,
-            treasury: treasuryPda,
             borrower: borrower2.publicKey,
             borrowerTokenAccount: borrower2GoldTokenAccount,
             vault: testVaultPda,
             poolAccount: goldPool.publicKey,
             tokenMint: goldTokenMint,
-            userExposure: borrower2ExposurePda,
-            tokenProgram: TOKEN_PROGRAM_ID,
-            associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
-            systemProgram: SystemProgram.programId,
-            rent: anchor.web3.SYSVAR_RENT_PUBKEY,
           })
           .signers([borrower2])
           .rpc();

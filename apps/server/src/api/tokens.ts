@@ -31,6 +31,86 @@ tokensRouter.get('/', async (c) => {
   });
 });
 
+// Get top collateral token for dashboard (must come before /:mint to avoid conflict)
+tokensRouter.get('/top-collateral', async (c) => {
+  try {
+    // Get the token with the highest total collateral value
+    // First, let's get active loans and calculate manually
+    const activeLoans = await prisma.loan.findMany({
+      where: {
+        status: 'active'
+      },
+      select: {
+        tokenMint: true,
+        collateralAmount: true,
+      },
+    });
+
+    if (!activeLoans.length) {
+      return c.json<ApiResponse<null>>({
+        success: true,
+        data: null,
+      });
+    }
+
+    // Group by tokenMint and sum collateral manually
+    const tokenStats = new Map<string, { total: bigint; count: number }>();
+    
+    for (const loan of activeLoans) {
+      const mint = loan.tokenMint;
+      const amount = BigInt(loan.collateralAmount);
+      const existing = tokenStats.get(mint) || { total: 0n, count: 0 };
+      tokenStats.set(mint, {
+        total: existing.total + amount,
+        count: existing.count + 1,
+      });
+    }
+
+    // Find the token with highest collateral
+    let topMint = '';
+    let maxCollateral = 0n;
+    let maxCount = 0;
+
+    for (const [mint, stats] of tokenStats) {
+      if (stats.total > maxCollateral) {
+        maxCollateral = stats.total;
+        topMint = mint;
+        maxCount = stats.count;
+      }
+    }
+
+    if (!topMint) {
+      return c.json<ApiResponse<null>>({
+        success: true,
+        data: null,
+      });
+    }
+
+    // Get token info
+    const token = await prisma.token.findUnique({
+      where: { id: topMint },
+    });
+
+    const result = {
+      mint: topMint,
+      symbol: token?.symbol || 'UNKNOWN',
+      name: token?.name || 'Unknown Token',
+      totalCollateralAmount: maxCollateral.toString(),
+      activeLoansCount: maxCount,
+    };
+
+    return c.json<ApiResponse<typeof result>>({
+      success: true,
+      data: result,
+    });
+  } catch (error: any) {
+    return c.json<ApiResponse<null>>({
+      success: false,
+      error: error.message,
+    }, 500);
+  }
+});
+
 // Get single token details
 tokensRouter.get('/:mint', async (c) => {
   const mint = c.req.param('mint');

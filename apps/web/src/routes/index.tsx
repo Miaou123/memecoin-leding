@@ -82,7 +82,7 @@ export default function Home() {
         
         <div class="text-center">
           <div class="text-2xl font-bold text-text-primary">
-            {protocolStats.isLoading ? '---' : formatNumber(protocolStats.data?.totalLoansIssued || 0)}
+            {protocolStats.isLoading ? '---' : formatNumber(protocolStats.data?.totalLoansCreated || 0)}
           </div>
           <div class="text-text-dim text-xs">TOTAL_LOANS</div>
         </div>

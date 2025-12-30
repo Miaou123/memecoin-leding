@@ -67,6 +67,47 @@ loansRouter.get('/', zValidator('query', getLoansSchema), async (c) => {
   return c.json(response);
 });
 
+// Get recent loans for dashboard (must come before /:pubkey to avoid conflict)
+const getRecentLoansSchema = z.object({
+  limit: z.coerce.number().min(1).max(20).default(5),
+});
+
+loansRouter.get('/recent', zValidator('query', getRecentLoansSchema), async (c) => {
+  const query = c.req.valid('query');
+  
+  try {
+    const loans = await prisma.loan.findMany({
+      include: {
+        token: true,
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+      take: query.limit,
+    });
+
+    const formattedLoans = loans.map(loan => ({
+      id: loan.pubkey,
+      tokenSymbol: loan.token?.symbol || 'UNKNOWN',
+      tokenName: loan.token?.name || 'Unknown Token',
+      solBorrowed: loan.solBorrowed,
+      status: loan.status,
+      createdAt: Math.floor(loan.createdAt.getTime() / 1000),
+      healthScore: 75, // TODO: Calculate actual health score
+    }));
+
+    return c.json<ApiResponse<typeof formattedLoans>>({
+      success: true,
+      data: formattedLoans,
+    });
+  } catch (error: any) {
+    return c.json<ApiResponse<null>>({
+      success: false,
+      error: error.message,
+    }, 500);
+  }
+});
+
 // Get single loan
 loansRouter.get('/:pubkey', async (c) => {
   const pubkey = c.req.param('pubkey');

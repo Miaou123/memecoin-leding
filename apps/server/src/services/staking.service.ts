@@ -76,6 +76,26 @@ class StakingService {
       }
       
       // Deserialize staking pool account (skip 8-byte discriminator)
+      // Correct Rust struct layout:
+      // pub struct StakingPool {
+      //     pub authority: Pubkey,              // 32 bytes
+      //     pub staking_token_mint: Pubkey,     // 32 bytes
+      //     pub staking_vault: Pubkey,          // 32 bytes
+      //     pub reward_vault: Pubkey,           // 32 bytes
+      //     pub total_staked: u64,              // 8 bytes
+      //     pub reward_per_token_stored: u128,  // 16 bytes
+      //     pub last_update_time: i64,          // 8 bytes
+      //     pub target_pool_balance: u64,       // 8 bytes
+      //     pub base_emission_rate: u64,        // 8 bytes
+      //     pub max_emission_rate: u64,         // 8 bytes
+      //     pub min_emission_rate: u64,         // 8 bytes
+      //     pub total_rewards_distributed: u64, // 8 bytes
+      //     pub total_rewards_deposited: u64,   // 8 bytes
+      //     pub paused: bool,                   // 1 byte
+      //     pub bump: u8,                       // 1 byte
+      //     pub _reserved: [u8; 64],            // 64 bytes
+      // }
+      
       const data = stakingPoolAccount.data;
       let offset = 8; // Skip discriminator
       
@@ -84,23 +104,86 @@ class StakingService {
       const stakingVault = readPubkey(data, offset); offset += 32;
       const rewardVault = readPubkey(data, offset); offset += 32;
       const totalStaked = readU64(data, offset); offset += 8;
-      const totalStakers = readU64(data, offset); offset += 8;
-      const rewardPerTokenStored = readU128(data, offset); offset += 16;
+      const rewardPerTokenStored = readU128(data, offset); offset += 16;  // u128, not totalStakers!
       const lastUpdateTime = readI64(data, offset); offset += 8;
       const targetPoolBalance = readU64(data, offset); offset += 8;
       const baseEmissionRate = readU64(data, offset); offset += 8;
       const maxEmissionRate = readU64(data, offset); offset += 8;
       const minEmissionRate = readU64(data, offset); offset += 8;
-      const currentEmissionRate = readU64(data, offset); offset += 8;
-      const paused = data[offset]; offset += 1;
-      const bump = data[offset];
+      const totalRewardsDistributed = readU64(data, offset); offset += 8;
+      const totalRewardsDeposited = readU64(data, offset); offset += 8;
+      const paused = data[offset] !== 0; offset += 1;
+      const bump = data[offset]; offset += 1;
       
-      // Calculate APR: (currentEmissionRate * 365 * 24 * 3600 * 100) / totalStaked
+      // Count total stakers by querying all UserStake PDAs
+      let totalStakers = new BN(0);
+      try {
+        // Get all UserStake accounts for this staking pool
+        const userStakeAccounts = await this.connection.getProgramAccounts(
+          new PublicKey(PROGRAM_ID),
+          {
+            filters: [
+              {
+                memcmp: {
+                  offset: 0,
+                  bytes: 'J6ZWGMgjwQC', // UserStake discriminator [102,53,163,107,9,138,87,153] in base58
+                },
+              },
+              {
+                memcmp: {
+                  offset: 40, // Skip discriminator (8) + owner (32) = position of pool pubkey
+                  bytes: stakingPoolPDA.toBase58(),
+                },
+              },
+            ],
+          }
+        );
+        
+        // Count accounts with non-zero stakes
+        let activeStakers = 0;
+        for (const account of userStakeAccounts) {
+          try {
+            let offset = 8 + 32 + 32; // Skip discriminator + owner + pool
+            const stakedAmount = readU64(account.account.data, offset);
+            if (stakedAmount.gt(new BN(0))) {
+              activeStakers++;
+            }
+          } catch (e) {
+            // Skip invalid accounts
+            continue;
+          }
+        }
+        
+        totalStakers = new BN(activeStakers);
+        console.log(`👥 Found ${activeStakers} active stakers`);
+      } catch (error) {
+        console.warn('⚠️ Could not query staker count, using 0:', error);
+        totalStakers = new BN(0);
+      }
+      
+      // Calculate dynamic emission rate based on reward pool balance
+      let currentEmissionRate = baseEmissionRate;
+      if (targetPoolBalance.gt(new BN(0)) && rewardVaultBalance > 0) {
+        // Dynamic emission: rate = base * (poolBalance / targetBalance)
+        // Clamped between min and max
+        const ratio = new BN(rewardVaultBalance).mul(new BN(10000)).div(targetPoolBalance);
+        currentEmissionRate = baseEmissionRate.mul(ratio).div(new BN(10000));
+        
+        // Clamp to min/max bounds
+        if (currentEmissionRate.lt(minEmissionRate)) currentEmissionRate = minEmissionRate;
+        if (currentEmissionRate.gt(maxEmissionRate)) currentEmissionRate = maxEmissionRate;
+      }
+      
+      // Calculate APR: (currentEmissionRate * 365 * 24 * 3600) / totalStaked * 100
       let currentApr = 0;
-      if (totalStaked.gt(new BN(0))) {
-        const secondsPerYear = 365 * 24 * 3600;
-        const annualEmission = currentEmissionRate.mul(new BN(secondsPerYear));
-        currentApr = annualEmission.mul(new BN(100)).div(totalStaked).toNumber();
+      if (totalStaked.gt(new BN(0)) && currentEmissionRate.gt(new BN(0))) {
+        const secondsPerYear = new BN(365 * 24 * 3600);
+        const annualEmissionLamports = currentEmissionRate.mul(secondsPerYear);
+        
+        // APR as percentage: (annual SOL emission / total staked tokens) * 100
+        // Note: This assumes 1:1 value between SOL and staking token for simplicity
+        const aprBasisPoints = annualEmissionLamports.mul(new BN(10000)).div(totalStaked);
+        currentApr = aprBasisPoints.toNumber() / 100;
       }
       
       console.log('📊 Staking pool state:', {
