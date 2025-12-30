@@ -61,7 +61,7 @@ export default function Staking() {
   const canUnstake = createMemo(() => {
     const amount = parseFloat(unstakeAmount());
     const userStaked = parseFloat(userStake.data?.stake?.stakedAmount || '0');
-    return !isNaN(amount) && amount > 0 && amount <= userStaked / 1e9; // Convert from lamports
+    return !isNaN(amount) && amount > 0 && amount <= userStaked / 1e6; // Convert from 6 decimals
   });
 
   // Stake mutation
@@ -220,7 +220,7 @@ export default function Staking() {
       <div class="flex justify-center gap-8 py-4 border-y border-border">
         <div class="text-center">
           <div class="text-2xl font-bold text-accent-green">
-            {stakingStats.isLoading ? '---' : formatNumber(parseFloat(stakingStats.data?.totalStaked || '0') / 1e9)}
+            {stakingStats.isLoading ? '---' : formatNumber(parseFloat(stakingStats.data?.totalStaked || '0') / 1e6)}
           </div>
           <div class="text-text-dim text-xs">TOTAL_STAKED</div>
         </div>
@@ -267,7 +267,7 @@ export default function Staking() {
               {/* big staked number centered */}
               <div class="text-center mb-6">
                 <div style="font-size: 32px" class="font-bold text-accent-green mb-2 leading-none">
-                  {userStake.isLoading ? '---' : formatNumber(parseFloat(userStake.data?.stake?.stakedAmount || '0') / 1e9)}
+                  {userStake.isLoading ? '---' : formatNumber(parseFloat(userStake.data?.stake?.stakedAmount || '0') / 1e6)}
                 </div>
                 <div class="text-xs text-text-dim uppercase tracking-wider">TOKENS STAKED</div>
               </div>
@@ -381,10 +381,10 @@ export default function Staking() {
                   </div>
                   
                   <div class="text-xs text-text-secondary">
-                    Available: {formatNumber(parseFloat(userStake.data?.stake?.stakedAmount || '0') / 1e9)} TOKENS 
+                    Available: {formatNumber(parseFloat(userStake.data?.stake?.stakedAmount || '0') / 1e6)} TOKENS 
                     <button 
                       class="text-accent-blue hover:underline ml-2"
-                      onClick={() => setUnstakeAmount((parseFloat(userStake.data?.stake?.stakedAmount || '0') / 1e9).toString())}
+                      onClick={() => setUnstakeAmount((parseFloat(userStake.data?.stake?.stakedAmount || '0') / 1e6).toString())}
                     >
                       [MAX]
                     </button>
