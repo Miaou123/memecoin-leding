@@ -2,172 +2,175 @@ use anchor_lang::prelude::*;
 
 #[error_code]
 pub enum LendingError {
-    #[msg("Protocol is currently paused")]
-    ProtocolPaused,
+    #[msg("E6000: Protocol is currently paused")]
+    ProtocolPaused = 6000,
 
-    #[msg("Only admin can perform this action")]
-    Unauthorized,
+    #[msg("E6001: Only admin can perform this action")]
+    Unauthorized = 6001,
 
-    #[msg("Invalid token tier")]
-    InvalidTokenTier,
+    #[msg("E6002: Invalid token tier")]
+    InvalidTokenTier = 6002,
 
-    #[msg("Token is not whitelisted")]
-    TokenNotWhitelisted,
+    #[msg("E6003: Token is not whitelisted")]
+    TokenNotWhitelisted = 6003,
 
-    #[msg("Token is disabled for lending")]
-    TokenDisabled,
+    #[msg("E6004: Token is disabled for lending")]
+    TokenDisabled = 6004,
 
-    #[msg("Loan amount is below minimum")]
-    LoanAmountTooLow,
+    #[msg("E6005: Loan amount is below minimum")]
+    LoanAmountTooLow = 6005,
 
-    #[msg("Loan amount exceeds maximum")]
-    LoanAmountTooHigh,
+    #[msg("E6006: Loan amount exceeds maximum")]
+    LoanAmountTooHigh = 6006,
 
-    #[msg("Insufficient collateral for loan")]
-    InsufficientCollateral,
+    #[msg("E6007: Insufficient collateral for loan")]
+    InsufficientCollateral = 6007,
 
-    #[msg("Loan has already been repaid")]
-    LoanAlreadyRepaid,
+    #[msg("E6008: Loan has already been repaid")]
+    LoanAlreadyRepaid = 6008,
 
-    #[msg("Loan has been liquidated")]
-    LoanLiquidated,
+    #[msg("E6009: Loan has been liquidated")]
+    LoanLiquidated = 6009,
 
-    #[msg("Loan is not due for liquidation")]
-    LoanNotLiquidatable,
+    #[msg("E6010: Loan is not due for liquidation")]
+    LoanNotLiquidatable = 6010,
 
-    #[msg("Invalid price feed data")]
-    InvalidPriceFeed,
+    #[msg("E6011: Invalid price feed data")]
+    InvalidPriceFeed = 6011,
 
-    #[msg("Price feed is stale")]
-    StalePriceFeed,
+    #[msg("E6012: Price feed is stale")]
+    StalePriceFeed = 6012,
 
-    #[msg("Math overflow")]
-    MathOverflow,
+    #[msg("E6013: Math overflow")]
+    MathOverflow = 6013,
 
-    #[msg("Math underflow")]
-    MathUnderflow,
+    #[msg("E6014: Math underflow")]
+    MathUnderflow = 6014,
 
-    #[msg("Division by zero")]
-    DivisionByZero,
+    #[msg("E6015: Division by zero")]
+    DivisionByZero = 6015,
 
-    #[msg("Invalid loan duration")]
-    InvalidLoanDuration,
+    #[msg("E6016: Invalid loan duration")]
+    InvalidLoanDuration = 6016,
 
+    #[msg("E6017: LTV ratio too high")]
+    LtvTooHigh = 6017,
 
-    #[msg("LTV ratio too high")]
-    LtvTooHigh,
+    #[msg("E6018: Insufficient treasury balance")]
+    InsufficientTreasuryBalance = 6018,
 
-    #[msg("Insufficient treasury balance")]
-    InsufficientTreasuryBalance,
+    #[msg("E6019: Invalid liquidation bonus")]
+    InvalidLiquidationBonus = 6019,
 
-    #[msg("Invalid liquidation bonus")]
-    InvalidLiquidationBonus,
+    #[msg("E6020: Cannot liquidate healthy loan")]
+    LoanNotUnhealthy = 6020,
 
-    #[msg("Cannot liquidate healthy loan")]
-    LoanNotUnhealthy,
+    #[msg("E6021: Price deviation too high")]
+    PriceDeviationTooHigh = 6021,
 
-    #[msg("Price deviation too high")]
-    PriceDeviationTooHigh,
+    #[msg("E6022: Invalid pool address")]
+    InvalidPoolAddress = 6022,
 
-    #[msg("Invalid pool address")]
-    InvalidPoolAddress,
+    #[msg("E6023: Token already whitelisted")]
+    TokenAlreadyWhitelisted = 6023,
 
-    #[msg("Token already whitelisted")]
-    TokenAlreadyWhitelisted,
+    #[msg("E6024: Invalid admin address")]
+    InvalidAdminAddress = 6024,
 
-    #[msg("Invalid admin address")]
-    InvalidAdminAddress,
+    #[msg("E6025: Emergency mode active")]
+    EmergencyModeActive = 6025,
 
-    #[msg("Emergency mode active")]
-    EmergencyModeActive,
+    #[msg("E6026: Invalid token account owner")]
+    InvalidTokenAccountOwner = 6026,
 
-    #[msg("Invalid token account owner")]
-    InvalidTokenAccountOwner,
+    #[msg("E6027: Insufficient token balance")]
+    InsufficientTokenBalance = 6027,
 
-    #[msg("Insufficient token balance")]
-    InsufficientTokenBalance,
+    #[msg("E6028: Invalid fee configuration - splits must sum to 10000")]
+    InvalidFeeConfiguration = 6028,
 
-    #[msg("Invalid fee configuration - splits must sum to 10000")]
-    InvalidFeeConfiguration,
-    
-    #[msg("Pool type mismatch")]
-    PoolTypeMismatch,
-    
-    #[msg("Price is zero or invalid")]
-    ZeroPrice,
-    
-    #[msg("Loan duration too short (min 12 hours)")]
-    DurationTooShort,
-    
-    #[msg("Loan duration too long (max 7 days)")]
-    DurationTooLong,
+    #[msg("E6029: Pool type mismatch")]
+    PoolTypeMismatch = 6029,
 
-    #[msg("Invalid pool type")]
-    InvalidPoolType,
+    #[msg("E6030: Price is zero or invalid")]
+    ZeroPrice = 6030,
 
-    #[msg("Invalid loan amount")]
-    InvalidLoanAmount,
+    #[msg("E6031: Loan duration too short (min 12 hours)")]
+    DurationTooShort = 6031,
 
-    #[msg("Reentrancy detected")]
-    ReentrancyDetected,
-    
-    #[msg("Minimum deposit amount not met")]
-    BelowMinimumDeposit,
-    
-    #[msg("Loan not found")]
-    LoanNotFound,
-    
-    #[msg("Price too volatile for safe lending")]
-    PriceTooVolatile,
-    
-    #[msg("Cooldown period not elapsed")]
-    CooldownNotElapsed,
-    
-    #[msg("Maximum loans per user exceeded")]
-    MaxLoansExceeded,
-    
-    #[msg("Treasury utilization too high")]
-    TreasuryUtilizationTooHigh,
+    #[msg("E6032: Loan duration too long (max 7 days)")]
+    DurationTooLong = 6032,
 
-    #[msg("Slippage tolerance exceeded")]
-    SlippageExceeded,
+    #[msg("E6033: Invalid pool type")]
+    InvalidPoolType = 6033,
 
-    #[msg("Missing PumpFun accounts for liquidation")]
-    MissingPumpfunAccounts,
+    #[msg("E6034: Invalid loan amount")]
+    InvalidLoanAmount = 6034,
 
-    #[msg("Missing Jupiter accounts for liquidation")]
-    MissingJupiterAccounts,
+    #[msg("E6035: Reentrancy detected")]
+    ReentrancyDetected = 6035,
 
-    #[msg("Missing Jupiter swap data")]
-    MissingJupiterSwapData,
+    #[msg("E6036: Minimum deposit amount not met")]
+    BelowMinimumDeposit = 6036,
 
-    #[msg("Invalid bonding curve address")]
-    InvalidBondingCurve,
+    #[msg("E6037: Loan not found")]
+    LoanNotFound = 6037,
 
-    #[msg("Invalid pool data")]
-    InvalidPoolData,
+    #[msg("E6038: Staking pool is paused")]
+    StakingPaused = 6038,
 
-    #[msg("Staking pool is paused")]
-    StakingPaused,
+    #[msg("E6039: No rewards to claim")]
+    NoRewardsToClaim = 6039,
 
-    #[msg("Nothing staked")]
-    NothingStaked,
+    #[msg("E6040: Insufficient reward balance")]
+    InsufficientRewardBalance = 6040,
 
-    #[msg("Insufficient stake balance")]
-    InsufficientStakeBalance,
+    #[msg("E6041: Insufficient stake balance")]
+    InsufficientStakeBalance = 6041,
 
-    #[msg("No rewards to claim")]
-    NoRewardsToClaim,
+    #[msg("E6042: Slippage tolerance exceeded")]
+    SlippageExceeded = 6042,
 
-    #[msg("Invalid fee split configuration")]
-    InvalidFeeSplit,
+    #[msg("E6043: Missing PumpFun accounts")]
+    MissingPumpfunAccounts = 6043,
 
-    #[msg("Staking pool not initialized")]
-    StakingPoolNotInitialized,
+    #[msg("E6044: Missing Jupiter accounts")]
+    MissingJupiterAccounts = 6044,
 
-    #[msg("Invalid staking token")]
-    InvalidStakingToken,
+    #[msg("E6045: Missing Jupiter swap data")]
+    MissingJupiterSwapData = 6045,
 
-    #[msg("Reward vault insufficient balance")]
-    InsufficientRewardBalance,
+    #[msg("E6046: Invalid bonding curve")]
+    InvalidBondingCurve = 6046,
+
+    // New errors from this fix batch
+    #[msg("E6047: Admin transfer timelock not expired")]
+    AdminTransferTooEarly = 6047,
+
+    #[msg("E6048: No pending admin transfer")]
+    NoPendingAdminTransfer = 6048,
+
+    #[msg("E6049: Protocol must be paused for emergency admin update")]
+    ProtocolNotPaused = 6049,
+
+    #[msg("E6050: Collateral value below minimum required")]
+    CollateralValueTooLow = 6050,
+
+    #[msg("E6051: Slippage tolerance too high")]
+    SlippageTooHigh = 6051,
+
+    #[msg("E6052: Token exposure limit exceeded (max 10% of treasury per token)")]
+    TokenExposureTooHigh = 6052,
+
+    #[msg("E6053: User exposure limit exceeded (max 30% of treasury per user)")]
+    UserExposureTooHigh = 6053,
+
+    #[msg("E6054: Single loan exceeds maximum (10% of treasury)")]
+    SingleLoanTooLarge = 6054,
+
+    #[msg("E6055: Invalid fee split configuration")]
+    InvalidFeeSplit = 6055,
+
+    #[msg("E6056: Invalid pool data")]
+    InvalidPoolData = 6056,
 }

@@ -79,6 +79,9 @@ export const PUMPSWAP_PROGRAM_ID = new PublicKey('PSwapMdSai8tjrEXcxFeQth87xC4rR
 export const RAYDIUM_PROGRAM_ID = new PublicKey('675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8');
 export const ORCA_PROGRAM_ID = new PublicKey('whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc');
 
+// Staking configuration
+export const STAKING_TOKEN_MINT = process.env.STAKING_TOKEN_MINT || process.env.VITE_STAKING_TOKEN_MINT || '';
+
 // Cache TTLs (in seconds)
 export const CACHE_TTL = {
   PRICE: 10,

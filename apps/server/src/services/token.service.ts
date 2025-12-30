@@ -69,14 +69,8 @@ class TokenService {
       throw new Error('Token not found');
     }
     
-    // In a real implementation, this would fetch from the AMM pool
-    // For now, return mock data
-    return {
-      poolAddress: token.poolAddress,
-      tokenAmount: '1000000000', // Mock amount
-      solAmount: '50000000000', // Mock SOL amount
-      totalSupply: '1000000000000', // Mock LP supply
-    };
+    // TODO: Implement real pool data fetching from AMM
+    throw new Error('Pool data not available - real implementation required');
   }
   
   async updateTokenTier(mint: string, tier: TokenTier): Promise<void> {

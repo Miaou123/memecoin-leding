@@ -1,7 +1,7 @@
 import { Component, createSignal, createEffect, Show, For } from 'solid-js';
 import { WalletToken } from '@/hooks/useWalletPumpTokens';
 import { api } from '@/lib/api';
-import { formatSOL, shortenAddress } from '@/lib/utils';
+import { formatSOL, formatTokenAmount, shortenAddress } from '@/lib/utils';
 
 interface TokenWithPrice extends WalletToken {
   price?: string;
@@ -103,7 +103,7 @@ export const WalletTokenList: Component<WalletTokenListProps> = (props) => {
                     </div>
                     <div class="mt-1">
                       <span class="text-lg font-semibold">
-                        {formatSOL(token.uiBalance)}
+                        {formatTokenAmount(token.uiBalance)}
                       </span>
                       <span class="text-sm text-muted-foreground ml-2">
                         tokens

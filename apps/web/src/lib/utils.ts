@@ -24,6 +24,12 @@ export function formatSOL(lamports: string | number): string {
   });
 }
 
+export function formatTokenAmount(amount: string | number, maxDecimals = 2): string {
+  return formatNumber(amount, {
+    maximumFractionDigits: maxDecimals,
+  });
+}
+
 export function formatUSD(amount: number): string {
   return formatNumber(amount, {
     style: 'currency',

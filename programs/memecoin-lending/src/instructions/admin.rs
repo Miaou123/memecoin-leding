@@ -43,6 +43,20 @@ pub struct WithdrawTreasury<'info> {
     pub system_program: Program<'info, System>,
 }
 
+/// Accept admin transfer context
+#[derive(Accounts)]
+pub struct AcceptAdminTransfer<'info> {
+    #[account(
+        mut,
+        seeds = [PROTOCOL_STATE_SEED],
+        bump = protocol_state.bump,
+        constraint = protocol_state.pending_admin == new_admin.key() @ LendingError::Unauthorized
+    )]
+    pub protocol_state: Account<'info, ProtocolState>,
+    
+    pub new_admin: Signer<'info>,
+}
+
 /// Emergency drain context
 #[derive(Accounts)]
 pub struct EmergencyDrain<'info> {
@@ -92,19 +106,69 @@ pub fn resume_handler(ctx: Context<AdminControl>) -> Result<()> {
     Ok(())
 }
 
-/// Update protocol admin
+/// Emergency admin update (requires protocol to be paused)
 pub fn update_admin_handler(ctx: Context<AdminControl>, new_admin: Pubkey) -> Result<()> {
     let protocol_state = &mut ctx.accounts.protocol_state;
     
-    // Validate new admin address
-    if new_admin == Pubkey::default() {
-        return Err(LendingError::InvalidAdminAddress.into());
-    }
+    // Emergency admin update only allowed when paused
+    require!(protocol_state.paused, LendingError::ProtocolNotPaused);
+    require!(new_admin != Pubkey::default(), LendingError::InvalidAdminAddress);
     
     let old_admin = protocol_state.admin;
     protocol_state.admin = new_admin;
+    protocol_state.pending_admin = Pubkey::default();
+    protocol_state.admin_transfer_timestamp = 0;
     
-    msg!("Admin updated from {} to {}", old_admin, new_admin);
+    msg!("EMERGENCY: Admin updated from {} to {}", old_admin, new_admin);
+    
+    Ok(())
+}
+
+/// Initiate admin transfer (starts 48h timelock)
+pub fn initiate_admin_transfer_handler(ctx: Context<AdminControl>, new_admin: Pubkey) -> Result<()> {
+    let protocol_state = &mut ctx.accounts.protocol_state;
+    let clock = Clock::get()?;
+    
+    require!(new_admin != Pubkey::default(), LendingError::InvalidAdminAddress);
+    require!(new_admin != protocol_state.admin, LendingError::InvalidAdminAddress);
+    
+    protocol_state.pending_admin = new_admin;
+    protocol_state.admin_transfer_timestamp = clock.unix_timestamp;
+    
+    msg!("Admin transfer initiated to {}. Can be accepted after {} seconds.", 
+         new_admin, ADMIN_TRANSFER_DELAY);
+    
+    Ok(())
+}
+
+/// Accept admin transfer (after timelock expires)
+pub fn accept_admin_transfer_handler(ctx: Context<AcceptAdminTransfer>) -> Result<()> {
+    let protocol_state = &mut ctx.accounts.protocol_state;
+    let clock = Clock::get()?;
+    
+    let time_elapsed = clock.unix_timestamp - protocol_state.admin_transfer_timestamp;
+    require!(time_elapsed >= ADMIN_TRANSFER_DELAY, LendingError::AdminTransferTooEarly);
+    
+    let old_admin = protocol_state.admin;
+    protocol_state.admin = protocol_state.pending_admin;
+    protocol_state.pending_admin = Pubkey::default();
+    protocol_state.admin_transfer_timestamp = 0;
+    
+    msg!("Admin transferred from {} to {}", old_admin, protocol_state.admin);
+    
+    Ok(())
+}
+
+/// Cancel pending admin transfer (current admin only)
+pub fn cancel_admin_transfer_handler(ctx: Context<AdminControl>) -> Result<()> {
+    let protocol_state = &mut ctx.accounts.protocol_state;
+    
+    require!(protocol_state.pending_admin != Pubkey::default(), LendingError::NoPendingAdminTransfer);
+    
+    protocol_state.pending_admin = Pubkey::default();
+    protocol_state.admin_transfer_timestamp = 0;
+    
+    msg!("Admin transfer cancelled");
     
     Ok(())
 }

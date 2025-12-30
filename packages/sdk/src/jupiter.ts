@@ -76,13 +76,25 @@ export async function getJupiterSwapInstruction(
 }
 
 /**
+ * SECURITY: Slippage escalation levels for liquidation retries
+ */
+export const SLIPPAGE_ESCALATION_BPS = [
+  300,  // 3% - First attempt
+  500,  // 5% - Second attempt  
+  700,  // 7% - Third attempt
+  900,  // 9% - Fourth attempt
+  1100, // 11% - Fifth attempt
+  1500, // 15% - Final attempt
+];
+
+/**
  * Prepare Jupiter liquidation data
  */
 export async function prepareJupiterLiquidation(
   tokenMint: PublicKey,
   amount: BN,
   vaultAuthority: PublicKey,
-  slippageBps: number = 150
+  slippageBps: number = 300 // SECURITY: Default to 3% for first attempt
 ): Promise<{
   minSolOutput: BN;
   swapData: Buffer;
@@ -108,5 +120,39 @@ export async function prepareJupiterLiquidation(
     minSolOutput: new BN(quote.otherAmountThreshold),
     swapData,
     routeAccounts,
+  };
+}
+
+/**
+ * SECURITY: Prepare Jupiter liquidation with retry mechanism and slippage escalation
+ */
+export async function prepareJupiterLiquidationWithRetry(
+  tokenMint: PublicKey,
+  amount: BN,
+  vaultAuthority: PublicKey,
+  retryAttempt: number = 0
+): Promise<{
+  minSolOutput: BN;
+  swapData: Buffer;
+  routeAccounts: AccountMeta[];
+  slippageBps: number;
+  maxRetries: number;
+}> {
+  const maxRetries = SLIPPAGE_ESCALATION_BPS.length;
+  
+  if (retryAttempt >= maxRetries) {
+    throw new Error(`Maximum liquidation retries exceeded (${maxRetries})`);
+  }
+  
+  const slippageBps = SLIPPAGE_ESCALATION_BPS[retryAttempt];
+  
+  console.log(`🔄 Jupiter liquidation attempt ${retryAttempt + 1}/${maxRetries} with ${slippageBps/100}% slippage`);
+  
+  const result = await prepareJupiterLiquidation(tokenMint, amount, vaultAuthority, slippageBps);
+  
+  return {
+    ...result,
+    slippageBps,
+    maxRetries,
   };
 }

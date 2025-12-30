@@ -62,12 +62,25 @@ export async function calculatePumpfunSellOutput(
 }
 
 /**
+ * SECURITY: Slippage escalation levels for PumpFun liquidation retries
+ */
+export const PUMPFUN_SLIPPAGE_ESCALATION_BPS = [
+  300,  // 3% - First attempt
+  500,  // 5% - Second attempt  
+  700,  // 7% - Third attempt
+  900,  // 9% - Fourth attempt
+  1100, // 11% - Fifth attempt
+  1500, // 15% - Final attempt
+];
+
+/**
  * Prepare PumpFun liquidation accounts
  */
 export async function preparePumpfunLiquidation(
   connection: Connection,
   tokenMint: PublicKey,
-  collateralAmount: BN
+  collateralAmount: BN,
+  slippageBps: number = 300 // SECURITY: Default to 3% for first attempt
 ): Promise<{
   minSolOutput: BN;
   bondingCurve: PublicKey;
@@ -80,17 +93,54 @@ export async function preparePumpfunLiquidation(
     tokenMint
   );
   
-  // Calculate expected output with 2% slippage buffer
+  // Calculate expected output with configurable slippage
   const expectedOutput = await calculatePumpfunSellOutput(
     connection,
     bondingCurve,
     collateralAmount
   );
-  const minSolOutput = expectedOutput.mul(new BN(98)).div(new BN(100));
+  
+  // Apply slippage: minOutput = expectedOutput * (10000 - slippageBps) / 10000
+  const slippageMultiplier = new BN(10000 - slippageBps);
+  const minSolOutput = expectedOutput.mul(slippageMultiplier).div(new BN(10000));
   
   return {
     minSolOutput,
     bondingCurve,
     bondingCurveTokenAccount,
+  };
+}
+
+/**
+ * SECURITY: Prepare PumpFun liquidation with retry mechanism and slippage escalation
+ */
+export async function preparePumpfunLiquidationWithRetry(
+  connection: Connection,
+  tokenMint: PublicKey,
+  collateralAmount: BN,
+  retryAttempt: number = 0
+): Promise<{
+  minSolOutput: BN;
+  bondingCurve: PublicKey;
+  bondingCurveTokenAccount: PublicKey;
+  slippageBps: number;
+  maxRetries: number;
+}> {
+  const maxRetries = PUMPFUN_SLIPPAGE_ESCALATION_BPS.length;
+  
+  if (retryAttempt >= maxRetries) {
+    throw new Error(`Maximum PumpFun liquidation retries exceeded (${maxRetries})`);
+  }
+  
+  const slippageBps = PUMPFUN_SLIPPAGE_ESCALATION_BPS[retryAttempt];
+  
+  console.log(`🔄 PumpFun liquidation attempt ${retryAttempt + 1}/${maxRetries} with ${slippageBps/100}% slippage`);
+  
+  const result = await preparePumpfunLiquidation(connection, tokenMint, collateralAmount, slippageBps);
+  
+  return {
+    ...result,
+    slippageBps,
+    maxRetries,
   };
 }

@@ -79,6 +79,16 @@ pub struct CreateLoan<'info> {
 
     pub token_mint: Account<'info, anchor_spl::token::Mint>,
 
+    /// User exposure tracker PDA
+    #[account(
+        init_if_needed,
+        payer = borrower,
+        space = UserExposure::LEN,
+        seeds = [USER_EXPOSURE_SEED, borrower.key().as_ref()],
+        bump
+    )]
+    pub user_exposure: Account<'info, UserExposure>,
+
     pub token_program: Program<'info, Token>,
     pub associated_token_program: Program<'info, anchor_spl::associated_token::AssociatedToken>,
     pub system_program: Program<'info, System>,
@@ -95,6 +105,9 @@ pub fn create_loan_handler(
     let loan = &mut ctx.accounts.loan;
     let clock = Clock::get()?;
 
+    // FIX 1: Reentrancy guard
+    ReentrancyGuard::enter(protocol_state)?;
+
     // Validate loan duration
     ValidationUtils::validate_loan_duration(duration_seconds)?;
 
@@ -107,6 +120,16 @@ pub fn create_loan_handler(
     
     require!(current_price > 0, LendingError::ZeroPrice);
     
+    // FIX 6: Validate minimum collateral value
+    let collateral_value = SafeMath::mul_div(
+        collateral_amount,
+        current_price,
+        PRICE_SCALE as u64,
+    )?;
+    require!(
+        collateral_value >= MIN_COLLATERAL_VALUE_LAMPORTS,
+        LendingError::CollateralValueTooLow
+    );
 
     // Calculate loan amount based on LTV
     let sol_loan_amount = LoanCalculator::calculate_loan_amount(
@@ -129,12 +152,90 @@ pub fn create_loan_handler(
         return Err(LendingError::InsufficientTreasuryBalance.into());
     }
 
-    // Calculate liquidation price
+    // ============================================================
+    // SECURITY CHECK 1: Dynamic Max Single Loan (10% of treasury)
+    // ============================================================
+    let max_single_loan = SafeMath::mul_div(
+        treasury_balance,
+        MAX_SINGLE_LOAN_BPS as u64,
+        BPS_DIVISOR
+    )?;
+
+    require!(
+        sol_loan_amount <= max_single_loan,
+        LendingError::SingleLoanTooLarge
+    );
+
+    msg!(
+        "Single loan check: {} <= {} (10% of treasury)", 
+        sol_loan_amount, 
+        max_single_loan
+    );
+
+    // ============================================================
+    // SECURITY CHECK 2: Per-Token Exposure Limit (10% of treasury)
+    // ============================================================
+    let max_token_exposure = SafeMath::mul_div(
+        treasury_balance,
+        MAX_TOKEN_EXPOSURE_BPS as u64,
+        BPS_DIVISOR
+    )?;
+
+    let new_token_exposure = SafeMath::add(
+        token_config.total_active_borrowed,
+        sol_loan_amount
+    )?;
+
+    require!(
+        new_token_exposure <= max_token_exposure,
+        LendingError::TokenExposureTooHigh
+    );
+
+    msg!(
+        "Token exposure check: {} <= {} (10% of treasury)", 
+        new_token_exposure, 
+        max_token_exposure
+    );
+
+    // ============================================================
+    // SECURITY CHECK 3: Per-User Exposure Limit (30% of treasury)
+    // ============================================================
+    let max_user_exposure = SafeMath::mul_div(
+        treasury_balance,
+        MAX_USER_EXPOSURE_BPS as u64,
+        BPS_DIVISOR
+    )?;
+
+    let new_user_exposure = SafeMath::add(
+        ctx.accounts.user_exposure.total_borrowed,
+        sol_loan_amount
+    )?;
+
+    require!(
+        new_user_exposure <= max_user_exposure,
+        LendingError::UserExposureTooHigh
+    );
+
+    msg!(
+        "User exposure check: {} <= {} (30% of treasury)", 
+        new_user_exposure, 
+        max_user_exposure
+    );
+
+    // ============================================================
+    // SECURITY CHECK 4: Minimum Loan Amount (0.01 SOL)
+    // ============================================================
+    require!(
+        sol_loan_amount >= MIN_COLLATERAL_VALUE_LAMPORTS,
+        LendingError::LoanAmountTooLow
+    );
+
+    // Calculate liquidation price with updated buffer (40% drop triggers liquidation)
     let liquidation_price = LoanCalculator::calculate_liquidation_price(
         sol_loan_amount,
         collateral_amount,
         token_config.ltv_bps,
-        300, // 3% liquidation buffer
+        4000, // 40% liquidation buffer (was DEFAULT_LIQUIDATION_BUFFER_BPS = 3%)
     )?;
 
     // Transfer collateral tokens to loan's vault
@@ -188,12 +289,38 @@ pub fn create_loan_handler(
     token_config.active_loans_count = SafeMath::add(token_config.active_loans_count, 1)?;
     token_config.total_volume = SafeMath::add(token_config.total_volume, sol_loan_amount)?;
 
+    // Update token config exposure tracking
+    token_config.total_active_borrowed = SafeMath::add(
+        token_config.total_active_borrowed,
+        sol_loan_amount
+    )?;
+
+    // Update user exposure tracking
+    let user_exposure = &mut ctx.accounts.user_exposure;
+    if user_exposure.user == Pubkey::default() {
+        // First loan for this user - initialize the account
+        user_exposure.user = ctx.accounts.borrower.key();
+        user_exposure.bump = ctx.bumps.user_exposure;
+    }
+    user_exposure.total_borrowed = new_user_exposure;
+    user_exposure.active_loans_count = SafeMath::add(
+        user_exposure.active_loans_count,
+        1
+    )?;
+    user_exposure.lifetime_borrowed = SafeMath::add(
+        user_exposure.lifetime_borrowed,
+        sol_loan_amount
+    )?;
+
     msg!(
         "Loan created: {} SOL borrowed against {} tokens (price: {})",
         sol_loan_amount,
         collateral_amount,
         current_price
     );
+    
+    // FIX 1: Exit reentrancy guard
+    ReentrancyGuard::exit(protocol_state);
     
     Ok(())
 }

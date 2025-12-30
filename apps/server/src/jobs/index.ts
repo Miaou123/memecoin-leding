@@ -37,112 +37,162 @@ const notificationWorker = new Worker('notification', notificationJob, {
   concurrency: 5,
 });
 
-// Job schedules
+/**
+ * Gracefully clean up and re-register repeatable jobs for a queue
+ * This removes old repeatable job configurations without affecting active jobs
+ */
+async function setupRepeatableJobs(
+  queue: Queue,
+  jobs: Array<{
+    name: string;
+    data: Record<string, any>;
+    every: number;
+    removeOnComplete?: number;
+    removeOnFail?: number;
+  }>
+) {
+  // Get existing repeatable jobs
+  const existingRepeatables = await queue.getRepeatableJobs();
+  
+  // Remove all existing repeatable job configurations
+  for (const job of existingRepeatables) {
+    try {
+      await queue.removeRepeatableByKey(job.key);
+    } catch (err) {
+      console.warn(`Could not remove repeatable job ${job.key}:`, err);
+    }
+  }
+  
+  // Add fresh repeatable jobs
+  for (const job of jobs) {
+    await queue.add(
+      job.name,
+      job.data,
+      {
+        repeat: { every: job.every },
+        removeOnComplete: job.removeOnComplete ?? 5,
+        removeOnFail: job.removeOnFail ?? 10,
+      }
+    );
+  }
+}
+
+/**
+ * Initialize all background jobs gracefully
+ * - Cleans up old repeatable configurations
+ * - Preserves in-progress jobs
+ * - Re-registers all repeatable jobs
+ */
 export async function initializeJobs() {
   try {
-    // Clear existing jobs
-    await liquidationQueue.obliterate();
-    await priceMonitorQueue.obliterate();
-    await syncQueue.obliterate();
+    console.log('🔄 Initializing background jobs...');
     
-    // Schedule recurring jobs
-    
-    // Liquidation check every 30 seconds
-    await liquidationQueue.add(
-      'check-liquidations',
-      {},
+    // Setup liquidation queue jobs - BACKUP: Liquidation checks (5s backup to fast monitor)
+    await setupRepeatableJobs(liquidationQueue, [
       {
-        repeat: { every: 30000 },
-        removeOnComplete: 5,
-        removeOnFail: 10,
-      }
-    );
+        name: 'check-liquidations',
+        data: {},
+        every: 5000, // Every 5 seconds (backup to fast monitor)
+      },
+    ]);
     
-    // Price monitoring every 10 seconds
-    await priceMonitorQueue.add(
-      'update-prices',
-      {},
+    // Setup price monitor queue jobs - SECURITY: Fast price monitoring (3s)
+    await setupRepeatableJobs(priceMonitorQueue, [
       {
-        repeat: { every: 10000 },
-        removeOnComplete: 5,
-        removeOnFail: 10,
-      }
-    );
-    
-    // Price alerts every 30 seconds
-    await priceMonitorQueue.add(
-      'check-price-alerts',
-      {},
+        name: 'update-prices',
+        data: {},
+        every: 3000, // Every 3 seconds (was 10s)
+      },
       {
-        repeat: { every: 30000 },
-        removeOnComplete: 5,
-        removeOnFail: 10,
-      }
-    );
+        name: 'check-price-alerts',
+        data: {},
+        every: 15000, // Every 15 seconds (reduced from 30s)
+      },
+    ]);
     
-    // Sync on-chain data every 2 minutes
-    await syncQueue.add(
-      'sync-protocol-state',
-      {},
+    // Setup sync queue jobs
+    await setupRepeatableJobs(syncQueue, [
       {
-        repeat: { every: 120000 },
-        removeOnComplete: 5,
-        removeOnFail: 10,
-      }
-    );
-    
-    await syncQueue.add(
-      'sync-loans',
-      {},
+        name: 'sync-protocol-state',
+        data: {},
+        every: 120000, // Every 2 minutes
+      },
       {
-        repeat: { every: 60000 },
-        removeOnComplete: 5,
-        removeOnFail: 10,
-      }
-    );
+        name: 'sync-loans',
+        data: {},
+        every: 60000, // Every minute
+      },
+    ]);
     
-    // Due notifications every minute
-    await notificationQueue.add(
-      'check-due-notifications',
-      {},
+    // Setup notification queue jobs
+    await setupRepeatableJobs(notificationQueue, [
       {
-        repeat: { every: 60000 },
-        removeOnComplete: 5,
-        removeOnFail: 10,
-      }
-    );
-    
-    console.log('✅ Jobs initialized successfully');
+        name: 'check-due-notifications',
+        data: {},
+        every: 60000, // Every minute
+      },
+    ]);
     
     // Setup error handlers
     liquidationWorker.on('failed', (job, err) => {
-      console.error(`Liquidation job failed:`, job?.data, err);
+      console.error(`❌ Liquidation job failed:`, job?.name, err.message);
     });
     
     priceMonitorWorker.on('failed', (job, err) => {
-      console.error(`Price monitor job failed:`, job?.data, err);
+      console.error(`❌ Price monitor job failed:`, job?.name, err.message);
     });
     
     syncWorker.on('failed', (job, err) => {
-      console.error(`Sync job failed:`, job?.data, err);
+      console.error(`❌ Sync job failed:`, job?.name, err.message);
     });
     
     notificationWorker.on('failed', (job, err) => {
-      console.error(`Notification job failed:`, job?.data, err);
+      console.error(`❌ Notification job failed:`, job?.name, err.message);
     });
     
+    // Log active job counts
+    const [liquidationActive, priceActive, syncActive, notificationActive] = await Promise.all([
+      liquidationQueue.getActiveCount(),
+      priceMonitorQueue.getActiveCount(),
+      syncQueue.getActiveCount(),
+      notificationQueue.getActiveCount(),
+    ]);
+    
+    if (liquidationActive + priceActive + syncActive + notificationActive > 0) {
+      console.log(`📋 Preserved active jobs: liquidation=${liquidationActive}, price=${priceActive}, sync=${syncActive}, notification=${notificationActive}`);
+    }
+    
+    console.log('✅ Background jobs initialized successfully');
+    
   } catch (error) {
-    console.error('Failed to initialize jobs:', error);
+    console.error('❌ Failed to initialize jobs:', error);
     throw error;
   }
 }
 
-// Graceful shutdown
+/**
+ * Graceful shutdown - close all workers
+ */
 export async function closeJobs() {
+  console.log('🛑 Closing background job workers...');
+  
   await Promise.all([
     liquidationWorker.close(),
     priceMonitorWorker.close(),
     syncWorker.close(),
     notificationWorker.close(),
   ]);
+  
+  // Close queues
+  await Promise.all([
+    liquidationQueue.close(),
+    priceMonitorQueue.close(),
+    syncQueue.close(),
+    notificationQueue.close(),
+  ]);
+  
+  // Close Redis connection
+  await redis.quit();
+  
+  console.log('✅ Background jobs closed');
 }

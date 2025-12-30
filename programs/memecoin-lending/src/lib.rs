@@ -5,6 +5,7 @@ pub mod instructions;
 pub mod state;
 pub mod utils;
 pub mod swap;
+pub mod events;
 
 use instructions::*;
 
@@ -80,9 +81,24 @@ pub mod memecoin_lending {
         instructions::admin::resume_handler(ctx)
     }
 
-    /// Update protocol admin (admin only)
+    /// Emergency admin update (requires protocol to be paused)
     pub fn update_admin(ctx: Context<AdminControl>, new_admin: Pubkey) -> Result<()> {
         instructions::admin::update_admin_handler(ctx, new_admin)
+    }
+
+    /// Initiate admin transfer with 48h timelock
+    pub fn initiate_admin_transfer(ctx: Context<AdminControl>, new_admin: Pubkey) -> Result<()> {
+        instructions::admin::initiate_admin_transfer_handler(ctx, new_admin)
+    }
+
+    /// Accept admin transfer after timelock
+    pub fn accept_admin_transfer(ctx: Context<AcceptAdminTransfer>) -> Result<()> {
+        instructions::admin::accept_admin_transfer_handler(ctx)
+    }
+
+    /// Cancel pending admin transfer
+    pub fn cancel_admin_transfer(ctx: Context<AdminControl>) -> Result<()> {
+        instructions::admin::cancel_admin_transfer_handler(ctx)
     }
 
     /// Withdraw treasury funds (admin only)

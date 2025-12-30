@@ -21,6 +21,8 @@ import { initializeJobs } from './jobs/index.js';
 import { initializeWebSocket } from './websocket/index.js';
 import { errorHandler } from './middleware/error.js';
 import { prisma } from './db/client.js';
+import { initializeFastPriceMonitor, fastPriceMonitor } from './services/fast-price-monitor.js';
+import { loanService } from './services/loan.service.js';
 
 // Create Hono app
 const app = new Hono();
@@ -131,6 +133,28 @@ const server = serve({
     });
   }
   
+  // ════════════════════════════════════════════════════════════
+  // Initialize Fast Price Monitor (1-second polling)
+  // ════════════════════════════════════════════════════════════
+  console.log('🚀 Starting price monitor...');
+
+  try {
+    initializeFastPriceMonitor(loanService).then(() => {
+      const status = fastPriceMonitor.getStatus();
+      console.log('✅ Price monitor running');
+      console.log(`   Poll interval: 5 seconds (dev mode)`);
+      console.log(`   Tokens: ${status.tokensMonitored}`);
+      console.log(`   Thresholds: ${status.totalThresholds}`);
+    }).catch((error: any) => {
+      console.error('⚠️ Price monitor failed:', error.message);
+      console.log('   Liquidation job will still run as backup');
+    });
+    
+  } catch (error: any) {
+    console.error('⚠️ Price monitor failed:', error.message);
+    console.log('   Liquidation job will still run as backup');
+  }
+  
   initializeJobs().then(() => {
     console.log('📋 Background jobs initialized');
   }).catch((error) => {
@@ -142,12 +166,22 @@ const server = serve({
 const wss = initializeWebSocket(server as any);
 
 // Graceful shutdown
-process.on('SIGTERM', async () => {
-  console.log('SIGTERM received, shutting down gracefully...');
-  wss.close();
-  server.close();
-  await prisma.$disconnect();
-  process.exit(0);
-});
+async function gracefulShutdown(signal: string) {
+  console.log(`\n${signal} received. Shutting down...`);
+  
+  try {
+    await fastPriceMonitor.shutdown();
+    wss.close();
+    server.close();
+    await prisma.$disconnect();
+    process.exit(0);
+  } catch (error) {
+    console.error('Shutdown error:', error);
+    process.exit(1);
+  }
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 export { app, server, wss };

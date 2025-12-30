@@ -1,7 +1,7 @@
 import { Component, createSignal, createEffect, Show, For } from 'solid-js';
 import { WalletToken } from '@/hooks/useWalletPumpTokens';
 import { api } from '@/lib/api';
-import { formatSOL, shortenAddress } from '@/lib/utils';
+import { formatSOL, formatNumber, formatTokenAmount, shortenAddress } from '@/lib/utils';
 
 interface TokenWithPrice extends WalletToken {
   price?: string;
@@ -49,6 +49,15 @@ export const TokenSelectionUnified: Component<TokenSelectionUnifiedProps> = (pro
         const usdValue = price && token.uiBalance 
           ? parseFloat(token.uiBalance) * parseFloat(price)
           : 0;
+
+        // Debug logging for USD calculation (remove when not debugging)
+        // console.log('USD calc:', {
+        //   mint: token.mint.slice(0, 8) + '...',
+        //   uiBalance: token.uiBalance,
+        //   priceData: priceData,
+        //   extractedPrice: price,
+        //   calculated: usdValue
+        // });
 
         return {
           ...token,
@@ -106,7 +115,7 @@ export const TokenSelectionUnified: Component<TokenSelectionUnifiedProps> = (pro
       // Find the selected token in wallet tokens for display
       const selectedToken = tokensWithPrices().find(t => t.mint === props.selectedMint);
       if (selectedToken) {
-        return `${shortenAddress(selectedToken.mint)} (${formatSOL(selectedToken.uiBalance)} tokens)`;
+        return `${shortenAddress(selectedToken.mint)} (${formatTokenAmount(selectedToken.uiBalance)} tokens)`;
       }
       return shortenAddress(props.selectedMint);
     }
@@ -189,7 +198,7 @@ export const TokenSelectionUnified: Component<TokenSelectionUnifiedProps> = (pro
                           )}
                         </div>
                         <div class="text-sm text-foreground">
-                          {formatSOL(token.uiBalance)} tokens
+                          {formatTokenAmount(token.uiBalance)} tokens
                         </div>
                       </div>
                       <div class="text-right ml-2">

@@ -1,7 +1,38 @@
 use anchor_lang::prelude::*;
 
-// === PROTOCOL FEE ===
-pub const PROTOCOL_FEE_BPS: u16 = 200; // 2% flat fee for all tiers
+// === SEEDS ===
+pub const PROTOCOL_STATE_SEED: &[u8] = b"protocol_state";
+pub const TREASURY_SEED: &[u8] = b"treasury";
+pub const TOKEN_CONFIG_SEED: &[u8] = b"token_config";
+pub const LOAN_SEED: &[u8] = b"loan";
+pub const VAULT_SEED: &[u8] = b"vault";
+pub const STAKING_POOL_SEED: &[u8] = b"staking_pool";
+pub const STAKING_VAULT_SEED: &[u8] = b"staking_vault";
+pub const REWARD_VAULT_SEED: &[u8] = b"reward_vault";
+pub const USER_STAKE_SEED: &[u8] = b"user_stake";
+pub const FEE_RECEIVER_SEED: &[u8] = b"fee_receiver";
+pub const USER_EXPOSURE_SEED: &[u8] = b"user_exposure";  // NEW!
+
+// === PROTOCOL PARAMETERS ===
+pub const PROTOCOL_FEE_BPS: u16 = 200;           // 2% flat fee
+pub const DEFAULT_LTV_BPS: u16 = 5000;           // 50% LTV
+pub const LIQUIDATION_THRESHOLD_BPS: u16 = 4000; // 40% drop triggers liquidation
+
+// === EXPOSURE LIMITS ===
+pub const MAX_TOKEN_EXPOSURE_BPS: u16 = 1000;    // 10% of treasury per token
+pub const MAX_USER_EXPOSURE_BPS: u16 = 3000;     // 30% of treasury per user
+pub const MAX_SINGLE_LOAN_BPS: u16 = 1000;       // 10% of treasury per loan
+
+// === SLIPPAGE ===
+pub const DEFAULT_SLIPPAGE_BPS: u16 = 300;       // 3% default slippage
+pub const MAX_SLIPPAGE_BPS: u16 = 1500;          // 15% max slippage
+pub const SLIPPAGE_INCREMENT_BPS: u16 = 200;     // 2% increment per retry
+
+// === BASIS POINTS ===
+pub const BPS_DIVISOR: u64 = 10000;
+
+// === ADMIN TRANSFER ===
+pub const ADMIN_TRANSFER_DELAY: i64 = 48 * 60 * 60; // 48 hours in seconds
 
 // === LOAN FEE DISTRIBUTION (out of 10000) ===
 // These define how the 2% loan fee is split
@@ -54,7 +85,9 @@ pub struct ProtocolState {
     /// Reentrancy protection guard
     pub reentrancy_guard: bool,
     /// Pending admin for two-step transfer
-    pub pending_admin: Option<Pubkey>,
+    pub pending_admin: Pubkey,
+    /// Timestamp when admin transfer was initiated
+    pub admin_transfer_timestamp: i64,
     /// Bump seed for PDA
     pub bump: u8,
     /// Reserved for future upgrades
@@ -78,7 +111,8 @@ impl ProtocolState {
         8 + // treasury_balance
         2 + // liquidation_bonus_bps
         1 + // reentrancy_guard
-        33 + // pending_admin (1 + 32)
+        32 + // pending_admin
+        8 + // admin_transfer_timestamp
         1 + // bump
         32; // _reserved
 }
@@ -109,6 +143,8 @@ pub struct TokenConfig {
     pub active_loans_count: u64,
     /// Total trading volume for analytics
     pub total_volume: u64,
+    /// Total SOL currently borrowed against this token (for exposure tracking)
+    pub total_active_borrowed: u64,
     /// Bump seed for PDA
     pub bump: u8,
     /// Reserved for future use
@@ -128,6 +164,7 @@ impl TokenConfig {
         8 + // max_loan_amount
         8 + // active_loans_count
         8 + // total_volume
+        8 + // total_active_borrowed
         1 + // bump
         32; // _reserved
 }
@@ -178,6 +215,41 @@ impl Loan {
         32; // _reserved
 }
 
+/// User exposure tracking account
+/// Tracks total borrowed amount per user to enforce 30% treasury limit
+#[account]
+#[derive(Default)]
+pub struct UserExposure {
+    /// User's wallet address
+    pub user: Pubkey,
+    /// Total SOL currently borrowed by this user
+    pub total_borrowed: u64,
+    /// Number of active loans
+    pub active_loans_count: u64,
+    /// Historical total borrowed (for analytics)
+    pub lifetime_borrowed: u64,
+    /// Number of loans repaid successfully
+    pub loans_repaid: u64,
+    /// Number of loans liquidated
+    pub loans_liquidated: u64,
+    /// Bump seed for PDA
+    pub bump: u8,
+    /// Reserved for future use
+    pub _reserved: [u8; 32],
+}
+
+impl UserExposure {
+    pub const LEN: usize = 8 +  // discriminator
+        32 + // user
+        8 +  // total_borrowed
+        8 +  // active_loans_count
+        8 +  // lifetime_borrowed
+        8 +  // loans_repaid
+        8 +  // loans_liquidated
+        1 +  // bump
+        32;  // _reserved
+}
+
 /// Pool type enum for different AMM protocols
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, Debug)]
 pub enum PoolType {
@@ -222,19 +294,7 @@ impl Default for LoanStatus {
     }
 }
 
-/// Seeds for PDA derivation
-pub const PROTOCOL_STATE_SEED: &[u8] = b"protocol_state";
-pub const TOKEN_CONFIG_SEED: &[u8] = b"token_config";
-pub const LOAN_SEED: &[u8] = b"loan";
-pub const TREASURY_SEED: &[u8] = b"treasury";
-pub const VAULT_SEED: &[u8] = b"vault";
-
-// === STAKING CONSTANTS ===
-pub const STAKING_POOL_SEED: &[u8] = b"staking_pool";
-pub const STAKING_VAULT_SEED: &[u8] = b"staking_vault";
-pub const REWARD_VAULT_SEED: &[u8] = b"reward_vault";
-pub const USER_STAKE_SEED: &[u8] = b"user_stake";
-pub const FEE_RECEIVER_SEED: &[u8] = b"fee_receiver";
+// Note: SEEDS are already defined above at lines 4-14, removing duplicates
 
 /// Precision for reward calculations (1e12)
 pub const REWARD_PRECISION: u128 = 1_000_000_000_000;

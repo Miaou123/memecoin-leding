@@ -49,6 +49,10 @@ export function useWalletPumpTokens(): UseWalletPumpTokensResult {
         programId: TOKEN_PROGRAM_ID,
       });
 
+      // Debug logging (uncomment when debugging)
+      // console.log('=== Wallet Token Debug ===');
+      // console.log('Total token accounts:', tokenAccounts.value.length);
+
       // Filter for PumpFun tokens (mint ends with "pump")
       const pumpTokens: WalletToken[] = [];
       
@@ -58,10 +62,14 @@ export function useWalletPumpTokens(): UseWalletPumpTokensResult {
 
         const mint = parsedInfo.mint;
         const tokenAmount = parsedInfo.tokenAmount;
+        const balance = tokenAmount.amount;
+        const isPump = mint.toLowerCase().endsWith('pump');
+
+        // Debug individual tokens (uncomment when debugging)
+        // console.log(`Token: ${mint.slice(0,8)}... | Balance: ${balance} | isPump: ${isPump} | decimals: ${tokenAmount.decimals} | uiAmount: ${tokenAmount.uiAmountString || tokenAmount.uiAmount}`);
 
         // Check if this is a PumpFun token
-        if (mint.toLowerCase().endsWith('pump')) {
-          const balance = tokenAmount.amount;
+        if (isPump) {
           const decimals = tokenAmount.decimals;
           const uiAmount = tokenAmount.uiAmountString || tokenAmount.uiAmount?.toString() || '0';
 
@@ -77,6 +85,15 @@ export function useWalletPumpTokens(): UseWalletPumpTokensResult {
         }
       }
 
+      // Debug results (uncomment when debugging)
+      // console.log('PumpFun tokens found:', pumpTokens.length);
+      // console.log('PumpFun tokens:', pumpTokens.map(t => ({
+      //   mint: t.mint.slice(0, 8) + '...',
+      //   balance: t.balance,
+      //   uiBalance: t.uiBalance,
+      //   decimals: t.decimals
+      // })));
+      
       setTokens(pumpTokens);
     } catch (err: any) {
       console.error('Error fetching wallet tokens:', err);

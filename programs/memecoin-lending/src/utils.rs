@@ -3,13 +3,63 @@ use anchor_spl::token::TokenAccount;
 use crate::error::LendingError;
 use crate::state::*;
 
-/// Constants
-pub const BPS_DIVISOR: u64 = 10_000;
+/// Reentrancy guard utilities
+pub struct ReentrancyGuard;
+
+impl ReentrancyGuard {
+    pub fn enter(protocol_state: &mut ProtocolState) -> Result<()> {
+        require!(!protocol_state.reentrancy_guard, LendingError::ReentrancyDetected);
+        protocol_state.reentrancy_guard = true;
+        Ok(())
+    }
+    
+    pub fn exit(protocol_state: &mut ProtocolState) {
+        protocol_state.reentrancy_guard = false;
+    }
+}
+
+/// Constants (BPS_DIVISOR imported from state.rs)
 pub const SECONDS_PER_YEAR: u64 = 365 * 24 * 60 * 60;
 pub const MAX_LOAN_DURATION: u64 = 7 * 24 * 60 * 60; // 7 days
 pub const MIN_LOAN_DURATION: u64 = 12 * 60 * 60; // 12 hours
 pub const PRICE_STALENESS_THRESHOLD: i64 = 60; // 60 seconds
 pub const MAX_PRICE_DEVIATION_BPS: u64 = 500; // 5%
+
+// === PRICE CONSTANTS ===
+/// Price scaling factor (10^9 for lamport precision)
+pub const PRICE_SCALE: u128 = 1_000_000_000;
+
+/// Price scaling for calculations (10^6)
+pub const PRICE_PRECISION: u64 = 1_000_000;
+
+// === TIME CONSTANTS ===
+/// Seconds per day
+pub const SECONDS_PER_DAY: u64 = 86_400;
+
+/// Seconds per hour
+pub const SECONDS_PER_HOUR: u64 = 3_600;
+
+// === LOAN CONSTANTS ===
+/// Default liquidation buffer in basis points (3%)
+pub const DEFAULT_LIQUIDATION_BUFFER_BPS: u16 = 300;
+
+/// Maximum allowed slippage for liquidations in basis points (5%)
+pub const MAX_LIQUIDATION_SLIPPAGE_BPS: u64 = 500;
+
+/// Minimum collateral value in lamports (0.01 SOL = 10_000_000 lamports)
+pub const MIN_COLLATERAL_VALUE_LAMPORTS: u64 = 10_000_000;
+
+// === POOL DATA OFFSETS (Raydium AMM V4) ===
+pub const RAYDIUM_TOKEN_A_AMOUNT_OFFSET: usize = 224;
+pub const RAYDIUM_TOKEN_B_AMOUNT_OFFSET: usize = 232;
+pub const RAYDIUM_TOKEN_A_MINT_OFFSET: usize = 400;
+pub const RAYDIUM_TOKEN_B_MINT_OFFSET: usize = 432;
+pub const RAYDIUM_MIN_DATA_LEN: usize = 464;
+
+// === POOL DATA OFFSETS (PumpFun) ===
+pub const PUMPFUN_VIRTUAL_TOKEN_OFFSET: usize = 8;
+pub const PUMPFUN_VIRTUAL_SOL_OFFSET: usize = 16;
+pub const PUMPFUN_MIN_DATA_LEN: usize = 24;
 
 /// TWAP configuration
 pub const TWAP_WINDOW_SECONDS: i64 = 300; // 5 minute window
@@ -179,26 +229,37 @@ pub struct PriceFeedUtils;
 
 impl PriceFeedUtils {
     /// Read price from Raydium AMM pool
-    pub fn read_raydium_price(pool_data: &[u8], _token_mint: &Pubkey, sol_mint: &Pubkey) -> Result<u64> {
-        // Raydium AMM pool layout offsets
-        const TOKEN_A_AMOUNT_OFFSET: usize = 128;
-        const TOKEN_B_AMOUNT_OFFSET: usize = 136;
-        const TOKEN_A_MINT_OFFSET: usize = 400;
-        const TOKEN_B_MINT_OFFSET: usize = 432;
+    pub fn read_raydium_price(pool_data: &[u8], token_mint: &Pubkey, sol_mint: &Pubkey) -> Result<u64> {
+        // Validate minimum data length
+        require!(pool_data.len() >= RAYDIUM_MIN_DATA_LEN, LendingError::InvalidPriceFeed);
         
-        require!(pool_data.len() >= 464, LendingError::InvalidPriceFeed);
+        // Validate data is not all zeros (account might be uninitialized)
+        let is_initialized = pool_data.iter().any(|&b| b != 0);
+        require!(is_initialized, LendingError::InvalidPriceFeed);
         
         let token_a_amount = u64::from_le_bytes(
-            pool_data[TOKEN_A_AMOUNT_OFFSET..TOKEN_A_AMOUNT_OFFSET + 8].try_into().unwrap()
+            pool_data[RAYDIUM_TOKEN_A_AMOUNT_OFFSET..RAYDIUM_TOKEN_A_AMOUNT_OFFSET + 8]
+                .try_into()
+                .map_err(|_| LendingError::InvalidPriceFeed)?
         );
         let token_b_amount = u64::from_le_bytes(
-            pool_data[TOKEN_B_AMOUNT_OFFSET..TOKEN_B_AMOUNT_OFFSET + 8].try_into().unwrap()
+            pool_data[RAYDIUM_TOKEN_B_AMOUNT_OFFSET..RAYDIUM_TOKEN_B_AMOUNT_OFFSET + 8]
+                .try_into()
+                .map_err(|_| LendingError::InvalidPriceFeed)?
         );
         
-        let token_a_mint = Pubkey::try_from(&pool_data[TOKEN_A_MINT_OFFSET..TOKEN_A_MINT_OFFSET + 32]).unwrap();
-        let token_b_mint = Pubkey::try_from(&pool_data[TOKEN_B_MINT_OFFSET..TOKEN_B_MINT_OFFSET + 32]).unwrap();
+        // Validate reserves are non-zero
+        require!(token_a_amount > 0 && token_b_amount > 0, LendingError::InvalidPriceFeed);
         
-        // Determine which token is SOL and calculate price
+        let token_a_mint = Pubkey::try_from(
+            &pool_data[RAYDIUM_TOKEN_A_MINT_OFFSET..RAYDIUM_TOKEN_A_MINT_OFFSET + 32]
+        ).map_err(|_| LendingError::InvalidPriceFeed)?;
+        
+        let token_b_mint = Pubkey::try_from(
+            &pool_data[RAYDIUM_TOKEN_B_MINT_OFFSET..RAYDIUM_TOKEN_B_MINT_OFFSET + 32]
+        ).map_err(|_| LendingError::InvalidPriceFeed)?;
+        
+        // Validate one of the mints is SOL
         let (sol_amount, token_amount) = if token_a_mint == *sol_mint {
             (token_a_amount, token_b_amount)
         } else if token_b_mint == *sol_mint {
@@ -207,51 +268,58 @@ impl PriceFeedUtils {
             return Err(LendingError::InvalidPriceFeed.into());
         };
         
-        require!(token_amount > 0, LendingError::InvalidPriceFeed);
+        // Validate the other mint matches expected token
+        let other_mint = if token_a_mint == *sol_mint { token_b_mint } else { token_a_mint };
+        require!(other_mint == *token_mint, LendingError::PoolTypeMismatch);
         
-        // Price in lamports per token (with 9 decimal precision)
+        // Calculate price with overflow protection
         let price = (sol_amount as u128)
-            .checked_mul(1_000_000_000)
+            .checked_mul(PRICE_SCALE)
             .ok_or(LendingError::MathOverflow)?
             .checked_div(token_amount as u128)
-            .ok_or(LendingError::DivisionByZero)? as u64;
-        
-        Ok(price)
-    }
-
-    /// Read price from Pumpfun bonding curve
-    pub fn read_pumpfun_price(pool_data: &[u8]) -> Result<u64> {
-        const VIRTUAL_SOL_OFFSET: usize = 16;
-        const VIRTUAL_TOKEN_OFFSET: usize = 8;
-        
-        require!(pool_data.len() >= 24, LendingError::InvalidPriceFeed);
-        
-        let virtual_sol = u64::from_le_bytes(
-            pool_data[VIRTUAL_SOL_OFFSET..VIRTUAL_SOL_OFFSET + 8].try_into().unwrap()
-        );
-        let virtual_token = u64::from_le_bytes(
-            pool_data[VIRTUAL_TOKEN_OFFSET..VIRTUAL_TOKEN_OFFSET + 8].try_into().unwrap()
-        );
-        
-        require!(virtual_token > 0, LendingError::InvalidPriceFeed);
-        
-        // Calculate price per token in lamports
-        // Price = virtual_sol_reserves * 10^6 / virtual_token_reserves
-        // This gives us lamports per smallest token unit (matches SDK calculation)
-        let price = (virtual_sol as u128)
-            .checked_mul(1_000_000_000) // 10^9 to match PRICE_SCALE in calculate_loan_amount
-            .ok_or(LendingError::MathOverflow)?
-            .checked_div(virtual_token as u128)
             .ok_or(LendingError::DivisionByZero)?;
         
-        if price > u64::MAX as u128 {
-            return Err(LendingError::MathOverflow.into());
-        }
+        require!(price <= u64::MAX as u128, LendingError::MathOverflow);
         
         Ok(price as u64)
     }
 
-    /// Unified price reader based on pool type
+    /// Read price from Pumpfun bonding curve
+    pub fn read_pumpfun_price(pool_data: &[u8]) -> Result<u64> {
+        require!(pool_data.len() >= PUMPFUN_MIN_DATA_LEN, LendingError::InvalidPriceFeed);
+        
+        // Validate data is not all zeros
+        let is_initialized = pool_data[..PUMPFUN_MIN_DATA_LEN].iter().any(|&b| b != 0);
+        require!(is_initialized, LendingError::InvalidPriceFeed);
+        
+        let virtual_sol = u64::from_le_bytes(
+            pool_data[PUMPFUN_VIRTUAL_SOL_OFFSET..PUMPFUN_VIRTUAL_SOL_OFFSET + 8]
+                .try_into()
+                .map_err(|_| LendingError::InvalidPriceFeed)?
+        );
+        let virtual_token = u64::from_le_bytes(
+            pool_data[PUMPFUN_VIRTUAL_TOKEN_OFFSET..PUMPFUN_VIRTUAL_TOKEN_OFFSET + 8]
+                .try_into()
+                .map_err(|_| LendingError::InvalidPriceFeed)?
+        );
+        
+        // Validate reserves are non-zero
+        require!(virtual_sol > 0 && virtual_token > 0, LendingError::InvalidPriceFeed);
+        
+        let price = (virtual_sol as u128)
+            .checked_mul(PRICE_SCALE)
+            .ok_or(LendingError::MathOverflow)?
+            .checked_div(virtual_token as u128)
+            .ok_or(LendingError::DivisionByZero)?;
+        
+        require!(price <= u64::MAX as u128, LendingError::MathOverflow);
+        require!(price > 0, LendingError::ZeroPrice);
+        
+        Ok(price as u64)
+    }
+
+    /// Read price from pool - ALWAYS validates freshness
+    /// This is the ONLY function that should be used for price reading
     pub fn read_price_from_pool(
         pool_account: &AccountInfo,
         pool_type: PoolType,
@@ -260,10 +328,15 @@ impl PriceFeedUtils {
         let pool_data = pool_account.try_borrow_data()?;
         let sol_mint = pubkey!("So11111111111111111111111111111111111111112");
         
-        match pool_type {
-            PoolType::Raydium | PoolType::Orca => Self::read_raydium_price(&pool_data, token_mint, &sol_mint),
-            PoolType::Pumpfun | PoolType::PumpSwap => Self::read_pumpfun_price(&pool_data),
-        }
+        let price = match pool_type {
+            PoolType::Raydium | PoolType::Orca => Self::read_raydium_price(&pool_data, token_mint, &sol_mint)?,
+            PoolType::Pumpfun | PoolType::PumpSwap => Self::read_pumpfun_price(&pool_data)?,
+        };
+        
+        // Validate price is non-zero
+        require!(price > 0, LendingError::ZeroPrice);
+        
+        Ok(price)
     }
 
     /// Validate price freshness
@@ -433,5 +506,37 @@ impl PdaUtils {
 
     pub fn derive_vault_token_account(loan_pubkey: &Pubkey, program_id: &Pubkey) -> (Pubkey, u8) {
         Pubkey::find_program_address(&[VAULT_SEED, loan_pubkey.as_ref()], program_id)
+    }
+
+    pub fn derive_user_exposure(user: &Pubkey, program_id: &Pubkey) -> (Pubkey, u8) {
+        Pubkey::find_program_address(&[USER_EXPOSURE_SEED, user.as_ref()], program_id)
+    }
+}
+
+/// Exposure calculation utilities
+pub struct ExposureCalculator;
+
+impl ExposureCalculator {
+    /// Calculate maximum exposure for a given limit in basis points
+    pub fn calculate_max_exposure(treasury_balance: u64, limit_bps: u64) -> Result<u64> {
+        SafeMath::mul_div(treasury_balance, limit_bps, BPS_DIVISOR)
+    }
+    
+    /// Check if adding amount would exceed limit
+    pub fn would_exceed_limit(
+        current_exposure: u64,
+        new_amount: u64,
+        max_exposure: u64,
+    ) -> Result<bool> {
+        let new_total = SafeMath::add(current_exposure, new_amount)?;
+        Ok(new_total > max_exposure)
+    }
+    
+    /// Calculate remaining exposure capacity
+    pub fn remaining_capacity(current_exposure: u64, max_exposure: u64) -> Result<u64> {
+        if current_exposure >= max_exposure {
+            return Ok(0);
+        }
+        SafeMath::sub(max_exposure, current_exposure)
     }
 }

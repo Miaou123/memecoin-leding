@@ -1,13 +1,23 @@
-import { Show, createSignal, createEffect, createMemo } from 'solid-js';
-import { createQuery } from '@tanstack/solid-query';
+import { Show, createSignal, createMemo } from 'solid-js';
+import { createQuery, createMutation } from '@tanstack/solid-query';
+import { Connection, PublicKey } from '@solana/web3.js';
+import { getAssociatedTokenAddress } from '@solana/spl-token';
+import BN from 'bn.js';
 import { Button } from '@/components/ui/Button';
 import { formatSOL, formatNumber, formatPercentage } from '@/lib/utils';
 import { api } from '@/lib/api';
+import { useWallet } from '@/components/wallet/WalletProvider';
+import { buildStakeTransaction, buildUnstakeTransaction, buildClaimRewardsTransaction } from '@/lib/staking-transactions';
 
 export default function Staking() {
+  const STAKING_TOKEN_MINT = import.meta.env.VITE_STAKING_TOKEN_MINT;
+  
   const [stakeAmount, setStakeAmount] = createSignal('');
   const [unstakeAmount, setUnstakeAmount] = createSignal('');
-  const [userAddress] = createSignal('DummyUserAddress123'); // This would come from wallet connection
+  const [activeTab, setActiveTab] = createSignal<'STAKE' | 'UNSTAKE'>('STAKE');
+  
+  // Get wallet context
+  const wallet = useWallet();
 
   // Queries
   const stakingStats = createQuery(() => ({
@@ -16,9 +26,30 @@ export default function Staking() {
   }));
 
   const userStake = createQuery(() => ({
-    queryKey: ['user-stake', userAddress()],
-    queryFn: () => api.getUserStake(userAddress()),
-    enabled: !!userAddress(),
+    queryKey: ['user-stake', wallet.publicKey()?.toString()],
+    queryFn: () => api.getUserStake(wallet.publicKey()?.toString() || ''),
+    enabled: !!wallet.publicKey(),
+  }));
+  
+  // User token balance query
+  const userTokenBalance = createQuery(() => ({
+    queryKey: ['userTokenBalance', wallet.publicKey()?.toString(), STAKING_TOKEN_MINT],
+    queryFn: async () => {
+      if (!wallet.publicKey() || !STAKING_TOKEN_MINT) return '0';
+      
+      const connection = new Connection(import.meta.env.VITE_SOLANA_RPC_URL);
+      const mint = new PublicKey(STAKING_TOKEN_MINT);
+      const ata = await getAssociatedTokenAddress(mint, wallet.publicKey()!);
+      
+      try {
+        const balance = await connection.getTokenAccountBalance(ata);
+        return balance.value.uiAmountString || '0';
+      } catch {
+        return '0'; // Account doesn't exist
+      }
+    },
+    enabled: !!wallet.publicKey() && !!STAKING_TOKEN_MINT,
+    refetchInterval: 30000,
   }));
 
   // Calculated values
@@ -33,277 +64,343 @@ export default function Staking() {
     return !isNaN(amount) && amount > 0 && amount <= userStaked / 1e9; // Convert from lamports
   });
 
-  const handleStake = async () => {
-    if (!canStake()) return;
-    
-    try {
-      // In a real implementation, this would prepare and send the transaction
-      console.log(`Staking ${stakeAmount()} tokens`);
-      // Reset form
+  // Stake mutation
+  const stakeMutation = createMutation(() => ({
+    mutationFn: async () => {
+      if (!wallet.publicKey() || !STAKING_TOKEN_MINT) {
+        throw new Error('Wallet not connected or staking token not configured');
+      }
+      
+      const amount = parseFloat(stakeAmount());
+      if (isNaN(amount) || amount <= 0) {
+        throw new Error('Invalid stake amount');
+      }
+      const rawAmount = new BN(Math.floor(amount * 1e6)); // 6 decimals for pumpfun
+      const mint = new PublicKey(STAKING_TOKEN_MINT);
+      
+      const connection = new Connection(import.meta.env.VITE_SOLANA_RPC_URL);
+      
+      // Build transaction
+      const transaction = await buildStakeTransaction(
+        wallet.publicKey()!,
+        rawAmount,
+        mint,
+        connection
+      );
+      
+      // Sign and send
+      const signed = await wallet.signTransaction(transaction);
+      const signature = await connection.sendRawTransaction(signed.serialize());
+      await connection.confirmTransaction(signature, 'confirmed');
+      
+      console.log('Stake transaction:', signature);
+      return { amount, signature };
+    },
+    onSuccess: (data) => {
+      console.log(`Successfully staked ${data.amount} tokens!`);
       setStakeAmount('');
-      // Refetch user data
+      // Refetch all data
       userStake.refetch();
-    } catch (error) {
+      userTokenBalance.refetch();
+      stakingStats.refetch();
+    },
+    onError: (error) => {
       console.error('Stake failed:', error);
+      alert(`Stake failed: ${error.message}`);
     }
+  }));
+  
+  const handleStake = () => {
+    stakeMutation.mutate();
   };
 
-  const handleUnstake = async () => {
-    if (!canUnstake()) return;
-    
-    try {
-      // In a real implementation, this would prepare and send the transaction
-      console.log(`Unstaking ${unstakeAmount()} tokens`);
-      // Reset form
+  // Unstake mutation
+  const unstakeMutation = createMutation(() => ({
+    mutationFn: async () => {
+      if (!wallet.publicKey() || !STAKING_TOKEN_MINT) {
+        throw new Error('Wallet not connected or staking token not configured');
+      }
+      
+      const amount = parseFloat(unstakeAmount());
+      if (isNaN(amount) || amount <= 0) {
+        throw new Error('Invalid unstake amount');
+      }
+      const rawAmount = new BN(Math.floor(amount * 1e6)); // 6 decimals for pumpfun
+      const mint = new PublicKey(STAKING_TOKEN_MINT);
+      
+      const connection = new Connection(import.meta.env.VITE_SOLANA_RPC_URL);
+      
+      // Build transaction
+      const transaction = await buildUnstakeTransaction(
+        wallet.publicKey()!,
+        rawAmount,
+        mint,
+        connection
+      );
+      
+      // Sign and send
+      const signed = await wallet.signTransaction(transaction);
+      const signature = await connection.sendRawTransaction(signed.serialize());
+      await connection.confirmTransaction(signature, 'confirmed');
+      
+      console.log('Unstake transaction:', signature);
+      return { amount, signature };
+    },
+    onSuccess: (data) => {
+      console.log(`Successfully unstaked ${data.amount} tokens!`);
       setUnstakeAmount('');
-      // Refetch user data
+      // Refetch all data
       userStake.refetch();
-    } catch (error) {
+      userTokenBalance.refetch();
+      stakingStats.refetch();
+    },
+    onError: (error) => {
       console.error('Unstake failed:', error);
+      alert(`Unstake failed: ${error.message}`);
     }
+  }));
+  
+  const handleUnstake = () => {
+    unstakeMutation.mutate();
   };
 
-  const handleClaimRewards = async () => {
-    try {
-      // In a real implementation, this would prepare and send the transaction
-      console.log('Claiming rewards');
+  // Claim rewards mutation
+  const claimRewardsMutation = createMutation(() => ({
+    mutationFn: async () => {
+      if (!wallet.publicKey()) {
+        throw new Error('Wallet not connected');
+      }
+      
+      const connection = new Connection(import.meta.env.VITE_SOLANA_RPC_URL);
+      
+      // Build transaction
+      const transaction = await buildClaimRewardsTransaction(
+        wallet.publicKey()!,
+        connection
+      );
+      
+      // Sign and send
+      const signed = await wallet.signTransaction(transaction);
+      const signature = await connection.sendRawTransaction(signed.serialize());
+      await connection.confirmTransaction(signature, 'confirmed');
+      
+      console.log('Claim rewards transaction:', signature);
+      return { signature };
+    },
+    onSuccess: (data) => {
+      console.log('Successfully claimed rewards!');
       // Refetch user data
       userStake.refetch();
-    } catch (error) {
+      stakingStats.refetch();
+    },
+    onError: (error) => {
       console.error('Claim failed:', error);
+      alert(`Claim failed: ${error.message}`);
     }
+  }));
+  
+  const handleClaimRewards = () => {
+    claimRewardsMutation.mutate();
   };
 
   return (
-    <div class="space-y-8 font-mono">
-      {/* Terminal Header */}
+    <div class="space-y-6 font-mono">
+      {/* Module Header */}
       <div class="bg-bg-secondary border border-border p-6">
-        <div class="text-xs text-text-dim mb-2">STAKING_MODULE v1.0.0</div>
-        <div class="text-xl font-bold text-accent-blue mb-4">
+        <div class="text-xs text-text-dim uppercase tracking-wider mb-2">STAKING_MODULE v1.0.0</div>
+        <div class="text-xl font-bold text-accent-blue mb-3">
           {">"} GOVERNANCE_TOKEN_STAKING.init()
         </div>
-        <div class="text-text-primary mb-4">
-          STAKE_GOVERNANCE_TOKENS {">"} EARN_SOL_REWARDS<br/>
-          DYNAMIC_APR_SYSTEM {">"} TIME_WEIGHTED_EMISSIONS
+        <div class="text-sm text-text-primary leading-relaxed">
+          STAKE_GOVERNANCE_TOKENS {">"} EARN_SOL_REWARDS | DYNAMIC_APR_SYSTEM {">"} TIME_WEIGHTED_EMISSIONS
         </div>
       </div>
 
-      {/* Staking Pool Stats */}
-      <div class="space-y-4">
-        <div class="text-xs text-text-dim">STAKING_POOL_METRICS:</div>
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <div class="bg-bg-secondary border border-border p-4">
-            <div class="text-xs text-text-dim mb-1">TOTAL_STAKED</div>
-            <div class="text-lg font-bold text-accent-green">
-              {stakingStats.isLoading ? '---' : formatNumber(parseFloat(stakingStats.data?.totalStaked || '0') / 1e9)}
-            </div>
-            <div class="text-xs text-text-secondary">TOKENS</div>
+      {/* Horizontal Stats Bar */}
+      <div class="flex justify-center gap-8 py-4 border-y border-border">
+        <div class="text-center">
+          <div class="text-2xl font-bold text-accent-green">
+            {stakingStats.isLoading ? '---' : formatNumber(parseFloat(stakingStats.data?.totalStaked || '0') / 1e9)}
           </div>
-          <div class="bg-bg-secondary border border-border p-4">
-            <div class="text-xs text-text-dim mb-1">TOTAL_STAKERS</div>
-            <div class="text-lg font-bold text-accent-blue">
-              {stakingStats.isLoading ? '---' : formatNumber(stakingStats.data?.totalStakers || 0)}
-            </div>
-            <div class="text-xs text-text-secondary">USERS</div>
+          <div class="text-text-dim text-xs">TOTAL_STAKED</div>
+        </div>
+        <div class="w-px bg-border"></div>
+        
+        <div class="text-center">
+          <div class="text-2xl font-bold text-accent-blue">
+            {stakingStats.isLoading ? '---' : formatNumber(stakingStats.data?.totalStakers || 0)}
           </div>
-          <div class="bg-bg-secondary border border-border p-4">
-            <div class="text-xs text-text-dim mb-1">REWARD_POOL</div>
-            <div class="text-lg font-bold text-accent-yellow">
-              {stakingStats.isLoading ? '---' : formatSOL(stakingStats.data?.rewardPoolBalance || '0')}
-            </div>
-            <div class="text-xs text-text-secondary">SOL</div>
+          <div class="text-text-dim text-xs">TOTAL_STAKERS</div>
+        </div>
+        <div class="w-px bg-border"></div>
+        
+        <div class="text-center">
+          <div class="text-2xl font-bold text-accent-yellow">
+            {stakingStats.isLoading ? '---' : formatSOL(stakingStats.data?.rewardPoolBalance || '0')} SOL
           </div>
-          <div class="bg-bg-secondary border border-border p-4">
-            <div class="text-xs text-text-dim mb-1">CURRENT_APR</div>
-            <div class="text-lg font-bold text-accent-green">
-              {stakingStats.isLoading ? '---' : formatPercentage(stakingStats.data?.currentApr || 0)}
-            </div>
-            <div class="text-xs text-text-secondary">ANNUAL</div>
+          <div class="text-text-dim text-xs">REWARD_POOL</div>
+        </div>
+        <div class="w-px bg-border"></div>
+        
+        <div class="text-center">
+          <div class="text-2xl font-bold text-accent-green">
+            {stakingStats.isLoading ? '---' : formatPercentage(stakingStats.data?.currentApr || 0)}
           </div>
+          <div class="text-text-dim text-xs">CURRENT_APR</div>
         </div>
       </div>
 
-      {/* User Stake Information */}
-      <Show when={userAddress()}>
+      {/* Two-Column Main Section */}
+      <div class="grid md:grid-cols-2 gap-6">
+        {/* Left Column - YOUR_POSITION */}
         <div class="space-y-4">
-          <div class="text-xs text-text-dim">YOUR_STAKE_POSITION:</div>
-          <div class="bg-bg-secondary border-2 border-accent-blue p-6">
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <div>
-                <div class="text-xs text-text-dim mb-1">STAKED_AMOUNT</div>
-                <div class="text-xl font-bold text-accent-blue">
+          <div class="bg-bg-secondary border border-border">
+            {/* Header row inside card */}
+            <div class="flex justify-between items-center p-4 border-b border-border">
+              <span class="text-xs text-text-dim uppercase tracking-wider">YOUR_POSITION</span>
+              <span class="border border-accent-green bg-bg-tertiary text-accent-green px-2 py-1 text-xs">
+                {stakingStats.isLoading ? '---' : formatPercentage(stakingStats.data?.currentApr || 0)} APR
+              </span>
+            </div>
+            {/* Content */}
+            <div class="p-6">
+              {/* big staked number centered */}
+              <div class="text-center mb-6">
+                <div style="font-size: 32px" class="font-bold text-accent-green mb-2 leading-none">
                   {userStake.isLoading ? '---' : formatNumber(parseFloat(userStake.data?.stake?.stakedAmount || '0') / 1e9)}
                 </div>
-                <div class="text-xs text-text-secondary">TOKENS</div>
+                <div class="text-xs text-text-dim uppercase tracking-wider">TOKENS STAKED</div>
               </div>
-              <div>
-                <div class="text-xs text-text-dim mb-1">PENDING_REWARDS</div>
-                <div class="text-xl font-bold text-accent-green">
-                  {userStake.isLoading ? '---' : formatSOL(userStake.data?.pendingRewards || '0')}
-                </div>
-                <div class="text-xs text-text-secondary">SOL</div>
-              </div>
-              <div>
-                <div class="text-xs text-text-dim mb-1">REWARDS_SOL</div>
+              
+              {/* pending rewards box */}
+              <div class="bg-bg-tertiary border border-border p-4 mb-6">
+                <div class="text-xs text-text-dim uppercase tracking-wider mb-2">PENDING_REWARDS</div>
                 <div class="text-xl font-bold text-accent-yellow">
-                  {userStake.isLoading ? '---' : userStake.data?.pendingRewardsSol?.toFixed(4)}
+                  {userStake.isLoading ? '---' : formatSOL(userStake.data?.pendingRewards || '0')} SOL
                 </div>
-                <div class="text-xs text-text-secondary">SOL</div>
               </div>
-            </div>
-            
-            <Show when={userStake.data?.pendingRewardsSol && userStake.data.pendingRewardsSol > 0}>
-              <div class="mt-6 pt-4 border-t border-border">
+              
+              {/* claim button */}
+              <Show when={userStake.data?.pendingRewardsSol && userStake.data.pendingRewardsSol > 0}>
                 <Button 
                   onClick={handleClaimRewards}
-                  class="w-full md:w-auto"
-                  size="lg"
+                  loading={claimRewardsMutation.isPending}
+                  variant="outline"
+                  class="w-full border-accent-yellow text-accent-yellow hover:bg-accent-yellow hover:text-bg-primary"
                 >
-                  [CLAIM_REWARDS]
+                  {claimRewardsMutation.isPending ? 'CLAIMING...' : '[CLAIM_REWARDS]'}
                 </Button>
-              </div>
-            </Show>
-          </div>
-        </div>
-      </Show>
-
-      {/* Staking Actions */}
-      <div class="grid md:grid-cols-2 gap-6">
-        {/* Stake Section */}
-        <div class="bg-bg-secondary border border-border p-6">
-          <div class="text-xs text-text-dim mb-4">STAKE_TOKENS:</div>
-          
-          <div class="space-y-4">
-            <div>
-              <label class="text-xs text-text-dim block mb-2">AMOUNT_TO_STAKE:</label>
-              <input
-                type="number"
-                placeholder="0.00"
-                value={stakeAmount()}
-                onInput={(e) => setStakeAmount(e.target.value)}
-                class="w-full bg-bg-primary border border-border p-3 font-mono text-text-primary placeholder:text-text-dim focus:outline-none focus:border-accent-green"
-              />
-            </div>
-            
-            <div class="text-xs text-text-secondary">
-              MIN_STAKE: 1 TOKEN<br/>
-              AVAILABLE: --- TOKENS {/* Would show actual balance */}
-            </div>
-            
-            <Button
-              onClick={handleStake}
-              disabled={!canStake()}
-              class="w-full"
-              size="lg"
-            >
-              [EXECUTE_STAKE]
-            </Button>
-          </div>
-        </div>
-
-        {/* Unstake Section */}
-        <div class="bg-bg-secondary border border-border p-6">
-          <div class="text-xs text-text-dim mb-4">UNSTAKE_TOKENS:</div>
-          
-          <div class="space-y-4">
-            <div>
-              <label class="text-xs text-text-dim block mb-2">AMOUNT_TO_UNSTAKE:</label>
-              <input
-                type="number"
-                placeholder="0.00"
-                value={unstakeAmount()}
-                onInput={(e) => setUnstakeAmount(e.target.value)}
-                class="w-full bg-bg-primary border border-border p-3 font-mono text-text-primary placeholder:text-text-dim focus:outline-none focus:border-accent-yellow"
-              />
-            </div>
-            
-            <div class="text-xs text-text-secondary">
-              STAKED_BALANCE: {formatNumber(parseFloat(userStake.data?.stake?.stakedAmount || '0') / 1e9)} TOKENS<br/>
-              INSTANT_WITHDRAWAL: NO_COOLDOWN
-            </div>
-            
-            <Button
-              onClick={handleUnstake}
-              disabled={!canUnstake()}
-              variant="outline"
-              class="w-full"
-              size="lg"
-            >
-              [EXECUTE_UNSTAKE]
-            </Button>
-          </div>
-        </div>
-      </div>
-
-      {/* Emission Information */}
-      <div class="space-y-4">
-        <div class="text-xs text-text-dim">EMISSION_ALGORITHM:</div>
-        <div class="bg-bg-secondary border border-border p-6">
-          <div class="grid md:grid-cols-2 gap-6">
-            <div>
-              <div class="text-sm font-bold text-text-primary mb-4">DYNAMIC_EMISSION_SYSTEM</div>
-              <div class="space-y-2 text-xs text-text-secondary">
-                <div>• REWARD_RATE = f(POOL_BALANCE, TARGET_BALANCE)</div>
-                <div>• HIGHER_POOL_BALANCE → HIGHER_EMISSIONS</div>
-                <div>• TIME_WEIGHTED_ACCUMULATOR_PATTERN</div>
-                <div>• AUTOMATIC_APR_ADJUSTMENT</div>
-              </div>
-            </div>
-            <div>
-              <div class="text-sm font-bold text-text-primary mb-4">CURRENT_PARAMETERS</div>
-              <div class="space-y-2 text-xs">
-                <div class="flex justify-between">
-                  <span class="text-text-dim">EMISSION_RATE:</span>
-                  <span class="text-accent-green">{stakingStats.data?.emissionRate ? formatSOL(stakingStats.data.emissionRate) : '---'} SOL/SEC</span>
-                </div>
-                <div class="flex justify-between">
-                  <span class="text-text-dim">BASE_RATE:</span>
-                  <span class="text-text-secondary">1.000 SOL/SEC</span>
-                </div>
-                <div class="flex justify-between">
-                  <span class="text-text-dim">MAX_RATE:</span>
-                  <span class="text-text-secondary">10.000 SOL/SEC</span>
-                </div>
-                <div class="flex justify-between">
-                  <span class="text-text-dim">MIN_RATE:</span>
-                  <span class="text-text-secondary">0.100 SOL/SEC</span>
-                </div>
-              </div>
+              </Show>
             </div>
           </div>
         </div>
-      </div>
 
-      {/* Fee Distribution Info */}
-      <div class="space-y-4">
-        <div class="text-xs text-text-dim">FEE_DISTRIBUTION_SYSTEM:</div>
-        <div class="bg-bg-secondary border border-border p-6">
-          <h3 class="font-mono text-sm text-accent-yellow mb-4">REVENUE_STREAMS</h3>
-          
-          <div class="grid md:grid-cols-2 gap-6 text-sm">
-            <div>
-              <div class="text-text-dim font-mono mb-2">LOAN_FEES (2% per loan)</div>
-              <div class="space-y-1 text-text-secondary">
-                <div>• Treasury: 50% (1.0%)</div>
-                <div>• <span class="text-accent-green">Staking Rewards: 25% (0.5%)</span></div>
-                <div>• Operations: 25% (0.5%)</div>
-              </div>
+        {/* Right Column - ACTIONS */}
+        <div class="space-y-4">
+          <div class="bg-bg-secondary border border-border">
+            {/* Header row inside card */}
+            <div class="flex justify-between items-center p-4 border-b border-border">
+              <span class="text-xs text-text-dim uppercase tracking-wider">ACTIONS</span>
             </div>
             
-            <div>
-              <div class="text-text-dim font-mono mb-2">CREATOR_FEES (PumpFun/Swap)</div>
-              <div class="space-y-1 text-text-secondary">
-                <div>• Treasury: 40%</div>
-                <div>• <span class="text-accent-green">Staking Rewards: 40%</span></div>
-                <div>• Operations: 20%</div>
-              </div>
+            {/* Tabs */}
+            <div class="flex border-b border-border">
+              <button 
+                onClick={() => setActiveTab('STAKE')}
+                class={`flex-1 p-4 text-xs uppercase tracking-wider transition-colors ${
+                  activeTab() === 'STAKE' 
+                    ? 'text-text-primary border-b-2 border-accent-green' 
+                    : 'text-text-dim hover:text-text-secondary'
+                }`}
+              >
+                STAKE
+              </button>
+              <button 
+                onClick={() => setActiveTab('UNSTAKE')}
+                class={`flex-1 p-4 text-xs uppercase tracking-wider transition-colors ${
+                  activeTab() === 'UNSTAKE' 
+                    ? 'text-text-primary border-b-2 border-accent-yellow' 
+                    : 'text-text-dim hover:text-text-secondary'
+                }`}
+              >
+                UNSTAKE
+              </button>
             </div>
-          </div>
-          
-          <div class="mt-4 pt-4 border-t border-border">
-            <div class="text-xs text-text-dim">
-              Note: Stakers receive yield from BOTH loan fees AND creator fees, 
-              making this a staker-focused protocol.
+            
+            {/* Tab Content */}
+            <div class="p-6">
+              <Show when={activeTab() === 'STAKE'}>
+                <div class="space-y-4">
+                  <div class="relative">
+                    <input
+                      type="number"
+                      placeholder="0.00"
+                      value={stakeAmount()}
+                      onInput={(e) => setStakeAmount(e.target.value)}
+                      class="w-full bg-bg-tertiary border border-border p-3 font-mono text-text-primary placeholder:text-text-dim focus:outline-none focus:border-accent-green"
+                    />
+                    <div class="absolute right-3 top-1/2 transform -translate-y-1/2 text-xs text-text-dim uppercase">
+                      TOKENS
+                    </div>
+                  </div>
+                  
+                  <div class="text-xs text-text-secondary">
+                    Available: {userTokenBalance.isLoading ? '---' : formatNumber(parseFloat(userTokenBalance.data || '0'))} TOKENS 
+                    <button 
+                      class="text-accent-blue hover:underline ml-2"
+                      onClick={() => setStakeAmount(userTokenBalance.data || '0')}
+                    >
+                      [MAX]
+                    </button>
+                  </div>
+                  
+                  <Button
+                    onClick={handleStake}
+                    disabled={!canStake() || stakeMutation.isPending}
+                    loading={stakeMutation.isPending}
+                    class="w-full bg-accent-green text-bg-primary hover:bg-accent-green/90"
+                  >
+                    {stakeMutation.isPending ? 'STAKING...' : '[STAKE_TOKENS]'}
+                  </Button>
+                </div>
+              </Show>
+              
+              <Show when={activeTab() === 'UNSTAKE'}>
+                <div class="space-y-4">
+                  <div class="relative">
+                    <input
+                      type="number"
+                      placeholder="0.00"
+                      value={unstakeAmount()}
+                      onInput={(e) => setUnstakeAmount(e.target.value)}
+                      class="w-full bg-bg-tertiary border border-border p-3 font-mono text-text-primary placeholder:text-text-dim focus:outline-none focus:border-accent-yellow"
+                    />
+                    <div class="absolute right-3 top-1/2 transform -translate-y-1/2 text-xs text-text-dim uppercase">
+                      TOKENS
+                    </div>
+                  </div>
+                  
+                  <div class="text-xs text-text-secondary">
+                    Available: {formatNumber(parseFloat(userStake.data?.stake?.stakedAmount || '0') / 1e9)} TOKENS 
+                    <button 
+                      class="text-accent-blue hover:underline ml-2"
+                      onClick={() => setUnstakeAmount((parseFloat(userStake.data?.stake?.stakedAmount || '0') / 1e9).toString())}
+                    >
+                      [MAX]
+                    </button>
+                  </div>
+                  
+                  <Button
+                    onClick={handleUnstake}
+                    disabled={!canUnstake() || unstakeMutation.isPending}
+                    loading={unstakeMutation.isPending}
+                    variant="outline"
+                    class="w-full border-accent-yellow text-accent-yellow hover:bg-accent-yellow hover:text-bg-primary"
+                  >
+                    {unstakeMutation.isPending ? 'UNSTAKING...' : '[UNSTAKE_TOKENS]'}
+                  </Button>
+                </div>
+              </Show>
             </div>
           </div>
         </div>

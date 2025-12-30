@@ -84,12 +84,23 @@ pub struct RepayLoan<'info> {
     )]
     pub token_mint: Account<'info, anchor_spl::token::Mint>,
 
+    /// User exposure tracker - must update when loan is repaid
+    #[account(
+        mut,
+        seeds = [USER_EXPOSURE_SEED, borrower.key().as_ref()],
+        bump = user_exposure.bump
+    )]
+    pub user_exposure: Account<'info, UserExposure>,
+
     pub token_program: Program<'info, Token>,
     pub system_program: Program<'info, System>,
 }
 
 pub fn repay_loan_handler(ctx: Context<RepayLoan>) -> Result<()> {
     let protocol_state = &mut ctx.accounts.protocol_state;
+
+    // FIX 1: Reentrancy guard
+    ReentrancyGuard::enter(protocol_state)?;
     
     // Store loan data before taking mutable borrow
     let borrower = ctx.accounts.loan.borrower;
@@ -118,26 +129,29 @@ pub fn repay_loan_handler(ctx: Context<RepayLoan>) -> Result<()> {
         LendingError::InsufficientTreasuryBalance
     );
 
-    // === DISTRIBUTE THE 2% FEE ===
-    // Fee split: 50% Treasury, 25% Staking, 25% Operations
+    // === FIX 3: Calculate fee splits explicitly (all from the 2% protocol fee) ===
     let treasury_fee = SafeMath::mul_div(
         protocol_fee, 
         LOAN_FEE_TREASURY_BPS as u64, 
         BPS_DIVISOR
-    )?;  // 50% of 2% = 1.0%
-    
+    )?;
+
     let staking_fee = SafeMath::mul_div(
         protocol_fee, 
         LOAN_FEE_STAKING_BPS as u64, 
         BPS_DIVISOR
-    )?;  // 25% of 2% = 0.5%
-    
-    // Operations gets remainder to avoid rounding issues
-    let operations_fee = protocol_fee
-        .checked_sub(treasury_fee)
-        .ok_or(LendingError::MathUnderflow)?
-        .checked_sub(staking_fee)
-        .ok_or(LendingError::MathUnderflow)?;  // 25% of 2% = 0.5%
+    )?;
+
+    let operations_fee = SafeMath::mul_div(
+        protocol_fee,
+        LOAN_FEE_OPERATIONS_BPS as u64,
+        BPS_DIVISOR
+    )?;
+
+    // Handle dust from rounding - send to treasury
+    let total_distributed = treasury_fee + staking_fee + operations_fee;
+    let dust = protocol_fee.saturating_sub(total_distributed);
+    let treasury_fee_with_dust = treasury_fee + dust;
 
     // Update loan status BEFORE transfers
     loan.status = LoanStatus::Repaid;
@@ -155,7 +169,7 @@ pub fn repay_loan_handler(ctx: Context<RepayLoan>) -> Result<()> {
         sol_borrowed,
     )?;
 
-    // === DISTRIBUTE FEE: Treasury gets 50% (1.0%) ===
+    // === DISTRIBUTE FEE: Treasury gets 50% (1.0%) + dust ===
     system_program::transfer(
         CpiContext::new(
             ctx.accounts.system_program.to_account_info(),
@@ -164,7 +178,7 @@ pub fn repay_loan_handler(ctx: Context<RepayLoan>) -> Result<()> {
                 to: ctx.accounts.treasury.to_account_info(),
             },
         ),
-        treasury_fee,
+        treasury_fee_with_dust,
     )?;
 
     // === DISTRIBUTE FEE: Staking gets 25% (0.5%) ===
@@ -226,10 +240,31 @@ pub fn repay_loan_handler(ctx: Context<RepayLoan>) -> Result<()> {
         1
     )?;
     
-    // Update token config counters
+    // Update token config counters and exposure tracking
     let token_config = &mut ctx.accounts.token_config;
     token_config.active_loans_count = SafeMath::sub(
         token_config.active_loans_count, 
+        1
+    )?;
+    
+    // Update token exposure tracking - decrement borrowed amount
+    token_config.total_active_borrowed = SafeMath::sub(
+        token_config.total_active_borrowed,
+        sol_borrowed
+    )?;
+
+    // Update user exposure tracking - decrement borrowed amount and increment counters
+    let user_exposure = &mut ctx.accounts.user_exposure;
+    user_exposure.total_borrowed = SafeMath::sub(
+        user_exposure.total_borrowed,
+        sol_borrowed
+    )?;
+    user_exposure.active_loans_count = SafeMath::sub(
+        user_exposure.active_loans_count,
+        1
+    )?;
+    user_exposure.loans_repaid = SafeMath::add(
+        user_exposure.loans_repaid,
         1
     )?;
 
@@ -237,10 +272,13 @@ pub fn repay_loan_handler(ctx: Context<RepayLoan>) -> Result<()> {
         "Loan repaid: principal={} SOL, fee={} SOL (treasury={}, staking={}, ops={})",
         sol_borrowed,
         protocol_fee,
-        treasury_fee,
+        treasury_fee_with_dust,
         staking_fee,
         operations_fee
     );
+    
+    // FIX 1: Exit reentrancy guard
+    ReentrancyGuard::exit(protocol_state);
     
     Ok(())
 }

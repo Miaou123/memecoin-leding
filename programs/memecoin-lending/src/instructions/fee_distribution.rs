@@ -2,7 +2,6 @@ use anchor_lang::prelude::*;
 use crate::state::*;
 use crate::error::LendingError;
 use crate::utils::SafeMath;
-use crate::utils::BPS_DIVISOR;
 
 #[derive(Accounts)]
 pub struct InitializeFeeReceiver<'info> {

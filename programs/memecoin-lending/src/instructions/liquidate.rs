@@ -84,6 +84,14 @@ pub struct Liquidate<'info> {
     #[account(constraint = pool_account.key() == token_config.pool_address @ LendingError::InvalidPoolAddress)]
     pub pool_account: AccountInfo<'info>,
 
+    /// User exposure tracker - must update when loan is liquidated
+    #[account(
+        mut,
+        seeds = [USER_EXPOSURE_SEED, loan.borrower.as_ref()],
+        bump = user_exposure.bump
+    )]
+    pub user_exposure: Account<'info, UserExposure>,
+
     // === PumpFun Accounts (optional, for PumpFun swaps) ===
     
     /// CHECK: PumpFun program
@@ -138,6 +146,9 @@ pub fn liquidate_handler<'info>(
     let token_config = &mut ctx.accounts.token_config;
     let clock = Clock::get()?;
 
+    // FIX 1: Reentrancy guard
+    ReentrancyGuard::enter(protocol_state)?;
+
     // Extract values before mutable borrow
     let loan_key = ctx.accounts.loan.key();
     let token_mint_key = ctx.accounts.loan.token_mint;
@@ -169,6 +180,32 @@ pub fn liquidate_handler<'info>(
     // Store values
     let collateral_amount = loan.collateral_amount;
     let sol_borrowed = loan.sol_borrowed;
+
+    // FIX 9: Add on-chain minimum slippage validation to prevent malicious liquidators
+    let expected_sol_value = SafeMath::mul_div(
+        collateral_amount,
+        current_price,
+        PRICE_SCALE as u64,
+    )?;
+
+    // Minimum output must be at least (100% - MAX_SLIPPAGE)% of expected value
+    let min_acceptable_output = SafeMath::mul_div(
+        expected_sol_value,
+        BPS_DIVISOR - MAX_LIQUIDATION_SLIPPAGE_BPS,
+        BPS_DIVISOR,
+    )?;
+
+    require!(
+        min_sol_output >= min_acceptable_output,
+        LendingError::SlippageTooHigh
+    );
+
+    msg!(
+        "Liquidation slippage check: expected={}, min_acceptable={}, provided={}",
+        expected_sol_value,
+        min_acceptable_output,
+        min_sol_output
+    );
 
     // Update loan status
     loan.status = liquidation_reason;
@@ -310,6 +347,27 @@ pub fn liquidate_handler<'info>(
     protocol_state.total_fees_earned = SafeMath::add(protocol_state.total_fees_earned, treasury_share)?;
     
     token_config.active_loans_count = SafeMath::sub(token_config.active_loans_count, 1)?;
+    
+    // Update token exposure tracking - decrement borrowed amount  
+    token_config.total_active_borrowed = SafeMath::sub(
+        token_config.total_active_borrowed,
+        sol_borrowed
+    )?;
+
+    // Update user exposure tracking - decrement borrowed amount and increment liquidation counter
+    let user_exposure = &mut ctx.accounts.user_exposure;
+    user_exposure.total_borrowed = SafeMath::sub(
+        user_exposure.total_borrowed,
+        sol_borrowed
+    )?;
+    user_exposure.active_loans_count = SafeMath::sub(
+        user_exposure.active_loans_count,
+        1
+    )?;
+    user_exposure.loans_liquidated = SafeMath::add(
+        user_exposure.loans_liquidated,
+        1
+    )?;
 
     msg!(
         "Loan liquidated: reason={:?}, collateral={}, proceeds={} SOL (treasury={}, ops={})",
@@ -319,6 +377,9 @@ pub fn liquidate_handler<'info>(
         treasury_share,
         operations_share
     );
+    
+    // FIX 1: Exit reentrancy guard
+    ReentrancyGuard::exit(protocol_state);
     
     Ok(())
 }

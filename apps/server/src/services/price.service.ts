@@ -6,6 +6,7 @@ import { logger } from '../utils/logger.js';
 import Redis from 'ioredis';
 import { PumpFunSDK } from 'pumpdotfun-sdk';
 import { AnchorProvider } from '@coral-xyz/anchor';
+import { WebSocket } from 'ws';
 
 const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
 
@@ -66,15 +67,23 @@ interface ServiceStatus {
   jupiterAvailable: boolean;
   pumpFunAvailable: boolean;
   dexScreenerAvailable: boolean;
+  jupiterWebSocketConnected: boolean;
   lastCheck: number;
   cacheSize: number;
   uptime: number;
 }
 
+// Jupiter WebSocket price update interface
+interface JupiterWSPriceUpdate {
+  id: string;
+  price: string;
+  timestamp: number;
+}
+
 class PriceService {
   private connection: Connection;
   private cache = new Map<string, { data: ExtendedPriceData; timestamp: number }>();
-  private readonly CACHE_TTL = 10 * 1000; // 10 seconds
+  private readonly CACHE_TTL = 3 * 1000; // 3 seconds (reduced for faster updates)
   private serviceStartTime = Date.now();
   private jupiterAvailable = true;
   private pumpFunAvailable = true;
@@ -82,10 +91,210 @@ class PriceService {
   private lastHealthCheck = 0;
   private pumpFunSDK: PumpFunSDK | null = null;
   
+  // SECURITY: Jupiter WebSocket for real-time price streaming
+  private jupiterWS: WebSocket | null = null;
+  private wsReconnectAttempts = 0;
+  private maxReconnectAttempts = 10;
+  private trackedMints = new Set<string>();
+  private wsConnected = false;
+  
   constructor() {
     const network = (process.env.SOLANA_NETWORK as NetworkType) || 'devnet';
     const networkConfig = getNetworkConfig(network);
     this.connection = new Connection(networkConfig.rpcUrl, 'confirmed');
+    
+    // SECURITY: Initialize Jupiter WebSocket for real-time price streaming
+    this.initializeJupiterWebSocket();
+  }
+
+  /**
+   * SECURITY: Initialize Jupiter WebSocket connection for real-time price streaming
+   */
+  private initializeJupiterWebSocket(): void {
+    try {
+      // Jupiter WebSocket URL (check Jupiter docs for the correct URL)
+      const wsUrl = 'wss://price.jup.ag/v4/price-stream';
+      
+      this.jupiterWS = new WebSocket(wsUrl, {
+        headers: {
+          'x-api-key': process.env.JUPITER_API_KEY || '',
+        },
+      });
+
+      this.jupiterWS.on('open', () => {
+        logger.info('🔌 Jupiter WebSocket connected');
+        this.wsConnected = true;
+        this.wsReconnectAttempts = 0;
+        
+        // Subscribe to tracked tokens
+        this.subscribeToTrackedTokens();
+      });
+
+      this.jupiterWS.on('message', (data: string) => {
+        try {
+          const update = JSON.parse(data) as JupiterWSPriceUpdate;
+          this.handlePriceUpdate(update);
+        } catch (error) {
+          logger.warn('Failed to parse WebSocket message:', error);
+        }
+      });
+
+      this.jupiterWS.on('close', (code: number, reason: string) => {
+        logger.warn(`🔌 Jupiter WebSocket disconnected: ${code} ${reason}`);
+        this.wsConnected = false;
+        this.scheduleReconnect();
+      });
+
+      this.jupiterWS.on('error', (error: Error) => {
+        logger.error('🔌 Jupiter WebSocket error:', error);
+        this.wsConnected = false;
+      });
+
+    } catch (error) {
+      logger.error('Failed to initialize Jupiter WebSocket:', error);
+    }
+  }
+
+  /**
+   * SECURITY: Handle real-time price updates from Jupiter WebSocket
+   */
+  private handlePriceUpdate(update: JupiterWSPriceUpdate): void {
+    const extendedData: ExtendedPriceData = {
+      mint: update.id,
+      usdPrice: parseFloat(update.price),
+      source: 'jupiter-ws',
+      timestamp: update.timestamp || Date.now(),
+    };
+
+    // Update cache with real-time data
+    this.cache.set(update.id, { data: extendedData, timestamp: Date.now() });
+    
+    // Also cache in Redis
+    redis.setex(`price:${update.id}`, 5, JSON.stringify(extendedData));
+    
+    logger.debug(`📈 Real-time price update: ${update.id} = $${update.price}`);
+    
+    // CHECK FOR LIQUIDATIONS IMMEDIATELY
+    this.checkLiquidationThresholds(update.id, parseFloat(update.price));
+  }
+
+  /**
+   * SECURITY: Check if any loans need immediate liquidation based on price update
+   */
+  private async checkLiquidationThresholds(mint: string, usdPrice: number): Promise<void> {
+    try {
+      // Get SOL price to convert USD to SOL
+      const solPrice = await this.getSolPrice();
+      const priceInSol = usdPrice / solPrice;
+      
+      // Get all active loans for this token
+      const loans = await prisma.loan.findMany({
+        where: { 
+          tokenMint: mint, 
+          status: 'active' 
+        },
+        select: {
+          id: true,
+          liquidationPrice: true,
+          borrower: true,
+        }
+      });
+      
+      for (const loan of loans) {
+        const liquidationPrice = parseFloat(loan.liquidationPrice);
+        if (priceInSol <= liquidationPrice) {
+          console.log(`🚨 URGENT: Loan ${loan.id} hit liquidation threshold!`);
+          console.log(`📊 Current: $${usdPrice} (${priceInSol} SOL) <= Threshold: ${liquidationPrice} SOL`);
+          
+          // Trigger immediate liquidation (don't wait for job)
+          this.triggerUrgentLiquidation(loan.id, priceInSol, liquidationPrice);
+        }
+      }
+    } catch (error) {
+      logger.error('Failed to check liquidation thresholds:', error);
+    }
+  }
+
+  /**
+   * SECURITY: Trigger urgent liquidation for critical price drops
+   */
+  private async triggerUrgentLiquidation(loanId: string, price: number, threshold: number): Promise<void> {
+    try {
+      const liquidatorWallet = process.env.LIQUIDATOR_WALLET || process.env.ADMIN_WALLET;
+      
+      if (!liquidatorWallet) {
+        console.error('❌ No liquidator wallet configured for urgent liquidation');
+        return;
+      }
+      
+      console.log(`⚡ Triggering URGENT liquidation for loan ${loanId}`);
+      
+      // Import loan service dynamically to avoid circular dependency
+      const { loanService } = await import('./loan.service.js');
+      await loanService.liquidateLoan(loanId, liquidatorWallet);
+      
+      console.log(`✅ URGENT liquidation completed for ${loanId}`);
+      
+    } catch (error) {
+      console.error(`❌ Urgent liquidation failed for ${loanId}:`, error);
+    }
+  }
+
+  /**
+   * SECURITY: Subscribe to tracked tokens for WebSocket updates
+   */
+  private subscribeToTrackedTokens(): void {
+    if (!this.jupiterWS || !this.wsConnected || this.trackedMints.size === 0) {
+      return;
+    }
+
+    const subscriptionMessage = {
+      method: 'subscribe',
+      params: {
+        ids: Array.from(this.trackedMints),
+      },
+    };
+
+    this.jupiterWS.send(JSON.stringify(subscriptionMessage));
+    logger.info(`📡 Subscribed to ${this.trackedMints.size} tokens via WebSocket`);
+  }
+
+  /**
+   * SECURITY: Add token to real-time tracking
+   */
+  public trackToken(mint: string): void {
+    this.trackedMints.add(mint);
+    
+    // If WebSocket is connected, subscribe immediately
+    if (this.wsConnected && this.jupiterWS) {
+      const subscriptionMessage = {
+        method: 'subscribe',
+        params: {
+          ids: [mint],
+        },
+      };
+      this.jupiterWS.send(JSON.stringify(subscriptionMessage));
+      logger.info(`📡 Added ${mint} to real-time tracking`);
+    }
+  }
+
+  /**
+   * SECURITY: Schedule WebSocket reconnection with exponential backoff
+   */
+  private scheduleReconnect(): void {
+    if (this.wsReconnectAttempts >= this.maxReconnectAttempts) {
+      logger.error('🔌 Max WebSocket reconnection attempts reached');
+      return;
+    }
+
+    const backoffMs = Math.min(1000 * Math.pow(2, this.wsReconnectAttempts), 30000);
+    this.wsReconnectAttempts++;
+
+    logger.info(`🔌 Reconnecting Jupiter WebSocket in ${backoffMs}ms (attempt ${this.wsReconnectAttempts})`);
+    
+    setTimeout(() => {
+      this.initializeJupiterWebSocket();
+    }, backoffMs);
   }
 
   /**
@@ -170,14 +379,8 @@ class PriceService {
       }
     }
 
-    // Fallback to mock prices for any remaining
-    for (const mint of mints) {
-      if (!results.has(mint)) {
-        const mockPrice = this.getMockPrice(mint);
-        results.set(mint, mockPrice);
-        this.cache.set(mint, { data: mockPrice, timestamp: Date.now() });
-      }
-    }
+    // For any remaining mints without prices, we don't add fallback data
+    // This ensures we only return real price data
 
     return results;
   }
@@ -394,26 +597,6 @@ class PriceService {
     };
   }
 
-  /**
-   * Get mock price for development
-   */
-  private getMockPrice(mint: string): ExtendedPriceData {
-    const mockPrices: Record<string, number> = {
-      'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263': 0.00001234, // BONK
-      '5z3EqYQo9HiCEs3R84RCDMu2n7anpDMxRhdK8PSWmrRC': 0.5678,     // POPCAT
-      'MEW1gQWJ3nEXg2qgERiKu7FAFj79PHvQVREQUzScPP5': 0.0123,      // MEW
-      'WENWENvqqNya429ubCdR81ZmD69brwQaaBYY6p3LCpk': 0.000456,    // WEN
-      'EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm': 2.45,       // WIF
-      'So11111111111111111111111111111111111111112': 150.0,        // SOL
-    };
-    
-    return {
-      mint,
-      usdPrice: mockPrices[mint] || 0.001,
-      source: 'mock',
-      timestamp: Date.now(),
-    };
-  }
 
   /**
    * Get price from 24h ago
@@ -507,6 +690,7 @@ class PriceService {
       jupiterAvailable: this.jupiterAvailable,
       pumpFunAvailable: this.pumpFunAvailable,
       dexScreenerAvailable: this.dexScreenerAvailable,
+      jupiterWebSocketConnected: this.wsConnected,
       lastCheck: this.lastHealthCheck,
       cacheSize: this.cache.size,
       uptime: Date.now() - this.serviceStartTime,
@@ -568,6 +752,11 @@ class PriceService {
     
     if (mints.length > 0) {
       await this.getPrices(mints);
+      
+      // SECURITY: Track all enabled tokens for real-time monitoring
+      for (const mint of mints) {
+        this.trackToken(mint);
+      }
     }
     
     logger.info(`Updated prices for ${mints.length} tokens`);

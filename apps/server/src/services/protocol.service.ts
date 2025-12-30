@@ -39,73 +39,124 @@ class ProtocolService {
   }
   
   async getProtocolStats(): Promise<ProtocolStats> {
-    const client = await this.getClient();
-    
-    // Get on-chain protocol state
-    const protocolState = await client.getProtocolState();
-    
-    // Get treasury balance separately (no longer on ProtocolState)
-    const treasuryBalance = await this.getTreasuryBalance();
-    
-    // Get 24h volume
-    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    const loans24h = await prisma.loan.findMany({
-      where: {
-        createdAt: { gte: yesterday },
-      },
-      select: { solBorrowed: true },
-    });
+    try {
+      const client = await this.getClient();
+      
+      // Get treasury balance separately (works independently)
+      const treasuryBalance = await this.getTreasuryBalance();
+      
+      // Get database stats (these should still work)
+      const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      const loans24h = await prisma.loan.findMany({
+        where: {
+          createdAt: { gte: yesterday },
+        },
+        select: { solBorrowed: true },
+      });
 
-    // Manually sum string values
-    const volume24h = loans24h.reduce((sum, loan) => {
-      return sum + BigInt(loan.solBorrowed || '0');
-    }, BigInt(0)).toString();
-    
-    // Get 24h liquidations
-    const liquidations24h = await prisma.loan.count({
-      where: {
-        liquidatedAt: { gte: yesterday },
-      },
-    });
-    
-    // Get active loans count
-    const totalLoansActive = await prisma.loan.count({
-      where: { status: 'active' },
-    });
-    
-    // Update cached stats
-    await prisma.protocolStats.upsert({
-      where: { id: 'current' },
-      create: {
-        id: 'current',
+      // Manually sum string values
+      const volume24h = loans24h.reduce((sum, loan) => {
+        return sum + BigInt(loan.solBorrowed || '0');
+      }, BigInt(0)).toString();
+      
+      // Get 24h liquidations
+      const liquidations24h = await prisma.loan.count({
+        where: {
+          liquidatedAt: { gte: yesterday },
+        },
+      });
+      
+      // Get active loans count
+      const totalLoansActive = await prisma.loan.count({
+        where: { status: 'active' },
+      });
+
+      // Get total loans created from database instead of on-chain
+      const totalLoansCreated = await prisma.loan.count();
+
+      let protocolState = null;
+      let totalFeesEarned = '0';
+
+      // Try to get on-chain protocol state with fallback
+      try {
+        protocolState = await client.getProtocolState();
+        totalFeesEarned = protocolState.totalFeesEarned || '0';
+      } catch (error) {
+        console.warn('Could not read on-chain protocol state, using database fallback:', error);
+        // Use database as fallback for fees
+        // Calculate fees from loans (protocolFeeBps * solBorrowed / 10000)
+        const loans = await prisma.loan.findMany({
+          where: {
+            status: { in: ['repaid', 'liquidated_price', 'liquidated_time'] }
+          },
+          select: {
+            solBorrowed: true,
+            protocolFeeBps: true
+          }
+        });
+        
+        let totalFees = BigInt(0);
+        for (const loan of loans) {
+          const borrowed = BigInt(loan.solBorrowed);
+          const feeBps = BigInt(loan.protocolFeeBps);
+          const fee = (borrowed * feeBps) / BigInt(10000);
+          totalFees += fee;
+        }
+        
+        totalFeesEarned = totalFees.toString();
+      }
+      
+      // Update cached stats
+      const stats = {
         totalValueLocked: treasuryBalance,
         totalLoansActive,
-        totalLoansCreated: parseInt(protocolState.totalLoansCreated),
-        totalFeesEarned: protocolState.totalFeesEarned,
+        totalLoansCreated,
+        totalFeesEarned,
         treasuryBalance: treasuryBalance,
         volume24h: volume24h,
         liquidations24h,
-      },
-      update: {
-        totalValueLocked: treasuryBalance,
-        totalLoansActive,
-        totalLoansCreated: parseInt(protocolState.totalLoansCreated),
-        totalFeesEarned: protocolState.totalFeesEarned,
-        treasuryBalance: treasuryBalance,
-        volume24h: volume24h,
-        liquidations24h,
-      },
-    });
-    
-    return {
-      totalValueLocked: treasuryBalance,
-      totalLoansActive,
-      totalLoansCreated: parseInt(protocolState.totalLoansCreated),
-      totalFeesEarned: protocolState.totalFeesEarned,
-      treasuryBalance: treasuryBalance,
-      volume24h: volume24h,
-      liquidations24h,
-    };
+      };
+
+      await prisma.protocolStats.upsert({
+        where: { id: 'current' },
+        create: {
+          id: 'current',
+          ...stats,
+        },
+        update: stats,
+      });
+      
+      return stats;
+    } catch (error) {
+      console.error('Error fetching protocol stats:', error);
+      // Return cached stats if available
+      const cached = await prisma.protocolStats.findUnique({
+        where: { id: 'current' },
+      });
+      
+      if (cached) {
+        return {
+          totalValueLocked: cached.totalValueLocked,
+          totalLoansActive: cached.totalLoansActive,
+          totalLoansCreated: cached.totalLoansCreated,
+          totalFeesEarned: cached.totalFeesEarned,
+          treasuryBalance: cached.treasuryBalance,
+          volume24h: cached.volume24h,
+          liquidations24h: cached.liquidations24h,
+        };
+      }
+      
+      // Last resort: return empty stats
+      return {
+        totalValueLocked: '0',
+        totalLoansActive: 0,
+        totalLoansCreated: 0,
+        totalFeesEarned: '0',
+        treasuryBalance: '0',
+        volume24h: '0',
+        liquidations24h: 0,
+      };
+    }
   }
   
   async getTreasuryBalance(): Promise<string> {

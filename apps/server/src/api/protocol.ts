@@ -13,12 +13,20 @@ protocolRouter.use('/*', apiRateLimit);
 
 // Get protocol statistics
 protocolRouter.get('/stats', async (c) => {
-  const stats = await protocolService.getProtocolStats();
-  
-  return c.json<ApiResponse<ProtocolStats>>({
-    success: true,
-    data: stats,
-  });
+  try {
+    const stats = await protocolService.getProtocolStats();
+    
+    return c.json<ApiResponse<ProtocolStats>>({
+      success: true,
+      data: stats,
+    });
+  } catch (error: any) {
+    console.error('Protocol stats error:', error);
+    return c.json<ApiResponse<null>>({
+      success: false,
+      error: error.message || 'Failed to fetch protocol statistics',
+    }, 500);
+  }
 });
 
 // Get treasury balance

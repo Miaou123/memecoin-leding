@@ -11,7 +11,7 @@ class FeeClaimerService {
   private pumpSdk: OnlinePumpSdk;
   private adminKeypair: Keypair;
   private program: Program;
-  private intervalId: NodeJS.Timer | null = null;
+  private intervalId: NodeJS.Timeout | null = null;
 
   constructor(
     connection: Connection,

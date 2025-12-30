@@ -67,6 +67,11 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
   let loanBump: number;
   let vaultPda: PublicKey;
   let vaultBump: number;
+  
+  // User Exposure PDAs
+  let borrowerExposurePda: PublicKey;
+  let borrower2ExposurePda: PublicKey;
+  let liquidatorExposurePda: PublicKey;
 
   // Test constants
   const LAMPORTS_FOR_TESTING = 100 * LAMPORTS_PER_SOL;
@@ -160,6 +165,22 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
 
     [bronzeTokenConfigPda] = PublicKey.findProgramAddressSync(
       [Buffer.from("token_config"), bronzeTokenMint.toBuffer()],
+      program.programId
+    );
+
+    // Derive User Exposure PDAs
+    [borrowerExposurePda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("user_exposure"), borrower.publicKey.toBuffer()],
+      program.programId
+    );
+
+    [borrower2ExposurePda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("user_exposure"), borrower2.publicKey.toBuffer()],
+      program.programId
+    );
+
+    [liquidatorExposurePda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("user_exposure"), liquidator.publicKey.toBuffer()],
       program.programId
     );
 
@@ -283,7 +304,7 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
       expect(protocolState.paused).to.be.false;
       expect(protocolState.totalLoansCreated.toNumber()).to.equal(0);
       expect(protocolState.treasuryBalance.toNumber()).to.equal(0);
-      expect(protocolState.protocolFeeBps).to.equal(100); // 1%
+      expect(protocolState.protocolFeeBps).to.equal(200); // 2%
       expect(protocolState.treasuryFeeBps).to.equal(9000); // 90%
       expect(protocolState.buybackFeeBps).to.equal(500); // 5%
       expect(protocolState.operationsFeeBps).to.equal(500); // 5%
@@ -431,9 +452,8 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
     it("should update token configuration", async () => {
       const tx = await program.methods
         .updateTokenConfig(
-          null, // keep enabled
-          6500, // new LTV: 65%
-          600   // new interest: 6%
+          true,   // enabled
+          6500,   // ltv_bps (65%)
         )
         .accounts({
           protocolState: protocolStatePda,
@@ -442,12 +462,12 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
         })
         .signers([admin])
         .rpc();
-
+    
       console.log(`✅ Update token config: ${tx}`);
-
+    
       const tokenConfig = await program.account.tokenConfig.fetch(goldTokenConfigPda);
+      expect(tokenConfig.enabled).to.be.true;
       expect(tokenConfig.ltvBps).to.equal(6500);
-      // Interest rate removed - using flat 1% fee now
     });
 
     it("should fail whitelist with non-admin", async () => {
@@ -522,12 +542,13 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
           protocolState: protocolStatePda,
           tokenConfig: goldTokenConfigPda,
           loan: loan1Pda,
-          vault: loan1VaultPda,
           treasury: treasuryPda,
           borrower: borrower.publicKey,
           borrowerTokenAccount: borrowerGoldTokenAccount,
-          tokenMint: goldTokenMint,
+          vault: loan1VaultPda,
           poolAccount: goldPool.publicKey,
+          tokenMint: goldTokenMint,
+          userExposure: borrowerExposurePda,
           tokenProgram: TOKEN_PROGRAM_ID,
           associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
           systemProgram: SystemProgram.programId,
@@ -595,12 +616,13 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
             protocolState: protocolStatePda,
             tokenConfig: goldTokenConfigPda,
             loan: loan2Pda,
-            vault: loan2VaultPda,
             treasury: treasuryPda,
             borrower: borrower.publicKey,
             borrowerTokenAccount: borrowerGoldTokenAccount,
-            tokenMint: goldTokenMint,
+            vault: loan2VaultPda,
             poolAccount: goldPool.publicKey,
+            tokenMint: goldTokenMint,
+            userExposure: borrowerExposurePda,
             tokenProgram: TOKEN_PROGRAM_ID,
             associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
             systemProgram: SystemProgram.programId,
@@ -642,6 +664,7 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
           borrowerTokenAccount: borrowerGoldTokenAccount,
           vaultTokenAccount: loan1VaultPda,
           tokenMint: goldTokenMint,
+          userExposure: borrowerExposurePda,
           tokenProgram: TOKEN_PROGRAM_ID,
           systemProgram: SystemProgram.programId,
         })
@@ -692,6 +715,7 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
             borrowerTokenAccount: borrowerGoldTokenAccount,
             vaultTokenAccount: loan1VaultPda,
             tokenMint: goldTokenMint,
+            userExposure: borrowerExposurePda,
             tokenProgram: TOKEN_PROGRAM_ID,
             systemProgram: SystemProgram.programId,
           })
@@ -737,12 +761,13 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
           protocolState: protocolStatePda,
           tokenConfig: goldTokenConfigPda,
           loan: liquidationLoanPda,
-          vault: liquidationVaultPda,
           treasury: treasuryPda,
           borrower: borrower.publicKey,
           borrowerTokenAccount: borrowerGoldTokenAccount,
-          tokenMint: goldTokenMint,
+          vault: liquidationVaultPda,
           poolAccount: goldPool.publicKey,
+          tokenMint: goldTokenMint,
+          userExposure: borrowerExposurePda,
           tokenProgram: TOKEN_PROGRAM_ID,
           associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
           systemProgram: SystemProgram.programId,
@@ -823,12 +848,13 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
           protocolState: protocolStatePda,
           tokenConfig: goldTokenConfigPda,
           loan: healthyLoanPda,
-          vault: healthyVaultPda,
           treasury: treasuryPda,
           borrower: borrower.publicKey,
           borrowerTokenAccount: borrowerGoldTokenAccount,
-          tokenMint: goldTokenMint,
+          vault: healthyVaultPda,
           poolAccount: goldPool.publicKey,
+          tokenMint: goldTokenMint,
+          userExposure: borrowerExposurePda,
           tokenProgram: TOKEN_PROGRAM_ID,
           associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
           systemProgram: SystemProgram.programId,
@@ -925,10 +951,10 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
       try {
         await program.methods
           .updateFees(
-            null,
+            null, // Keep existing protocol fee
             5000, // 50%
             2500, // 25%
-            2000  // 20% - Total: 95%, should fail
+            2000  // 20% - Total splits: 95%, should fail (must sum to 10000)
           )
           .accounts({
             protocolState: protocolStatePda,
@@ -949,7 +975,7 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
 
       const tx = await program.methods
         .updateWallets(
-          null, // keep admin
+          admin.publicKey, // keep admin
           newBuyback.publicKey,
           newOperations.publicKey
         )
@@ -1075,12 +1101,13 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
             protocolState: protocolStatePda,
             tokenConfig: goldTokenConfigPda,
             loan: pausedLoanPda,
-            vault: pausedVaultPda,
             treasury: treasuryPda,
             borrower: borrower.publicKey,
             borrowerTokenAccount: borrowerGoldTokenAccount,
-            tokenMint: goldTokenMint,
+            vault: pausedVaultPda,
             poolAccount: goldPool.publicKey,
+            tokenMint: goldTokenMint,
+            userExposure: borrowerExposurePda,
             tokenProgram: TOKEN_PROGRAM_ID,
             associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
             systemProgram: SystemProgram.programId,
@@ -1189,7 +1216,7 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
     it("should fail to update fees with invalid split", async () => {
       try {
         await program.methods
-          .updateFees(null, 5000, 3000, 3000) // Sum = 11000 (should be 10000)
+          .updateFees(null, 5000, 3000, 3000) // Keep protocol fee, splits sum = 11000 (should be 10000)
           .accounts({
             protocolState: protocolStatePda,
             admin: admin.publicKey,
@@ -1202,6 +1229,54 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
         expect(err.message).to.include("InvalidFeeConfiguration");
         console.log("✅ Invalid fee split correctly rejected");
       }
+    });
+
+    it("should handle partial fee updates correctly", async () => {
+      // First get current values
+      const stateBefore = await program.account.protocolState.fetch(protocolStatePda);
+      const protocolFeeBefore = stateBefore.protocolFeeBps;
+      const treasuryFeeBefore = stateBefore.treasuryFeeBps;
+      const buybackFeeBefore = stateBefore.buybackFeeBps;
+      const operationsFeeBefore = stateBefore.operationsFeeBps;
+
+      // Test 1: Update only protocol fee, keep all others unchanged
+      await program.methods
+        .updateFees(
+          300,  // Update protocol fee to 3%
+          null, // Keep treasury fee unchanged
+          null, // Keep buyback fee unchanged 
+          null  // Keep operations fee unchanged
+        )
+        .accounts({
+          protocolState: protocolStatePda,
+          admin: admin.publicKey,
+        })
+        .signers([admin])
+        .rpc();
+
+      let stateAfterPartial = await program.account.protocolState.fetch(protocolStatePda);
+      expect(stateAfterPartial.protocolFeeBps).to.equal(300);
+      expect(stateAfterPartial.treasuryFeeBps).to.equal(treasuryFeeBefore);
+      expect(stateAfterPartial.buybackFeeBps).to.equal(buybackFeeBefore);
+      expect(stateAfterPartial.operationsFeeBps).to.equal(operationsFeeBefore);
+
+      // Test 2: Update nothing (all nulls should keep everything unchanged)
+      await program.methods
+        .updateFees(null, null, null, null)
+        .accounts({
+          protocolState: protocolStatePda,
+          admin: admin.publicKey,
+        })
+        .signers([admin])
+        .rpc();
+
+      let stateAfterNulls = await program.account.protocolState.fetch(protocolStatePda);
+      expect(stateAfterNulls.protocolFeeBps).to.equal(300); // Should still be 300
+      expect(stateAfterNulls.treasuryFeeBps).to.equal(treasuryFeeBefore);
+      expect(stateAfterNulls.buybackFeeBps).to.equal(buybackFeeBefore);
+      expect(stateAfterNulls.operationsFeeBps).to.equal(operationsFeeBefore);
+
+      console.log("✅ Partial fee updates work correctly");
     });
 
     it("should whitelist token with pool type configuration", async () => {
@@ -1291,6 +1366,7 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
             vault: testVaultPda,
             poolAccount: goldPool.publicKey,
             tokenMint: goldTokenMint,
+            userExposure: borrower2ExposurePda,
             tokenProgram: TOKEN_PROGRAM_ID,
             associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
             systemProgram: SystemProgram.programId,

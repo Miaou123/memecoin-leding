@@ -16,6 +16,7 @@ import { MemecoinLendingClient, buildCreateLoanTransaction, buildRepayLoanTransa
 import { prisma } from '../db/client.js';
 import { priceService } from './price.service.js';
 import { notificationService } from './notification.service.js';
+import { fastPriceMonitor } from './fast-price-monitor.js';
 import { websocketService } from '../websocket/index.js';
 import { PROGRAM_ID, getNetworkConfig, getCurrentNetwork } from '@memecoin-lending/config';
 
@@ -197,6 +198,9 @@ class LoanService {
     tx.recentBlockhash = blockhash;
     tx.feePayer = new PublicKey(params.borrower);
     
+    // SECURITY: Track token for real-time price monitoring via WebSocket
+    priceService.trackToken(params.tokenMint);
+    
     // Serialize and return (unsigned)
     const serializedTx = tx.serialize({ 
       requireAllSignatures: false,
@@ -279,6 +283,13 @@ class LoanService {
       },
       include: { token: true },
     });
+
+    // Remove from price monitoring
+    try {
+      fastPriceMonitor.removeLiquidationThreshold(dbLoan.tokenMint, loanPubkey);
+    } catch (e) {
+      // Ignore
+    }
     
     // Create notification
     await notificationService.createNotification({
@@ -329,6 +340,13 @@ class LoanService {
     });
     
     console.log(`[LoanService] Loan ${loanPubkey.substring(0, 8)}... marked as repaid. Tx: ${txSignature.substring(0, 8)}...`);
+    
+    // Remove from price monitoring
+    try {
+      fastPriceMonitor.removeLiquidationThreshold(existingLoan.tokenMint, loanPubkey);
+    } catch (e) {
+      // Ignore
+    }
     
     // Create notification for user
     try {
@@ -394,29 +412,97 @@ class LoanService {
       throw new Error('Token configuration not found on-chain');
     }
     
-    let txSignature: string;
+    // SECURITY: Implement liquidation with retry mechanism and slippage escalation
+    let txSignature: string | undefined;
+    let lastError: Error | null = null;
     
-    try {
-      // Execute liquidation based on pool type
-      if (tokenConfig.poolType === PoolType.Pumpfun) {
-        console.log(`🔥 Liquidating PumpFun loan ${loanPubkey} via bonding curve`);
-        txSignature = await liquidateWithPumpfun(
-          client.program,
-          new PublicKey(loanPubkey),
-          client.connection
-        );
-      } else {
-        // Use Jupiter for Raydium, Orca, and PumpSwap
-        console.log(`🔥 Liquidating ${tokenConfig.poolType} loan ${loanPubkey} via Jupiter`);
-        txSignature = await liquidateWithJupiter(
-          client.program,
-          new PublicKey(loanPubkey),
-          150 // 1.5% slippage tolerance
-        );
+    const maxRetries = 6; // 3% → 5% → 7% → 9% → 11% → 15%
+    
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        // Calculate slippage for this attempt: 3% → 5% → 7% → 9% → 11% → 15%
+        const slippageLevels = [300, 500, 700, 900, 1100, 1500]; // basis points (6 levels)
+        const currentSlippageBps = slippageLevels[attempt];
+        
+        console.log(`🔄 Liquidation attempt ${attempt + 1}/${maxRetries} for ${loanPubkey} with ${currentSlippageBps/100}% slippage`);
+        
+        // Execute liquidation based on pool type
+        if (tokenConfig.poolType === PoolType.Pumpfun) {
+          console.log(`🔥 Liquidating PumpFun loan ${loanPubkey} via bonding curve`);
+          // Note: liquidateWithPumpfun may not support slippage parameter yet
+          txSignature = await liquidateWithPumpfun(
+            client.program,
+            new PublicKey(loanPubkey),
+            client.connection
+          );
+        } else {
+          // Use Jupiter for Raydium, Orca, and PumpSwap
+          console.log(`🔥 Liquidating ${tokenConfig.poolType} loan ${loanPubkey} via Jupiter`);
+          txSignature = await liquidateWithJupiter(
+            client.program,
+            new PublicKey(loanPubkey),
+            currentSlippageBps
+          );
+        }
+        
+        // Success! Now wait for on-chain confirmation
+        console.log(`📤 Transaction sent: ${txSignature}`);
+        
+        // CRITICAL: Wait for on-chain confirmation
+        const connection = client.connection;
+        const startTime = Date.now();
+        const timeout = 60000; // 60 seconds
+        
+        while (Date.now() - startTime < timeout) {
+          const status = await connection.getSignatureStatus(txSignature);
+          
+          if (status.value?.confirmationStatus === 'confirmed' || 
+              status.value?.confirmationStatus === 'finalized') {
+            console.log(`✅ Transaction CONFIRMED on-chain: ${txSignature}`);
+            break;
+          }
+          
+          if (status.value?.err) {
+            throw new Error(`Transaction failed on-chain: ${JSON.stringify(status.value.err)}`);
+          }
+          
+          await new Promise(r => setTimeout(r, 1000));
+        }
+        
+        // Double-check loan state changed
+        try {
+          const loanAfter = await (client.program.account as any).loan.fetch(new PublicKey(loanPubkey));
+          if (loanAfter && (loanAfter.status as any).active) {
+            throw new Error('Loan still active after liquidation - TX may have failed');
+          }
+          console.log(`✅ Loan status confirmed changed after liquidation`);
+        } catch (fetchError) {
+          console.log(`✅ Loan account no longer exists or changed - liquidation confirmed`);
+        }
+        
+        console.log(`✅ Liquidation successful and CONFIRMED on attempt ${attempt + 1}`);
+        break;
+        
+      } catch (error) {
+        lastError = error as Error;
+        console.warn(`❌ Liquidation attempt ${attempt + 1} failed:`, error);
+        
+        // If this is the last attempt, throw the error
+        if (attempt === maxRetries - 1) {
+          console.error(`🚨 All ${maxRetries} liquidation attempts failed for ${loanPubkey}`);
+          throw new Error(`Liquidation failed after ${maxRetries} attempts: ${lastError.message}`);
+        }
+        
+        // Wait before next attempt (exponential backoff: 1s, 2s, 4s)
+        const backoffMs = 1000 * Math.pow(2, attempt);
+        console.log(`⏱️  Waiting ${backoffMs}ms before retry...`);
+        await new Promise(resolve => setTimeout(resolve, backoffMs));
       }
-    } catch (error) {
-      console.error(`Failed to liquidate loan ${loanPubkey}:`, error);
-      throw new Error(`Liquidation failed: ${(error as Error).message}`);
+    }
+    
+    // Ensure liquidation was successful
+    if (!txSignature) {
+      throw new Error('Liquidation failed: no transaction signature received');
     }
     
     // Determine liquidation reason
@@ -438,6 +524,9 @@ class LoanService {
     });
     
     console.log(`✅ Loan ${loanPubkey} liquidated successfully (${liquidationReason}) - TX: ${txSignature}`);
+    
+    // Remove from monitoring
+    fastPriceMonitor.removeLiquidationThreshold(dbLoan.tokenMint, loanPubkey);
     
     // Create notification
     await notificationService.createNotification({
@@ -506,6 +595,21 @@ class LoanService {
       },
       include: { token: true },
     });
+
+    // Register for price monitoring
+    try {
+      fastPriceMonitor.registerLiquidationThreshold(
+        params.tokenMint,
+        dbLoan.id,
+        parseFloat(dbLoan.liquidationPrice),
+        dbLoan.borrower,
+        parseFloat(dbLoan.solBorrowed),
+        parseFloat(dbLoan.entryPrice)
+      );
+      console.log(`📡 Registered monitoring for loan ${dbLoan.id.slice(0, 8)}...`);
+    } catch (monitorError: any) {
+      console.warn(`⚠️ Failed to register price monitoring:`, monitorError.message);
+    }
     
     // Ensure user exists before creating notification
     await prisma.user.upsert({
@@ -646,6 +750,16 @@ class LoanService {
       
       throw new Error('Could not find loan PDA from transaction. Please try again or contact support.');
     }
+  }
+
+  /**
+   * Get all active loans for monitoring initialization
+   */
+  async getActiveLoans(): Promise<any[]> {
+    return prisma.loan.findMany({
+      where: { status: 'active' },
+      include: { token: true },
+    });
   }
 }
 
