@@ -5,13 +5,13 @@ resolution = true
 skip-lint = false
 
 [programs.devnet]
-memecoin_lending = "MCLend1111111111111111111111111111111111111"
+memecoin_lending = "CD2sN1enC22Nyw6U6s2dYcxfbtsLVq2PhbomLBkyh1z5"
 
 [programs.localnet]
-memecoin_lending = "8yrnAJZBNhU6Ae163oyN6tMzVs2Wg4o2dpPYVdt6H9Dt"
+memecoin_lending = "CD2sN1enC22Nyw6U6s2dYcxfbtsLVq2PhbomLBkyh1z5"
 
 [programs.mainnet]
-memecoin_lending = "MCLend1111111111111111111111111111111111111"
+memecoin_lending = "CD2sN1enC22Nyw6U6s2dYcxfbtsLVq2PhbomLBkyh1z5"
 
 [registry]
 url = "https://api.apr.dev"

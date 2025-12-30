@@ -5,10 +5,10 @@ use crate::state::*;
 use crate::error::LendingError;
 use crate::utils::*;
 use crate::swap::pumpfun::{
-    self, execute_pumpfun_sell, get_bonding_curve_pda, calculate_pumpfun_sell_output,
+    execute_pumpfun_sell, get_bonding_curve_pda,
     PUMPFUN_PROGRAM_ID, PUMPFUN_GLOBAL, PUMPFUN_FEE_RECIPIENT, PUMPFUN_EVENT_AUTHORITY,
 };
-use crate::swap::jupiter::{self, execute_jupiter_swap, JUPITER_V6_PROGRAM_ID};
+use crate::swap::jupiter::{execute_jupiter_swap, JUPITER_V6_PROGRAM_ID};
 
 /// Fee split constants
 const TREASURY_SPLIT_BPS: u64 = 9500;  // 95%

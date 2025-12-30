@@ -19,9 +19,6 @@ pub const CREATOR_FEE_OPERATIONS_BPS: u16 = 2000;   // 20%
 pub const LIQUIDATION_TREASURY_BPS: u16 = 9500;     // 95%
 pub const LIQUIDATION_OPERATIONS_BPS: u16 = 500;    // 5%
 
-// === BASIS POINTS ===
-pub const BPS_DIVISOR: u64 = 10_000;
-
 /// Global protocol state
 #[account]
 #[derive(Default)]

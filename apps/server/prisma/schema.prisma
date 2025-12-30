@@ -35,7 +35,7 @@ model Loan {
   solBorrowed          String
   entryPrice           String
   liquidationPrice     String
-  interestRateBps      Int
+  protocolFeeBps       Int      @default(200) // 2% flat fee
   status               String
   createdAt            DateTime
   dueAt                DateTime
@@ -114,7 +114,7 @@ model ProtocolStats {
   totalValueLocked     String
   totalLoansActive     Int
   totalLoansCreated    Int
-  totalInterestEarned  String
+  totalFeesEarned      String   // Renamed from totalInterestEarned
   treasuryBalance      String
   volume24h            String
   liquidations24h      Int
@@ -128,7 +128,7 @@ model ManualWhitelist {
   name                 String?
   tier                 String   // 'bronze', 'silver', 'gold'
   ltvBps               Int
-  interestRateBps      Int
+  liquidationBonusBps  Int      @default(500) // 5% liquidation bonus
   minLoanAmount        String
   maxLoanAmount        String
   enabled              Boolean  @default(true)

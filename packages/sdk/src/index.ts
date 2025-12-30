@@ -5,3 +5,6 @@ export * from './pda';
 export * from './utils';
 export * from './errors';
 export * from './price';
+// Swap helpers
+export * from './pumpfun';
+export * from './jupiter';

@@ -156,12 +156,12 @@ class LoanService {
     
     return {
       solAmount: loanTerms.solAmount,
-      protocolFeeRate: loanTerms.protocolFeeRate, // Always 1%
+      protocolFeeBps: 200, // 2% flat fee
       totalOwed: loanTerms.totalOwed,
       liquidationPrice: loanTerms.liquidationPrice,
       ltv: loanTerms.ltv,
       fees: {
-        protocolFee: (parseFloat(loanTerms.solAmount) * 0.01).toString(),
+        protocolFee: (parseFloat(loanTerms.solAmount) * 0.02).toString(),
         interest: '0', // No interest anymore
       },
     };
@@ -386,13 +386,12 @@ class LoanService {
       throw new Error('Loan not found');
     }
     
-    // Get token configuration to check pool type
-    const tokenConfig = await prisma.tokenConfig.findUnique({
-      where: { tokenMint: dbLoan.tokenMint },
-    });
+    // Get token configuration from on-chain data
+    const tokenMintPubkey = new PublicKey(dbLoan.tokenMint);
+    const tokenConfig = await client.getTokenConfig(tokenMintPubkey);
     
     if (!tokenConfig) {
-      throw new Error('Token configuration not found');
+      throw new Error('Token configuration not found on-chain');
     }
     
     let txSignature: string;
@@ -417,7 +416,7 @@ class LoanService {
       }
     } catch (error) {
       console.error(`Failed to liquidate loan ${loanPubkey}:`, error);
-      throw new Error(`Liquidation failed: ${error.message}`);
+      throw new Error(`Liquidation failed: ${(error as Error).message}`);
     }
     
     // Determine liquidation reason
@@ -622,20 +621,24 @@ class LoanService {
       // Fallback: try scanning recent loans to find a match
       try {
         console.log('[LoanService] Attempting fallback: scanning recent loans...');
-        const allLoans = await client.getAllLoans();
+        // Get recent loans from database
+        const allLoans = await prisma.loan.findMany({
+          where: { 
+            borrower: borrower,
+            tokenMint: tokenMint,
+            status: 'Active',
+            createdAt: {
+              gte: new Date(Date.now() - 5 * 60 * 1000) // Within 5 minutes
+            }
+          },
+          orderBy: { createdAt: 'desc' }
+        });
         
-        // Find loan that matches borrower and token mint, created recently
-        const recentLoan = allLoans
-          .filter(loan => 
-            loan.borrower === borrower && 
-            loan.tokenMint === tokenMint &&
-            Math.abs(loan.createdAt - Math.floor(Date.now() / 1000)) < 300 // Within 5 minutes
-          )
-          .sort((a, b) => b.createdAt - a.createdAt)[0]; // Most recent first
+        const recentLoan = allLoans[0];
         
         if (recentLoan) {
-          console.log('[LoanService] Found matching recent loan:', recentLoan.pubkey);
-          return recentLoan.pubkey;
+          console.log('[LoanService] Found matching recent loan:', recentLoan.id);
+          return recentLoan.id;
         }
       } catch (fallbackError: any) {
         console.error('[LoanService] Fallback search also failed:', fallbackError.message);

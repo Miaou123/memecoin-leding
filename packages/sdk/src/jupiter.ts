@@ -1,5 +1,5 @@
 import { PublicKey, AccountMeta } from '@solana/web3.js';
-import { BN } from '@coral-xyz/anchor';
+import BN from 'bn.js';
 
 const JUPITER_API_URL = 'https://quote-api.jup.ag/v6';
 const NATIVE_SOL_MINT = 'So11111111111111111111111111111111111111112';
@@ -46,7 +46,7 @@ export async function getJupiterQuote(
     throw new Error(`Jupiter quote failed: ${response.statusText}`);
   }
   
-  return response.json();
+  return response.json() as Promise<JupiterQuote>;
 }
 
 /**
@@ -72,7 +72,7 @@ export async function getJupiterSwapInstruction(
     throw new Error(`Jupiter swap failed: ${response.statusText}`);
   }
 
-  return response.json();
+  return response.json() as Promise<JupiterSwapResponse>;
 }
 
 /**

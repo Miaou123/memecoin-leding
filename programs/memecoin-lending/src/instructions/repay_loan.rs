@@ -90,7 +90,6 @@ pub struct RepayLoan<'info> {
 
 pub fn repay_loan_handler(ctx: Context<RepayLoan>) -> Result<()> {
     let protocol_state = &mut ctx.accounts.protocol_state;
-    let clock = Clock::get()?;
     
     // Store loan data before taking mutable borrow
     let borrower = ctx.accounts.loan.borrower;

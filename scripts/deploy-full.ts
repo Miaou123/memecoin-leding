@@ -6,6 +6,9 @@ import path from 'path';
 import chalk from 'chalk';
 import { Command } from 'commander';
 
+import { fileURLToPath } from 'url';
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 const ROOT_DIR = path.resolve(__dirname, '..');
 
 interface DeployConfig {
@@ -14,6 +17,7 @@ interface DeployConfig {
   skipInit: boolean;
   fundAmount: number;
   adminKeypair: string;
+  stakingTokenMint?: string;
 }
 
 function exec(cmd: string, options: { cwd?: string; silent?: boolean } = {}): string {
@@ -188,7 +192,39 @@ async function deploy(config: DeployConfig) {
     }
   }
 
-  // Step 11: Fund treasury
+  // Step 11: Initialize Staking (if governance token mint is provided)
+  if (config.stakingTokenMint) {
+    console.log(chalk.blue('\n🎯 Initializing staking pool...\n'));
+    try {
+      exec(`npx tsx initialize-staking.ts --network ${config.network} --token-mint ${config.stakingTokenMint}`, {
+        cwd: path.join(ROOT_DIR, 'scripts'),
+      });
+    } catch (error) {
+      console.log(chalk.yellow('  ⚠ Staking pool initialization failed or already initialized'));
+    }
+  }
+
+  // Step 12: Initialize Fee Receiver
+  console.log(chalk.blue('\n💰 Initializing fee receiver...\n'));
+  try {
+    exec(`npx tsx initialize-fee-receiver.ts --network ${config.network}`, {
+      cwd: path.join(ROOT_DIR, 'scripts'),
+    });
+  } catch (error) {
+    console.log(chalk.yellow('  ⚠ Fee receiver initialization failed or already initialized'));
+  }
+
+  // Step 13: Update Protocol Fee to 2%
+  console.log(chalk.blue('\n⚙️  Setting protocol fee to 2%...\n'));
+  try {
+    exec(`npx tsx update-protocol-fees.ts --network ${config.network} --protocol-fee 200`, {
+      cwd: path.join(ROOT_DIR, 'scripts'),
+    });
+  } catch (error) {
+    console.log(chalk.yellow('  ⚠ Fee update failed'));
+  }
+
+  // Step 14: Fund treasury
   if (config.fundAmount > 0) {
     console.log(chalk.blue(`\n💰 Funding treasury with ${config.fundAmount} SOL...\n`));
     try {
@@ -200,7 +236,7 @@ async function deploy(config: DeployConfig) {
     }
   }
 
-  // Step 12: Save deployment info
+  // Step 15: Save deployment info
   const deploymentInfo = {
     programId: newProgramId,
     network: config.network,
@@ -258,6 +294,7 @@ program
   .option('--fund <amount>', 'Amount of SOL to fund treasury', '0.5')
   .option('--no-fund', 'Skip treasury funding')
   .option('-k, --admin-keypair <path>', 'Path to admin keypair', './keys/admin.json')
+  .option('--staking-token <mint>', 'Governance token mint for staking (optional)')
   .action(async (options) => {
     // Safety check for mainnet
     if (options.network === 'mainnet') {
@@ -277,6 +314,7 @@ program
         skipInit: options.skipInit,
         fundAmount: options.fund === false ? 0 : parseFloat(options.fund),
         adminKeypair: options.adminKeypair,
+        stakingTokenMint: options.stakingToken,
       });
     } catch (error) {
       console.error(chalk.red('\n❌ Deployment failed:'), error);

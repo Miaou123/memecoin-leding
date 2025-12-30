@@ -197,6 +197,13 @@ export async function buildRepayLoanTransaction(
     borrower
   );
 
+  // Fetch protocol state to get operations wallet
+  const protocolStateAccount = await (program.account as any).protocolState.fetch(protocolState);
+  const operationsWallet = protocolStateAccount.operationsWallet;
+
+  // Derive staking reward vault PDA
+  const [stakingRewardVault] = pda.getRewardVaultPDA(program.programId);
+
   const tx = await program.methods
     .repayLoan()
     .accounts({
@@ -204,6 +211,8 @@ export async function buildRepayLoanTransaction(
       tokenConfig,
       loan: loanPubkey,
       treasury,
+      operationsWallet,
+      stakingRewardVault,
       borrower,
       borrowerTokenAccount,
       vaultTokenAccount,
@@ -321,6 +330,13 @@ export async function repayLoan(
     borrower
   );
 
+  // Fetch protocol state to get operations wallet
+  const protocolStateAccount = await (program.account as any).protocolState.fetch(protocolState);
+  const operationsWallet = protocolStateAccount.operationsWallet;
+
+  // Derive staking reward vault PDA
+  const [stakingRewardVault] = pda.getRewardVaultPDA(program.programId);
+
   return program.methods
     .repayLoan()
     .accounts({
@@ -328,6 +344,8 @@ export async function repayLoan(
       tokenConfig,
       loan: loanPubkey,
       treasury,
+      operationsWallet,
+      stakingRewardVault,
       borrower,
       borrowerTokenAccount,
       vaultTokenAccount,
@@ -386,13 +404,6 @@ export async function liquidate(
       vaultAuthority,
       tokenMint,
       poolAccount,
-      pumpfunProgram: null,
-      pumpfunGlobal: null,
-      pumpfunFeeRecipient: null,
-      bondingCurve: null,
-      bondingCurveTokenAccount: null,
-      pumpfunEventAuthority: null,
-      jupiterProgram: null,
       payer: program.provider.publicKey!,
       tokenProgram: TOKEN_PROGRAM_ID,
       associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
@@ -464,7 +475,6 @@ export async function liquidateWithPumpfun(
       bondingCurve,
       bondingCurveTokenAccount,
       pumpfunEventAuthority: PUMPFUN_EVENT_AUTHORITY,
-      jupiterProgram: null,
       payer: program.provider.publicKey!,
       tokenProgram: TOKEN_PROGRAM_ID,
       associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
@@ -531,12 +541,6 @@ export async function liquidateWithJupiter(
       vaultAuthority,
       tokenMint,
       poolAccount,
-      pumpfunProgram: null,
-      pumpfunGlobal: null,
-      pumpfunFeeRecipient: null,
-      bondingCurve: null,
-      bondingCurveTokenAccount: null,
-      pumpfunEventAuthority: null,
       jupiterProgram: JUPITER_V6_PROGRAM_ID,
       payer: program.provider.publicKey!,
       tokenProgram: TOKEN_PROGRAM_ID,

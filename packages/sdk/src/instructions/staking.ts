@@ -30,7 +30,7 @@ export async function initializeStaking(
       stakingVault,
       stakingVaultAuthority,
       rewardVault,
-      authority: program.provider.publicKey\!,
+      authority: program.provider.publicKey!,
       tokenProgram: TOKEN_PROGRAM_ID,
       associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
       systemProgram: SystemProgram.programId,
@@ -43,7 +43,7 @@ export async function stake(
   amount: BN,
   stakingTokenMint: PublicKey
 ): Promise<TransactionSignature> {
-  const user = program.provider.publicKey\!;
+  const user = program.provider.publicKey!;
   const [stakingPool] = pda.getStakingPoolPDA(program.programId);
   const [userStake] = pda.getUserStakePDA(stakingPool, user, program.programId);
   const [rewardVault] = pda.getRewardVaultPDA(program.programId);
@@ -79,7 +79,7 @@ export async function unstake(
   amount: BN,
   stakingTokenMint: PublicKey
 ): Promise<TransactionSignature> {
-  const user = program.provider.publicKey\!;
+  const user = program.provider.publicKey!;
   const [stakingPool] = pda.getStakingPoolPDA(program.programId);
   const [userStake] = pda.getUserStakePDA(stakingPool, user, program.programId);
   const [stakingVaultAuthority] = pda.getStakingVaultAuthorityPDA(program.programId);
@@ -114,7 +114,7 @@ export async function unstake(
 export async function claimRewards(
   program: Program
 ): Promise<TransactionSignature> {
-  const user = program.provider.publicKey\!;
+  const user = program.provider.publicKey!;
   const [stakingPool] = pda.getStakingPoolPDA(program.programId);
   const [userStake] = pda.getUserStakePDA(stakingPool, user, program.programId);
   const [rewardVault] = pda.getRewardVaultPDA(program.programId);
@@ -143,7 +143,7 @@ export async function depositRewards(
     .accounts({
       stakingPool,
       rewardVault,
-      depositor: program.provider.publicKey\!,
+      depositor: program.provider.publicKey!,
       systemProgram: SystemProgram.programId,
     })
     .rpc();
@@ -167,11 +167,11 @@ export async function updateStakingConfig(
       params.baseEmissionRate || null,
       params.maxEmissionRate || null,
       params.minEmissionRate || null,
-      params.paused \!== undefined ? params.paused : null
+      params.paused !== undefined ? params.paused : null
     )
     .accounts({
       stakingPool,
-      authority: program.provider.publicKey\!,
+      authority: program.provider.publicKey!,
     })
     .rpc();
 }
@@ -194,7 +194,7 @@ export async function initializeFeeReceiver(
       treasuryWallet,
       operationsWallet,  // RENAMED
       stakingRewardVault,
-      authority: program.provider.publicKey\!,
+      authority: program.provider.publicKey!,
       systemProgram: SystemProgram.programId,
     })
     .rpc();
@@ -207,7 +207,7 @@ export async function distributeCreatorFees(
   const [rewardVault] = pda.getRewardVaultPDA(program.programId);
   
   // Fetch fee receiver to get wallet addresses
-  const feeReceiverAccount = await program.account.feeReceiver.fetch(feeReceiver);
+  const feeReceiverAccount = await (program.account as any).feeReceiver.fetch(feeReceiver);
   
   return program.methods
     .distributeCreatorFees()
@@ -216,7 +216,7 @@ export async function distributeCreatorFees(
       treasuryWallet: feeReceiverAccount.treasuryWallet,
       operationsWallet: feeReceiverAccount.operationsWallet,  // RENAMED
       stakingRewardVault: rewardVault,
-      caller: program.provider.publicKey\!,
+      caller: program.provider.publicKey!,
       systemProgram: SystemProgram.programId,
     })
     .rpc();

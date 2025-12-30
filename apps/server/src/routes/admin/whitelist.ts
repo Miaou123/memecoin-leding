@@ -98,7 +98,7 @@ app.post(
   }),
   async (c) => {
     try {
-      const adminAddress = c.get('adminAddress');
+      const adminAddress = c.get('adminAddress' as never) as string;
       const data = c.req.valid('json');
 
       logger.info(`Admin ${adminAddress} adding token ${data.mint} to whitelist`);
@@ -253,7 +253,7 @@ app.put(
   async (c) => {
     try {
       const { mint } = c.req.param();
-      const adminAddress = c.get('adminAddress');
+      const adminAddress = c.get('adminAddress' as never) as string;
       const data = c.req.valid('json');
 
       if (!mint || !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(mint)) {
@@ -294,7 +294,7 @@ app.put(
 app.post('/:mint/enable', requireAdmin, async (c) => {
   try {
     const { mint } = c.req.param();
-    const adminAddress = c.get('adminAddress');
+    const adminAddress = c.get('adminAddress' as never) as string;
 
     if (!mint || !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(mint)) {
       return c.json({
@@ -326,7 +326,7 @@ app.post('/:mint/enable', requireAdmin, async (c) => {
 app.post('/:mint/disable', requireAdmin, async (c) => {
   try {
     const { mint } = c.req.param();
-    const adminAddress = c.get('adminAddress');
+    const adminAddress = c.get('adminAddress' as never) as string;
     const body = await c.req.json().catch(() => ({}));
     const { reason } = body;
 
@@ -360,7 +360,7 @@ app.post('/:mint/disable', requireAdmin, async (c) => {
 app.delete('/:mint', requireAdmin, async (c) => {
   try {
     const { mint } = c.req.param();
-    const adminAddress = c.get('adminAddress');
+    const adminAddress = c.get('adminAddress' as never) as string;
     const body = await c.req.json().catch(() => ({}));
     const { reason } = body;
 

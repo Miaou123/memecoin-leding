@@ -8,7 +8,7 @@ pub mod swap;
 
 use instructions::*;
 
-declare_id!("8yrnAJZBNhU6Ae163oyN6tMzVs2Wg4o2dpPYVdt6H9Dt");
+declare_id!("CD2sN1enC22Nyw6U6s2dYcxfbtsLVq2PhbomLBkyh1z5");
 
 #[program]
 pub mod memecoin_lending {

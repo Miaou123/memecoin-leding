@@ -2,7 +2,6 @@ use anchor_lang::prelude::*;
 use anchor_spl::token::{Mint, Token, TokenAccount};
 use anchor_spl::associated_token::AssociatedToken;
 use crate::state::*;
-use crate::error::LendingError;
 
 #[derive(Accounts)]
 pub struct InitializeStaking<'info> {

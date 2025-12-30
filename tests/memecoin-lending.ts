@@ -622,16 +622,25 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
 
       console.log(`Before repay - SOL: ${borrowerBalanceBefore / LAMPORTS_PER_SOL}, Tokens: ${borrowerTokensBefore.amount}`);
 
+      // Fetch protocol state to get operations wallet
+      const protocolStateAccount = await program.account.protocolState.fetch(protocolStatePda);
+      const [stakingRewardVault] = PublicKey.findProgramAddressSync(
+        [Buffer.from("reward_vault")],
+        program.programId
+      );
+
       const tx = await program.methods
         .repayLoan()
         .accounts({
           protocolState: protocolStatePda,
           tokenConfig: goldTokenConfigPda,
           loan: loan1Pda,
-          vault: loan1VaultPda,
           treasury: treasuryPda,
+          operationsWallet: protocolStateAccount.operationsWallet,
+          stakingRewardVault,
           borrower: borrower.publicKey,
           borrowerTokenAccount: borrowerGoldTokenAccount,
+          vaultTokenAccount: loan1VaultPda,
           tokenMint: goldTokenMint,
           tokenProgram: TOKEN_PROGRAM_ID,
           systemProgram: SystemProgram.programId,
@@ -663,16 +672,25 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
 
     it.skip("should fail to repay already repaid loan", async () => {
       try {
+        // Re-fetch to get the latest state
+        const protocolStateAccount = await program.account.protocolState.fetch(protocolStatePda);
+        const [stakingRewardVault] = PublicKey.findProgramAddressSync(
+          [Buffer.from("reward_vault")],
+          program.programId
+        );
+
         await program.methods
           .repayLoan()
           .accounts({
             protocolState: protocolStatePda,
             tokenConfig: goldTokenConfigPda,
             loan: loan1Pda,
-            vault: loan1VaultPda,
             treasury: treasuryPda,
+            operationsWallet: protocolStateAccount.operationsWallet,
+            stakingRewardVault,
             borrower: borrower.publicKey,
             borrowerTokenAccount: borrowerGoldTokenAccount,
+            vaultTokenAccount: loan1VaultPda,
             tokenMint: goldTokenMint,
             tokenProgram: TOKEN_PROGRAM_ID,
             systemProgram: SystemProgram.programId,

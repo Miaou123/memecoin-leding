@@ -64,6 +64,32 @@ impl SafeMath {
         }
         Ok(result as u64)
     }
+
+    /// Multiply then divide for u128 values with overflow protection
+    pub fn mul_div_u128(a: u128, b: u128, c: u128) -> Result<u128> {
+        if c == 0 {
+            return Err(LendingError::DivisionByZero.into());
+        }
+        
+        // Use checked arithmetic
+        let result = a
+            .checked_mul(b)
+            .ok_or(LendingError::MathOverflow)?
+            .checked_div(c)
+            .ok_or(LendingError::DivisionByZero)?;
+        
+        Ok(result)
+    }
+
+    /// Add two u128 values with overflow protection
+    pub fn add_u128(a: u128, b: u128) -> Result<u128> {
+        a.checked_add(b).ok_or(LendingError::MathOverflow.into())
+    }
+
+    /// Subtract two u128 values with underflow protection
+    pub fn sub_u128(a: u128, b: u128) -> Result<u128> {
+        a.checked_sub(b).ok_or(LendingError::MathUnderflow.into())
+    }
 }
 
 /// Loan calculation utilities

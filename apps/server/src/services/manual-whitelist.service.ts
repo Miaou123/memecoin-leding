@@ -19,10 +19,10 @@ export class ManualWhitelistService {
     [TokenTier.Gold]: 7000,   // 70%
   };
   
-  private readonly defaultInterestRateBps = {
-    [TokenTier.Bronze]: 800,  // 8%
-    [TokenTier.Silver]: 600,  // 6%
-    [TokenTier.Gold]: 400,    // 4%
+  private readonly defaultLiquidationBonusBps = {
+    [TokenTier.Bronze]: 500,  // 5%
+    [TokenTier.Silver]: 400,  // 4%
+    [TokenTier.Gold]: 300,    // 3%
   };
 
   constructor(prisma: PrismaClient) {
@@ -57,7 +57,7 @@ export class ManualWhitelistService {
         name: request.name,
         tier,
         ltvBps: request.ltvBps || this.defaultLtvBps[request.tier],
-        interestRateBps: request.interestRateBps || this.defaultInterestRateBps[request.tier],
+        liquidationBonusBps: request.liquidationBonusBps || this.defaultLiquidationBonusBps[request.tier],
         minLoanAmount: request.minLoanAmount || '1000000000', // 1 SOL in lamports
         maxLoanAmount: request.maxLoanAmount || '100000000000000', // 100,000 SOL in lamports
         enabled: true,
@@ -122,9 +122,9 @@ export class ManualWhitelistService {
         changes.ltvBps = { from: existing.ltvBps, to: updateData.ltvBps };
       }
       
-      if (request.interestRateBps === undefined) {
-        updateData.interestRateBps = this.defaultInterestRateBps[request.tier];
-        changes.interestRateBps = { from: existing.interestRateBps, to: updateData.interestRateBps };
+      if (request.liquidationBonusBps === undefined) {
+        updateData.liquidationBonusBps = this.defaultLiquidationBonusBps[request.tier];
+        changes.liquidationBonusBps = { from: existing.liquidationBonusBps, to: updateData.liquidationBonusBps };
       }
     }
     
@@ -133,9 +133,9 @@ export class ManualWhitelistService {
       changes.ltvBps = { from: existing.ltvBps, to: request.ltvBps };
     }
     
-    if (request.interestRateBps !== undefined && request.interestRateBps !== existing.interestRateBps) {
-      updateData.interestRateBps = request.interestRateBps;
-      changes.interestRateBps = { from: existing.interestRateBps, to: request.interestRateBps };
+    if (request.liquidationBonusBps !== undefined && request.liquidationBonusBps !== existing.liquidationBonusBps) {
+      updateData.liquidationBonusBps = request.liquidationBonusBps;
+      changes.liquidationBonusBps = { from: existing.liquidationBonusBps, to: request.liquidationBonusBps };
     }
     
     if (request.minLoanAmount !== undefined && request.minLoanAmount !== existing.minLoanAmount) {
@@ -402,7 +402,7 @@ export class ManualWhitelistService {
       adminAddress: log.adminAddress,
       changes: log.changes as Record<string, any>,
       timestamp: log.timestamp.getTime(),
-      reason: log.reason,
+      reason: log.reason ?? undefined,
     }));
   }
 
@@ -432,7 +432,7 @@ export class ManualWhitelistService {
       name: entry.name,
       tier: entry.tier as TokenTier,
       ltvBps: entry.ltvBps,
-      interestRateBps: entry.interestRateBps,
+      liquidationBonusBps: entry.liquidationBonusBps,
       minLoanAmount: entry.minLoanAmount,
       maxLoanAmount: entry.maxLoanAmount,
       enabled: entry.enabled,
