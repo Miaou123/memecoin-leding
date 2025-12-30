@@ -46,7 +46,10 @@ export function createTokenVerification(mint: () => string): UseTokenVerificatio
   let abortController: AbortController | undefined;
 
   const verifyToken = async (mintToVerify: string, forceRefresh = false) => {
+    console.log('[TokenVerificationSolid] verifyToken called with:', mintToVerify.slice(0, 8) + '...', 'forceRefresh:', forceRefresh);
+    
     if (!mintToVerify.trim()) {
+      console.log('[TokenVerificationSolid] Empty mint, clearing data');
       setData(null);
       setError(null);
       setIsLoading(false);
@@ -56,6 +59,7 @@ export function createTokenVerification(mint: () => string): UseTokenVerificatio
 
     // Validate mint address format
     if (!isValidMintAddress(mintToVerify)) {
+      console.log('[TokenVerificationSolid] Invalid mint address format:', mintToVerify.slice(0, 8) + '...');
       const invalidResult: TokenVerificationResult = {
         isValid: false,
         mint: mintToVerify,
@@ -72,6 +76,7 @@ export function createTokenVerification(mint: () => string): UseTokenVerificatio
 
     // Check cache first (unless force refresh)
     if (!forceRefresh && verificationCache[mintToVerify] && isCacheValid(verificationCache[mintToVerify])) {
+      console.log('[TokenVerificationSolid] Using cached data for:', mintToVerify.slice(0, 8) + '...');
       const cachedData = verificationCache[mintToVerify].data;
       setData(cachedData);
       setError(null);
@@ -79,6 +84,8 @@ export function createTokenVerification(mint: () => string): UseTokenVerificatio
       setIsValidating(false);
       return;
     }
+
+    console.log('[TokenVerificationSolid] Making API call for:', mintToVerify.slice(0, 8) + '...');
 
     setIsLoading(true);
     setIsValidating(true);
@@ -177,10 +184,14 @@ export function createTokenVerification(mint: () => string): UseTokenVerificatio
   // Effect to handle mint changes
   createEffect(() => {
     const currentMint = mint();
+    console.log('[TokenVerificationSolid] Effect triggered, mint:', currentMint?.slice(0, 8) + '...');
+    
     if (currentMint && currentMint.trim()) {
+      console.log('[TokenVerificationSolid] Starting verification for:', currentMint.slice(0, 8) + '...');
       debouncedVerify(currentMint.trim());
     } else {
       // Clear state for empty mint
+      console.log('[TokenVerificationSolid] Clearing state for empty mint');
       setData(null);
       setError(null);
       setIsLoading(false);

@@ -148,6 +148,7 @@ class ProtocolService {
       if (cached) {
         return {
           totalValueLocked: cached.totalValueLocked,
+          totalSolBorrowed: cached.totalSolBorrowed || '0',
           totalLoansActive: cached.totalLoansActive,
           totalLoansCreated: cached.totalLoansCreated,
           totalFeesEarned: cached.totalFeesEarned,
@@ -160,6 +161,7 @@ class ProtocolService {
       // Last resort: return empty stats
       return {
         totalValueLocked: '0',
+        totalSolBorrowed: '0',
         totalLoansActive: 0,
         totalLoansCreated: 0,
         totalFeesEarned: '0',

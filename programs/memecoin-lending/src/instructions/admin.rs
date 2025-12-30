@@ -247,24 +247,6 @@ pub fn update_wallets_handler(
     Ok(())
 }
 
-/// Update liquidation bonus percentage
-pub fn update_liquidation_bonus_handler(
-    ctx: Context<AdminControl>, 
-    new_bonus_bps: u16
-) -> Result<()> {
-    let protocol_state = &mut ctx.accounts.protocol_state;
-    
-    // Validate liquidation bonus (max 20%)
-    if new_bonus_bps > 2000 {
-        return Err(LendingError::InvalidLiquidationBonus.into());
-    }
-    
-    protocol_state.liquidation_bonus_bps = new_bonus_bps;
-    
-    msg!("Liquidation bonus updated to {} bps", new_bonus_bps);
-    
-    Ok(())
-}
 
 /// Emergency drain all funds (in case of critical vulnerability)
 pub fn emergency_drain_handler(ctx: Context<EmergencyDrain>) -> Result<()> {

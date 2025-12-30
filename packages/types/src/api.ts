@@ -31,8 +31,19 @@ export interface LoanEstimate {
   };
 }
 
+export interface RecentLoanResponse {
+  id: string;
+  tokenSymbol: string;
+  tokenName: string;
+  solBorrowed: string;
+  status: string;
+  createdAt: number;
+  healthScore: number;
+}
+
 export interface ProtocolStats {
   totalValueLocked: string;
+  totalSolBorrowed: string;
   totalLoansActive: number;
   totalLoansCreated: number;
   totalFeesEarned: string;

@@ -86,7 +86,7 @@ memecoin-lending/
 
 ### Core Protocol
 - ✅ SOL borrowing against memecoin collateral
-- ✅ Tiered interest rates (Bronze/Silver/Gold)
+- ✅ Tiered LTV ratios (Bronze/Silver/Gold)
 - ✅ Time and price-based liquidations
 - ✅ Real-time price monitoring
 - ✅ Automatic liquidation bot
@@ -300,15 +300,15 @@ pnpm --filter scripts fund-treasury --amount 1000 --network devnet
 
 ### Loan Parameters
 - **LTV Ratios**: 50% (Bronze), 60% (Silver), 70% (Gold)
-- **Interest Rates**: 5-10% (Bronze), 3-7% (Silver), 2-5% (Gold)
+- **Protocol Fee**: 2% flat fee (all tiers)
 - **Liquidation Buffer**: 0.5% price threshold
 - **Maximum Duration**: 7 days
 
-### Liquidation
-- Automated liquidation bot
+### Auto-Liquidation
+- Automated liquidation via PumpFun/Jupiter
 - Time-based liquidation (overdue loans)
 - Price-based liquidation (below threshold)
-- Liquidation bonuses: 10% (Bronze), 7.5% (Silver), 5% (Gold)
+- No manual liquidation bonuses (system handles liquidation automatically)
 
 ## 🤝 Contributing
 

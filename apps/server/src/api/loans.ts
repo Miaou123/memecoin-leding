@@ -87,7 +87,7 @@ loansRouter.get('/recent', zValidator('query', getRecentLoansSchema), async (c) 
     });
 
     const formattedLoans = loans.map(loan => ({
-      id: loan.pubkey,
+      id: loan.id,
       tokenSymbol: loan.token?.symbol || 'UNKNOWN',
       tokenName: loan.token?.name || 'Unknown Token',
       solBorrowed: loan.solBorrowed,

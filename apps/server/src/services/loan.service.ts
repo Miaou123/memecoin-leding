@@ -117,7 +117,6 @@ class LoanService {
         poolAddress: account.poolAddress.toString(),
         poolType: account.poolType.pumpfun ? PoolType.Pumpfun : account.poolType.raydium ? PoolType.Raydium : PoolType.Orca,
         ltvBps: account.ltvBps,
-        liquidationBonusBps: account.liquidationBonusBps,
         minLoanAmount: account.minLoanAmount.toString(),
         maxLoanAmount: account.maxLoanAmount.toString(),
         activeLoansCount: account.activeLoansCount.toString(),

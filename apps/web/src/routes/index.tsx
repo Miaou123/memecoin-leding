@@ -1,27 +1,28 @@
 import { Show, For, createMemo } from 'solid-js';
 import { A } from '@solidjs/router';
-import { createQuery } from '@tanstack/solid-query';
+import { useQuery } from '@tanstack/solid-query';
 import { Button } from '@/components/ui/Button';
 import { formatSOL, formatNumber } from '@/lib/utils';
 import { api } from '@/lib/api';
 import { RecentLoanItem } from '@/components/dashboard/RecentLoanItem';
 import { ProtocolHealth } from '@/components/dashboard/ProtocolHealth';
+import { RecentLoanResponse } from '@memecoin-lending/types';
 
 export default function Home() {
   // Protocol stats
-  const protocolStats = createQuery(() => ({
+  const protocolStats = useQuery(() => ({
     queryKey: ['protocol-stats'],
     queryFn: () => api.getProtocolStats(),
   }));
 
   // Recent loans (all users, for dashboard feed)
-  const recentLoans = createQuery(() => ({
+  const recentLoans = useQuery(() => ({
     queryKey: ['recent-loans'],
     queryFn: () => api.getRecentLoans({ limit: 5 }),
   }));
 
   // Top collateral token
-  const topToken = createQuery(() => ({
+  const topToken = useQuery(() => ({
     queryKey: ['top-token'],
     queryFn: () => api.getTopCollateralToken(),
   }));
@@ -133,7 +134,7 @@ export default function Home() {
               }
             >
               <For each={recentLoans.data}>
-                {(loan) => (
+                {(loan: RecentLoanResponse) => (
                   <RecentLoanItem 
                     loan={{
                       id: loan.id || 'unknown',

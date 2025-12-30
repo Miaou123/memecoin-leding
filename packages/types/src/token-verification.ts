@@ -10,7 +10,6 @@ export interface TokenVerificationResult {
   pairAddress?: string;
   tier?: TokenTier;
   ltvBps?: number;
-  interestRateBps?: number;
   reason?: string;
   verifiedAt?: number;
   isWhitelisted?: boolean;

@@ -80,8 +80,8 @@ pub struct ProtocolState {
     pub operations_fee_bps: u16,
     /// Track SOL in treasury
     pub treasury_balance: u64,
-    /// Global liquidation bonus (can be overridden per token)
-    pub liquidation_bonus_bps: u16,
+    /// Deprecated field - kept for account compatibility
+    pub _deprecated_liquidation_bonus: u16,
     /// Reentrancy protection guard
     pub reentrancy_guard: bool,
     /// Pending admin for two-step transfer
@@ -109,7 +109,7 @@ impl ProtocolState {
         2 + // buyback_fee_bps
         2 + // operations_fee_bps
         8 + // treasury_balance
-        2 + // liquidation_bonus_bps
+        2 + // _deprecated_liquidation_bonus
         1 + // reentrancy_guard
         32 + // pending_admin
         8 + // admin_transfer_timestamp
@@ -133,8 +133,8 @@ pub struct TokenConfig {
     pub pool_type: PoolType,
     /// Loan-to-value ratio in basis points (7000 = 70%)
     pub ltv_bps: u16,
-    /// Liquidation bonus in basis points (500 = 5%)
-    pub liquidation_bonus_bps: u16,
+    /// Deprecated field - kept for account compatibility
+    pub _deprecated_liquidation_bonus: u16,
     /// Minimum loan amount in lamports
     pub min_loan_amount: u64,
     /// Maximum loan amount in lamports
@@ -159,7 +159,7 @@ impl TokenConfig {
         32 + // pool_address
         1 + // pool_type
         2 + // ltv_bps
-        2 + // liquidation_bonus_bps
+        2 + // _deprecated_liquidation_bonus
         8 + // min_loan_amount
         8 + // max_loan_amount
         8 + // active_loans_count

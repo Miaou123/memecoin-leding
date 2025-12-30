@@ -17,6 +17,7 @@ import {
   TokenVerificationResult,
   StakingStats,
   UserStake,
+  RecentLoanResponse,
 } from '@memecoin-lending/types';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
@@ -177,7 +178,7 @@ class ApiClient {
   }
 
   // Dashboard-specific methods
-  async getRecentLoans(params: { limit?: number } = {}): Promise<Loan[]> {
+  async getRecentLoans(params: { limit?: number } = {}): Promise<RecentLoanResponse[]> {
     const query = new URLSearchParams();
     if (params.limit) query.append('limit', params.limit.toString());
     

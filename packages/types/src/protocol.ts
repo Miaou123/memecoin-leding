@@ -44,7 +44,6 @@ export interface TokenConfig {
   poolAddress: string;
   poolType: PoolType;
   ltvBps: number;
-  liquidationBonusBps: number;
   minLoanAmount: string;
   maxLoanAmount: string;
   activeLoansCount: string;

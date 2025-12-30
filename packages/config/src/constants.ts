@@ -26,21 +26,6 @@ export const FEE_DISTRIBUTION = {
   OPERATIONS_BPS: 500, // 5%
 };
 
-// Interest rates by tier (in basis points)
-export const INTEREST_RATES = {
-  BRONZE: {
-    MIN_BPS: 500,  // 5%
-    MAX_BPS: 1000, // 10%
-  },
-  SILVER: {
-    MIN_BPS: 300,  // 3%
-    MAX_BPS: 700,  // 7%
-  },
-  GOLD: {
-    MIN_BPS: 200,  // 2%
-    MAX_BPS: 500,  // 5%
-  },
-};
 
 // LTV ratios by tier (in basis points)
 export const LTV_RATIOS = {
@@ -49,12 +34,6 @@ export const LTV_RATIOS = {
   GOLD: 7000,   // 70%
 };
 
-// Liquidation bonuses by tier (in basis points)
-export const LIQUIDATION_BONUSES = {
-  BRONZE: 1000, // 10%
-  SILVER: 750,  // 7.5%
-  GOLD: 500,    // 5%
-};
 
 // API endpoints
 export const API_ENDPOINTS = {

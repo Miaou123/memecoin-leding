@@ -143,15 +143,15 @@ program
       console.log(chalk.gray(`Transaction: ${txSignature}`));
       
       // Show tier info
-      const tierInfo: Record<number, { ltv: string; apr: string }> = {
-        0: { ltv: '50%', apr: '10%' },
-        1: { ltv: '60%', apr: '7%' },
-        2: { ltv: '70%', apr: '5%' },
+      const tierInfo: Record<number, { ltv: string }> = {
+        0: { ltv: '50%' },
+        1: { ltv: '60%' },
+        2: { ltv: '70%' },
       };
       
       console.log(chalk.blue('\n📊 Token Config:'));
       console.log(chalk.gray(`  LTV: ${tierInfo[tier].ltv}`));
-      console.log(chalk.gray(`  Interest Rate: ${tierInfo[tier].apr}`));
+      console.log(chalk.gray(`  Protocol Fee: 2% flat`));
       
     } catch (error) {
       console.error(chalk.red('❌ Whitelisting failed:'), error);

@@ -557,7 +557,6 @@ export async function updateTokenConfig(
     mint: PublicKey;
     enabled?: boolean;
     ltvBps?: number;
-    interestRateBps?: number;
   }
 ): Promise<TransactionSignature> {
   const [protocolState] = pda.getProtocolStatePDA(program.programId);
@@ -566,8 +565,7 @@ export async function updateTokenConfig(
   return program.methods
     .updateTokenConfig(
       params.enabled ?? null,
-      params.ltvBps ?? null,
-      params.interestRateBps ?? null
+      params.ltvBps ?? null
     )
     .accounts({
       protocolState,

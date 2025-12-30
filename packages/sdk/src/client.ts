@@ -133,7 +133,6 @@ export class MemecoinLendingClient {
     mint: PublicKey;
     enabled?: boolean;
     ltvBps?: number;
-    interestRateBps?: number;
   }): Promise<TransactionSignature> {
     return instructions.updateTokenConfig(this.program, params);
   }

@@ -35,25 +35,19 @@ A collateralized lending protocol built on Solana that allows memecoin holders t
 ## 🎯 Features
 
 ### Token Tiers
-| Tier | LTV | Base Interest | Liquidation Bonus |
-|------|-----|--------------|-------------------|
-| Gold | 70% | 5% APR | 5% |
-| Silver | 60% | 7% APR | 7.5% |
-| Bronze | 50% | 10% APR | 10% |
+| Tier | LTV | Protocol Fee |
+|------|-----|-------------|
+| Gold | 70% | 2% flat |
+| Silver | 60% | 2% flat |
+| Bronze | 50% | 2% flat |
 
-### Duration-Based Interest Multipliers
-| Duration | Multiplier |
-|----------|------------|
-| ≤12 hours | 1.5x |
-| ≤24 hours | 1.25x |
-| ≤48 hours | 1.0x |
-| >48 hours | 0.75x |
-
-### Liquidation Triggers
+### Auto-Liquidation System
 1. **Time-based**: Loan expires (past due date)
 2. **Price-based**: Token price falls below liquidation threshold
+3. **Automated**: Protocol automatically liquidates via PumpFun bonding curve or Jupiter aggregator
+4. **No manual liquidators**: System handles liquidation without external liquidators
 
-### Fee Distribution (Liquidations)
+### Fee Distribution
 - 90% → Treasury (protocol reserves)
 - 5% → Buyback wallet (for token buyback and burn)
 - 5% → Operations wallet (team/costs)
@@ -92,12 +86,12 @@ programs/memecoin-lending/
 
 ### Token Management
 - `whitelist_token` - Add a token with tier and pool config
-- `update_token_config` - Modify LTV, rates, etc.
+- `update_token_config` - Modify LTV and other settings
 
 ### Loan Operations
 - `create_loan` - Deposit collateral, receive SOL
-- `repay_loan` - Return SOL + interest, get collateral back
-- `liquidate` - Claim collateral from expired/underwater loans
+- `repay_loan` - Return SOL + 2% fee, get collateral back
+- `liquidate` - Auto-liquidate expired/underwater loans via DEX
 
 ## 🔑 PDAs (Program Derived Addresses)
 
@@ -115,21 +109,21 @@ programs/memecoin-lending/
 1. User deposits memecoin collateral
 2. Protocol reads price from AMM pool (Raydium/Pumpfun)
 3. Calculates SOL amount based on LTV
-4. Calculates interest based on tier + duration
+4. Applies 2% flat protocol fee
 5. Transfers SOL from treasury to borrower
 6. Creates loan account with liquidation parameters
 
 ### Repaying a Loan
-1. User sends SOL (principal + interest + fee)
+1. User sends SOL (principal + 2% protocol fee)
 2. Protocol transfers collateral back to user
 3. Updates loan status to `Repaid`
 4. Closes vault account (rent returned)
 
-### Liquidating a Loan
-1. Anyone can liquidate expired OR underwater loans
-2. Collateral transferred to liquidator
-3. Loan marked as `LiquidatedTime` or `LiquidatedPrice`
-4. (Future: Jupiter swap for SOL distribution)
+### Auto-Liquidating a Loan
+1. Protocol automatically liquidates expired OR underwater loans
+2. Collateral sold via PumpFun bonding curve or Jupiter aggregator
+3. SOL proceeds distributed according to fee splits
+4. Loan marked as `LiquidatedTime` or `LiquidatedPrice`
 
 ## 🧮 Math Formulas
 
@@ -138,14 +132,15 @@ programs/memecoin-lending/
 sol_amount = (collateral_amount × price × LTV) / 10000
 ```
 
-### Interest Calculation
+### Protocol Fee
 ```
-interest = (principal × rate × duration_seconds) / (365_days × 10000)
+protocol_fee = sol_amount × 200 / 10000  // 2% flat fee
+total_owed = sol_amount + protocol_fee
 ```
 
 ### Liquidation Price
 ```
-liquidation_price = (total_owed × (1 + bonus_bps)) / collateral_amount
+liquidation_price = total_owed / (collateral_amount × (LTV + buffer_bps) / 10000)
 ```
 
 ## 🛡️ Security Considerations
@@ -232,7 +227,9 @@ PROGRAM_ID=MCLend1111111111111111111111111111111111111
 - [x] Time-based liquidation
 - [x] Price-based liquidation
 - [x] Admin controls
-- [ ] Jupiter swap integration for liquidations
+- [x] PumpFun auto-liquidation integration
+- [x] Jupiter aggregator integration for liquidations
+- [x] Flat 2% fee system (replaces interest rates)
 - [ ] TWAP oracle for price manipulation protection
 - [ ] Governance token integration
 - [ ] LP yield distribution

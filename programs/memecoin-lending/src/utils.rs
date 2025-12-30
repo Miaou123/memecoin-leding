@@ -194,13 +194,6 @@ impl LoanCalculator {
         SafeMath::mul_div(sol_borrowed, BPS_DIVISOR, SafeMath::mul_div(collateral_amount, effective_ltv, BPS_DIVISOR)?)
     }
 
-    /// Calculate liquidation bonus for liquidator
-    pub fn calculate_liquidation_bonus(
-        collateral_amount: u64,
-        liquidation_bonus_bps: u16,
-    ) -> Result<u64> {
-        SafeMath::mul_div(collateral_amount, liquidation_bonus_bps as u64, BPS_DIVISOR)
-    }
 
     /// Calculate loan health factor (>1 = healthy, <1 = liquidatable)
     /// Returns value in basis points (10000 = 1.0)

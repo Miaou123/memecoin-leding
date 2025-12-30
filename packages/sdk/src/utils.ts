@@ -63,12 +63,6 @@ export function calculateLoanTerms(params: LoanTermsParams): LoanTerms {
 }
 
 
-export function calculateLiquidationBonus(
-  collateralAmount: BN,
-  bonusBps: number
-): BN {
-  return collateralAmount.mul(new BN(bonusBps)).div(new BN(BPS_DIVISOR));
-}
 
 export async function getAssociatedTokenAddressAndCheckOwner(
   mint: PublicKey,

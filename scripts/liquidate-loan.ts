@@ -163,14 +163,9 @@ program
       
       console.log(chalk.yellow(`\n⚡ Liquidation Reason: ${reason}`));
       
-      // Get token config for liquidation bonus
-      const tokenConfig = await client.getTokenConfig(new PublicKey(loan.tokenMint));
-      if (tokenConfig) {
-        const bonus = tokenConfig.liquidationBonusBps / 100;
-        console.log(chalk.blue('\n💰 Liquidation Rewards:'));
-        printInfo('Collateral to Receive', formatTokens(loan.collateralAmount) + ' tokens');
-        printInfo('Liquidation Bonus', `${bonus}%`);
-      }
+      console.log(chalk.blue('\n💰 Liquidation Info:'));
+      printInfo('Auto-liquidation', 'Protocol automatically liquidates via PumpFun/Jupiter');
+      printInfo('Liquidator Reward', 'No manual liquidation bonuses - system handles liquidation');
       
       if (options.dryRun) {
         console.log(chalk.yellow('\n🔶 DRY RUN - Transaction not executed'));
@@ -187,7 +182,7 @@ program
       printInfo('Transaction', txSignature);
       printTxLink(txSignature, options.network);
       
-      console.log(chalk.green('\n🎉 Collateral has been transferred to your wallet!'));
+      console.log(chalk.green('\n🎉 Collateral liquidated automatically via DEX!'));
       console.log('');
       
     } catch (error: any) {

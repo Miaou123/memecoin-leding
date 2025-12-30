@@ -65,18 +65,17 @@ program
       console.log(chalk.green(`Found ${tokenConfigs.length} whitelisted token(s):\n`));
       
       // Print summary table
-      console.log(chalk.blue('─'.repeat(110)));
+      console.log(chalk.blue('─'.repeat(90)));
       console.log(
         chalk.bold(
           padRight('Token Mint', 48) +
           padRight('Tier', 12) +
           padRight('LTV', 10) +
-          padRight('Interest', 12) +
           padRight('Status', 10) +
           'Pool Type'
         )
       );
-      console.log(chalk.blue('─'.repeat(110)));
+      console.log(chalk.blue('─'.repeat(90)));
       
       for (const config of tokenConfigs) {
         const tierStr = getTierSimple(config.tier);
@@ -86,13 +85,12 @@ program
           padRight(config.mint.slice(0, 44) + '...', 48) +
           padRight(tierStr, 12) +
           padRight(`${config.ltvBps / 100}%`, 10) +
-          padRight(`${config.interestRateBps / 100}% APR`, 12) +
           padRight(statusStr, 10) +
           formatPoolTypeSimple(config.poolType)
         );
       }
       
-      console.log(chalk.blue('─'.repeat(110)));
+      console.log(chalk.blue('─'.repeat(90)));
       console.log('');
       
       // Summary
@@ -118,8 +116,7 @@ function printTokenConfig(config: any): void {
   
   console.log(chalk.blue('\n💰 Lending Parameters:'));
   printInfo('LTV Ratio', `${config.ltvBps / 100}% (${config.ltvBps} bps)`);
-  printInfo('Interest Rate', `${config.interestRateBps / 100}% APR (${config.interestRateBps} bps)`);
-  printInfo('Liquidation Bonus', `${config.liquidationBonusBps / 100}% (${config.liquidationBonusBps} bps)`);
+  printInfo('Protocol Fee', '2% flat');
   
   console.log(chalk.blue('\n📏 Loan Limits:'));
   printInfo('Min Loan', `${formatSOL(config.minLoanAmount)} SOL`);

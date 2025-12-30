@@ -24,6 +24,24 @@ export const TokenSelectionUnified: Component<TokenSelectionUnifiedProps> = (pro
   const [isDropdownOpen, setIsDropdownOpen] = createSignal(false);
   const [inputFocused, setInputFocused] = createSignal(false);
 
+  // Helper function to validate mint addresses
+  const isValidMintAddress = (value: string): boolean => {
+    const trimmed = value.trim();
+    // Solana addresses are typically 32-44 characters, Base58 encoded
+    const isValidLength = trimmed.length >= 32 && trimmed.length <= 44;
+    const isValidBase58 = /^[1-9A-HJ-NP-Za-km-z]+$/.test(trimmed);
+    const isValid = isValidLength && isValidBase58;
+    
+    console.log('[TokenSelection] Validation:', { 
+      value: trimmed.slice(0, 8) + '...', 
+      length: trimmed.length, 
+      isValidBase58, 
+      isValid 
+    });
+    
+    return isValid;
+  };
+
   // Fetch prices when tokens change
   createEffect(async () => {
     const tokens = props.walletTokens;
@@ -119,8 +137,29 @@ export const TokenSelectionUnified: Component<TokenSelectionUnifiedProps> = (pro
   };
 
   const handleInputChange = (value: string) => {
+    console.log('[TokenSelection] Input change:', value.slice(0, 8) + '...');
     props.onManualChange(value);
     setIsDropdownOpen(true);
+    
+    // Auto-select when valid mint address is entered/pasted
+    const trimmedValue = value.trim();
+    if (isValidMintAddress(trimmedValue)) {
+      console.log('[TokenSelection] Auto-selecting valid address:', trimmedValue.slice(0, 8) + '...');
+      props.onSelect(trimmedValue);
+    }
+  };
+
+  const handlePaste = (e: ClipboardEvent) => {
+    e.preventDefault();
+    const pastedText = e.clipboardData?.getData('text')?.trim() || '';
+    console.log('[TokenSelection] Paste detected:', pastedText.slice(0, 8) + '...');
+    props.onManualChange(pastedText);
+    
+    if (isValidMintAddress(pastedText)) {
+      console.log('[TokenSelection] Auto-selecting pasted valid address:', pastedText.slice(0, 8) + '...');
+      props.onSelect(pastedText);
+      setIsDropdownOpen(false);
+    }
   };
 
   const handleInputFocus = () => {
@@ -142,10 +181,12 @@ export const TokenSelectionUnified: Component<TokenSelectionUnifiedProps> = (pro
     if (props.selectedMint && props.selectedMint === props.manualValue) {
       // Find the selected token in wallet tokens for display
       const selectedToken = tokensWithPrices().find(t => t.mint === props.selectedMint);
-      if (selectedToken) {
-        return `${shortenAddress(selectedToken.mint)} (${formatTokenAmount(selectedToken.uiBalance)} tokens)`;
+      if (selectedToken && selectedToken.uiBalance && parseFloat(selectedToken.uiBalance) > 0) {
+        // Only show balance info for tokens the user actually holds
+        return `${props.selectedMint} (${formatTokenAmount(selectedToken.uiBalance)} tokens)`;
       }
-      return shortenAddress(props.selectedMint);
+      // For manually entered tokens or tokens with 0 balance, show full address
+      return props.selectedMint;
     }
     return props.manualValue;
   };
@@ -164,6 +205,7 @@ export const TokenSelectionUnified: Component<TokenSelectionUnifiedProps> = (pro
             onInput={(e) => handleInputChange(e.currentTarget.value)}
             onFocus={handleInputFocus}
             onBlur={handleInputBlur}
+            onPaste={handlePaste}
             placeholder="Enter PumpFun token mint address..."
             class="w-full p-3 border rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent pr-10"
           />

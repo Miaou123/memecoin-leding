@@ -68,11 +68,11 @@ pub fn whitelist_token_handler(
         return Err(LendingError::InvalidLoanAmount.into());
     }
 
-    // Set more conservative parameters based on tier (no interest rate, only LTV and liquidation bonus)
-    let (ltv_bps, liquidation_bonus_bps) = match token_tier {
-        TokenTier::Bronze => (5000, 1000), // 50% LTV, 10% liq bonus
-        TokenTier::Silver => (6000, 750),  // 60% LTV, 7.5% liq bonus
-        TokenTier::Gold => (7000, 500),    // 70% LTV, 5% liq bonus
+    // Set LTV based on tier (liquidation bonus is deprecated)
+    let ltv_bps = match token_tier {
+        TokenTier::Bronze => 5000, // 50% LTV
+        TokenTier::Silver => 6000, // 60% LTV
+        TokenTier::Gold => 7000,   // 70% LTV
     };
 
     // Initialize token config
@@ -82,7 +82,7 @@ pub fn whitelist_token_handler(
     token_config.pool_address = pool_address;
     token_config.pool_type = pool_type;
     token_config.ltv_bps = ltv_bps;
-    token_config.liquidation_bonus_bps = liquidation_bonus_bps;
+    token_config._deprecated_liquidation_bonus = 0; // Set to 0, field is deprecated
     token_config.min_loan_amount = min_loan_amount;
     token_config.max_loan_amount = max_loan_amount;
     token_config.active_loans_count = 0;

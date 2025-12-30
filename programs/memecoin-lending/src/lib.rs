@@ -106,13 +106,6 @@ pub mod memecoin_lending {
         instructions::admin::withdraw_treasury_handler(ctx, amount)
     }
 
-    /// Update liquidation bonus (admin only)
-    pub fn update_liquidation_bonus(
-        ctx: Context<AdminControl>,
-        new_bonus_bps: u16,
-    ) -> Result<()> {
-        instructions::admin::update_liquidation_bonus_handler(ctx, new_bonus_bps)
-    }
 
     /// Emergency drain (admin only)
     pub fn emergency_drain(ctx: Context<EmergencyDrain>) -> Result<()> {
