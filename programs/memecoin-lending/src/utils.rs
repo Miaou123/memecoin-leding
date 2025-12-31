@@ -39,6 +39,16 @@ pub const SECONDS_PER_DAY: u64 = 86_400;
 /// Seconds per hour
 pub const SECONDS_PER_HOUR: u64 = 3_600;
 
+// === DURATION-BASED LTV SCALING ===
+/// Default/base duration for LTV calculation (48 hours)
+pub const BASE_DURATION_SECONDS: u64 = 48 * 60 * 60; // 48 hours
+
+/// Maximum LTV bonus for shortest duration (25% = 2500 bps)
+pub const MAX_LTV_BONUS_BPS: u64 = 2500;
+
+/// Maximum LTV penalty for longest duration (25% = 2500 bps)
+pub const MAX_LTV_PENALTY_BPS: u64 = 2500;
+
 // === LOAN CONSTANTS ===
 /// Default liquidation buffer in basis points (3%)
 pub const DEFAULT_LIQUIDATION_BUFFER_BPS: u16 = 300;
@@ -214,6 +224,66 @@ impl LoanCalculator {
     /// Check if loan is healthy
     pub fn is_loan_healthy(health_factor: u64) -> bool {
         health_factor >= BPS_DIVISOR // >= 1.0
+    }
+
+    /// Calculate duration-based LTV modifier
+    /// Returns the effective LTV in basis points after applying duration scaling
+    /// 
+    /// Scaling:
+    /// - 12h (min): +25% bonus → modifier = 1.25
+    /// - 48h (default): no change → modifier = 1.0  
+    /// - 7d (max): -25% penalty → modifier = 0.75
+    pub fn calculate_duration_adjusted_ltv(
+        base_ltv_bps: u16,
+        duration_seconds: u64,
+    ) -> Result<u16> {
+        // Clamp duration to valid range
+        let duration = duration_seconds
+            .max(MIN_LOAN_DURATION)
+            .min(MAX_LOAN_DURATION);
+        
+        let base_ltv = base_ltv_bps as u64;
+        
+        let effective_ltv = if duration <= BASE_DURATION_SECONDS {
+            // Shorter duration = bonus (scales from +25% at 12h to 0% at 48h)
+            // bonus_ratio = (48h - duration) / (48h - 12h)
+            let duration_range = BASE_DURATION_SECONDS - MIN_LOAN_DURATION; // 36 hours
+            let duration_diff = BASE_DURATION_SECONDS - duration;
+            
+            // bonus = base_ltv * MAX_BONUS * duration_diff / duration_range / 10000
+            let bonus = SafeMath::mul_div(
+                base_ltv,
+                SafeMath::mul_div(MAX_LTV_BONUS_BPS, duration_diff, duration_range)?,
+                BPS_DIVISOR,
+            )?;
+            
+            SafeMath::add(base_ltv, bonus)?
+        } else {
+            // Longer duration = penalty (scales from 0% at 48h to -25% at 7d)
+            // penalty_ratio = (duration - 48h) / (168h - 48h)
+            let duration_range = MAX_LOAN_DURATION - BASE_DURATION_SECONDS; // 120 hours
+            let duration_diff = duration - BASE_DURATION_SECONDS;
+            
+            // penalty = base_ltv * MAX_PENALTY * duration_diff / duration_range / 10000
+            let penalty = SafeMath::mul_div(
+                base_ltv,
+                SafeMath::mul_div(MAX_LTV_PENALTY_BPS, duration_diff, duration_range)?,
+                BPS_DIVISOR,
+            )?;
+            
+            SafeMath::sub(base_ltv, penalty)?
+        };
+        
+        // Ensure result fits in u16 and has reasonable bounds
+        if effective_ltv > 9000 {
+            // Cap at 90% LTV maximum for safety
+            Ok(9000)
+        } else if effective_ltv < 1000 {
+            // Floor at 10% LTV minimum
+            Ok(1000)
+        } else {
+            Ok(effective_ltv as u16)
+        }
     }
 }
 

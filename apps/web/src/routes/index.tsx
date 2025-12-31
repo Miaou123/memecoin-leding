@@ -2,6 +2,7 @@ import { Show, For, createMemo } from 'solid-js';
 import { A } from '@solidjs/router';
 import { useQuery } from '@tanstack/solid-query';
 import { Button } from '@/components/ui/Button';
+import { CopyableText } from '@/components/ui/CopyButton';
 import { formatSOL, formatNumber } from '@/lib/utils';
 import { api } from '@/lib/api';
 import { RecentLoanItem } from '@/components/dashboard/RecentLoanItem';
@@ -65,16 +66,11 @@ export default function Home() {
         {/* Protocol Token */}
         <div class="text-center mt-8">
           <div class="bg-bg-secondary border border-border p-3 mx-auto max-w-fit">
-            <button 
-              onClick={() => {
-                const tokenMint = '6KHL8uUXFie8Xdy3EBvw6EgruiU3duc9fvGrWoZ9pump';
-                navigator.clipboard.writeText(tokenMint);
-              }}
-              class="font-mono text-sm text-text-primary hover:text-accent-green transition-colors cursor-pointer"
-              title="Click to copy"
-            >
-              6KHL8uUXFie8Xdy3EBvw6EgruiU3duc9fvGrWoZ9pump
-            </button>
+            <CopyableText
+              text="6KHL8uUXFie8Xdy3EBvw6EgruiU3duc9fvGrWoZ9pump"
+              successMessage="Token address copied to clipboard!"
+              title="Click to copy token address"
+            />
           </div>
         </div>
       </div>

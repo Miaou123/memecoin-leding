@@ -1,5 +1,6 @@
 import { ParentComponent } from 'solid-js';
 import { Header } from './Header';
+import { ToastContainer } from '../ui/Toast';
 
 export const Layout: ParentComponent = (props) => {
   return (
@@ -8,6 +9,7 @@ export const Layout: ParentComponent = (props) => {
       <main class="container mx-auto px-4 py-8">
         {props.children}
       </main>
+      <ToastContainer />
     </div>
   );
 };

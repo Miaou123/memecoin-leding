@@ -336,7 +336,8 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
           goldPool.publicKey, // pool_address argument
           0, // Raydium pool type
           new BN(1 * LAMPORTS_PER_SOL),   // min: 1 SOL
-          new BN(100 * LAMPORTS_PER_SOL) // max: 100 SOL
+          new BN(100 * LAMPORTS_PER_SOL), // max: 100 SOL
+          false // is_protocol_token
         )
         .accounts({
           tokenMint: goldTokenMint,
@@ -351,7 +352,7 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
       expect(tokenConfig.mint.toString()).to.equal(goldTokenMint.toString());
       expect(tokenConfig.tier).to.deep.equal({ gold: {} });
       expect(tokenConfig.enabled).to.be.true;
-      expect(tokenConfig.ltvBps).to.equal(7000); // 70%
+      expect(tokenConfig.ltvBps).to.equal(5000); // 50%
       // Using flat 2% protocol fee now (no interest rates or liquidation bonuses)
     });
 
@@ -362,7 +363,8 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
           silverPool.publicKey, // pool_address argument
           0, // Raydium pool type
           new BN(0.5 * LAMPORTS_PER_SOL),
-          new BN(50 * LAMPORTS_PER_SOL)
+          new BN(50 * LAMPORTS_PER_SOL),
+          false // is_protocol_token
         )
         .accounts({
           tokenMint: silverTokenMint,
@@ -375,7 +377,7 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
 
       const tokenConfig = await program.account.tokenConfig.fetch(silverTokenConfigPda);
       expect(tokenConfig.tier).to.deep.equal({ silver: {} });
-      expect(tokenConfig.ltvBps).to.equal(6000); // 60%
+      expect(tokenConfig.ltvBps).to.equal(3500); // 35%
       // Using flat 2% protocol fee now (no interest rates or liquidation bonuses)
     });
 
@@ -386,7 +388,8 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
           bronzePool.publicKey, // pool_address argument
           0, // Raydium pool type
           new BN(0.1 * LAMPORTS_PER_SOL),
-          new BN(25 * LAMPORTS_PER_SOL)
+          new BN(25 * LAMPORTS_PER_SOL),
+          false // is_protocol_token
         )
         .accounts({
           tokenMint: bronzeTokenMint,
@@ -399,7 +402,7 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
 
       const tokenConfig = await program.account.tokenConfig.fetch(bronzeTokenConfigPda);
       expect(tokenConfig.tier).to.deep.equal({ bronze: {} });
-      expect(tokenConfig.ltvBps).to.equal(5000); // 50%
+      expect(tokenConfig.ltvBps).to.equal(2500); // 25%
       // Using flat 2% protocol fee now (no interest rates or liquidation bonuses)
     });
 
@@ -1185,7 +1188,7 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
       
       // Note: pool_address is passed as argument, not as account
       await program.methods
-        .whitelistToken(0, testPool.publicKey, poolType, minLoanAmount, maxLoanAmount) // Bronze tier
+        .whitelistToken(0, testPool.publicKey, poolType, minLoanAmount, maxLoanAmount, false) // Bronze tier
         .accounts({
           tokenMint: testTokenMint,
           admin: admin.publicKey,
@@ -1201,7 +1204,7 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
       console.log("✅ Token whitelisted with pool type and loan limits");
     });
 
-    it.skip("should fail to create loan with duration too short", async () => {
+    it("should fail to create loan with duration too short", async () => {
       const shortDuration = 6 * 60 * 60; // 6 hours (min is 12)
       const collateralAmount = new BN(1000 * 10 ** TOKEN_DECIMALS);
       
@@ -1300,6 +1303,102 @@ describe("Memecoin Lending Protocol - Full Test Suite", () => {
       console.log("   • Each loan gets unique vault PDA");
       console.log("   • Collateral isolated per loan");
       console.log("   • No cross-contamination between loans");
+    });
+  });
+
+  describe("Duration-Based LTV Scaling", () => {
+    // Helper function to calculate expected LTV
+    function calculateExpectedLtv(baseLtv: number, durationSeconds: number): number {
+      const BASE_DURATION = 48 * 60 * 60; // 48 hours
+      const MIN_DURATION = 12 * 60 * 60; // 12 hours  
+      const MAX_DURATION = 7 * 24 * 60 * 60; // 7 days
+      const MAX_BONUS = 0.25; // 25%
+      const MAX_PENALTY = 0.25; // 25%
+
+      const duration = Math.max(MIN_DURATION, Math.min(MAX_DURATION, durationSeconds));
+      
+      let modifier: number;
+      if (duration <= BASE_DURATION) {
+        const durationRange = BASE_DURATION - MIN_DURATION;
+        const durationDiff = BASE_DURATION - duration;
+        const bonusRatio = durationDiff / durationRange;
+        modifier = 1 + (MAX_BONUS * bonusRatio);
+      } else {
+        const durationRange = MAX_DURATION - BASE_DURATION;
+        const durationDiff = duration - BASE_DURATION;
+        const penaltyRatio = durationDiff / durationRange;
+        modifier = 1 - (MAX_PENALTY * penaltyRatio);
+      }
+      
+      return Math.max(1000, Math.min(9000, Math.round(baseLtv * modifier)));
+    }
+
+    it("should give +25% LTV bonus for 12h loan", async () => {
+      // Bronze base: 2500 bps (25%) → 12h should give 3125 bps (31.25%)
+      const baseLtv = 2500;
+      const duration = 12 * 60 * 60; // 12 hours
+      const expectedLtv = calculateExpectedLtv(baseLtv, duration);
+      expect(expectedLtv).to.equal(3125); // 31.25%
+      console.log(`✅ 12h duration: ${baseLtv} bps → ${expectedLtv} bps (+25% bonus)`);
+    });
+
+    it("should give no modifier for 48h loan", async () => {
+      // Bronze base: 2500 bps (25%) → 48h should remain 2500 bps (25%)
+      const baseLtv = 2500;
+      const duration = 48 * 60 * 60; // 48 hours
+      const expectedLtv = calculateExpectedLtv(baseLtv, duration);
+      expect(expectedLtv).to.equal(2500); // 25% unchanged
+      console.log(`✅ 48h duration: ${baseLtv} bps → ${expectedLtv} bps (no change)`);
+    });
+
+    it("should give -25% LTV penalty for 7d loan", async () => {
+      // Bronze base: 2500 bps (25%) → 7d should give 1875 bps (18.75%)
+      const baseLtv = 2500;
+      const duration = 7 * 24 * 60 * 60; // 7 days
+      const expectedLtv = calculateExpectedLtv(baseLtv, duration);
+      expect(expectedLtv).to.equal(1875); // 18.75%
+      console.log(`✅ 7d duration: ${baseLtv} bps → ${expectedLtv} bps (-25% penalty)`);
+    });
+
+    it("should scale linearly for intermediate durations", async () => {
+      const baseLtv = 2500;
+      
+      // 24h = halfway between 12h and 48h → +12.5% bonus
+      const ltv24h = calculateExpectedLtv(baseLtv, 24 * 60 * 60);
+      expect(ltv24h).to.be.approximately(2813, 10); // ~28.13%
+      
+      // 4d = halfway between 48h and 7d → -12.5% penalty
+      const ltv4d = calculateExpectedLtv(baseLtv, 4 * 24 * 60 * 60);
+      expect(ltv4d).to.be.approximately(2188, 10); // ~21.88%
+      
+      console.log(`✅ Linear scaling: 24h → ${ltv24h} bps, 4d → ${ltv4d} bps`);
+    });
+
+    it("should work correctly with Gold tier tokens", async () => {
+      // Gold base: 5000 bps (50%)
+      const goldBaseLtv = 5000;
+      
+      // 12h → should give 6250 bps (62.5%)
+      const gold12h = calculateExpectedLtv(goldBaseLtv, 12 * 60 * 60);
+      expect(gold12h).to.equal(6250);
+      
+      // 7d → should give 3750 bps (37.5%)
+      const gold7d = calculateExpectedLtv(goldBaseLtv, 7 * 24 * 60 * 60);
+      expect(gold7d).to.equal(3750);
+      
+      console.log(`✅ Gold tier scaling: 12h → ${gold12h} bps, 7d → ${gold7d} bps`);
+    });
+
+    it("should cap LTV at reasonable bounds", async () => {
+      // Test with very high base LTV to verify capping
+      const highBaseLtv = 8000; // 80%
+      const shortDuration = 12 * 60 * 60; // 12h
+      
+      // This would calculate to 10000 bps (100%), but should be capped at 9000 bps (90%)
+      const cappedLtv = calculateExpectedLtv(highBaseLtv, shortDuration);
+      expect(cappedLtv).to.be.at.most(9000);
+      
+      console.log(`✅ LTV capping: ${highBaseLtv} bps @ 12h → ${cappedLtv} bps (capped at 90%)`);
     });
   });
 

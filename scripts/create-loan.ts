@@ -79,8 +79,7 @@ program
       }
       
       printInfo('Token Tier', formatTier(tokenConfig.tier));
-      printInfo('LTV', `${tokenConfig.ltvBps / 100}%`);
-      printInfo('Interest Rate', `${tokenConfig.interestRateBps / 100}% APR`);
+      printInfo('Base LTV', `${tokenConfig.ltvBps / 100}%`);
       
       // Get borrower's token account
       const borrowerTokenAccount = await getAssociatedTokenAddress(mint, keypair.publicKey);
@@ -123,10 +122,14 @@ program
           durationSeconds,
         });
         
+        // Add import for getLtvModifierDisplay if not already imported
+        const { getLtvModifierDisplay } = require('@memecoin-lending/sdk');
+        
+        printInfo('Duration Modifier', getLtvModifierDisplay(durationSeconds));
+        printInfo('Effective LTV', `${(estimate.ltv || 0).toFixed(2)}%`);
         printInfo('Estimated SOL to Receive', `${formatSOL(estimate.solAmount)} SOL`);
-        printInfo('Estimated Interest', `${formatSOL(estimate.interestAmount)} SOL`);
-        printInfo('Total Repayment', `${formatSOL(estimate.totalRepayment)} SOL`);
-        printInfo('Effective APR', `${estimate.effectiveApr.toFixed(2)}%`);
+        printInfo('Protocol Fee (2%)', `${formatSOL(estimate.protocolFee || 0)} SOL`);
+        printInfo('Total Repayment', `${formatSOL(estimate.totalOwed)} SOL`);
         printInfo('Liquidation Price', `${estimate.liquidationPrice} lamports/token`);
         
       } catch (e: any) {

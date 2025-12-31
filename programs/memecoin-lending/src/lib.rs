@@ -33,8 +33,9 @@ pub mod memecoin_lending {
         pool_type: u8,
         min_loan_amount: u64,
         max_loan_amount: u64,
+        is_protocol_token: bool,
     ) -> Result<()> {
-        instructions::whitelist_token::whitelist_token_handler(ctx, tier, pool_address, pool_type, min_loan_amount, max_loan_amount)
+        instructions::whitelist_token::whitelist_token_handler(ctx, tier, pool_address, pool_type, min_loan_amount, max_loan_amount, is_protocol_token)
     }
 
     /// Update token configuration parameters

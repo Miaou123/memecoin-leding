@@ -122,11 +122,24 @@ pub fn create_loan_handler(
         LendingError::CollateralValueTooLow
     );
 
-    // Calculate loan amount based on LTV
+    // Calculate duration-adjusted LTV
+    let effective_ltv = LoanCalculator::calculate_duration_adjusted_ltv(
+        token_config.ltv_bps,
+        duration_seconds,
+    )?;
+
+    msg!(
+        "LTV adjustment: base={} bps, duration={}s, effective={} bps",
+        token_config.ltv_bps,
+        duration_seconds,
+        effective_ltv
+    );
+
+    // Calculate loan amount based on duration-adjusted LTV
     let sol_loan_amount = LoanCalculator::calculate_loan_amount(
         collateral_amount,
         current_price,
-        token_config.ltv_bps,
+        effective_ltv,
     )?;
 
     // Validate loan amount against limits

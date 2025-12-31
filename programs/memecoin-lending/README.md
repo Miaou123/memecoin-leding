@@ -35,11 +35,30 @@ A collateralized lending protocol built on Solana that allows memecoin holders t
 ## 🎯 Features
 
 ### Token Tiers
-| Tier | LTV | Protocol Fee |
-|------|-----|-------------|
-| Gold | 70% | 2% flat |
-| Silver | 60% | 2% flat |
-| Bronze | 50% | 2% flat |
+
+| Tier | Liquidity Requirement | LTV Ratio | Protocol Fee |
+|------|----------------------|-----------|--------------|
+| Bronze | > $0 | 25% | 2% flat |
+| Silver | > $100,000 | 35% | 2% flat |
+| Gold | > $300,000 | 50% | 2% flat |
+
+**Protocol Token:** Always receives 50% LTV.
+
+### Duration-Based LTV Scaling
+
+Loan duration affects the LTV ratio. Shorter loans are less risky for the protocol, so they get higher LTV.
+
+| Duration | LTV Modifier | Example (Bronze 25%) |
+|----------|--------------|---------------------|
+| 12 hours | +25% | 31.25% |
+| 24 hours | +12.5% | 28.13% |
+| 48 hours | 0% (base) | 25% |
+| 4 days | -12.5% | 21.88% |
+| 7 days | -25% | 18.75% |
+
+**Formula:**
+- For duration ≤ 48h: `effective_ltv = base_ltv × (1 + 0.25 × (48h - duration) / 36h)`
+- For duration > 48h: `effective_ltv = base_ltv × (1 - 0.25 × (duration - 48h) / 120h)`
 
 ### Auto-Liquidation System
 1. **Time-based**: Loan expires (past due date)

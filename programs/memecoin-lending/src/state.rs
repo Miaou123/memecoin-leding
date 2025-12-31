@@ -28,6 +28,15 @@ pub const DEFAULT_SLIPPAGE_BPS: u16 = 300;       // 3% default slippage
 pub const MAX_SLIPPAGE_BPS: u16 = 1500;          // 15% max slippage
 pub const SLIPPAGE_INCREMENT_BPS: u16 = 200;     // 2% increment per retry
 
+// === LTV RATIOS BY TIER (in basis points) ===
+pub const LTV_BRONZE_BPS: u16 = 2500;  // 25%
+pub const LTV_SILVER_BPS: u16 = 3500;  // 35%
+pub const LTV_GOLD_BPS: u16 = 5000;    // 50%
+
+// === LIQUIDITY THRESHOLDS (in USD) ===
+pub const LIQUIDITY_THRESHOLD_SILVER_USD: u64 = 100_000;
+pub const LIQUIDITY_THRESHOLD_GOLD_USD: u64 = 300_000;
+
 // === BASIS POINTS ===
 pub const BPS_DIVISOR: u64 = 10000;
 
@@ -145,6 +154,8 @@ pub struct TokenConfig {
     pub total_volume: u64,
     /// Total SOL currently borrowed against this token (for exposure tracking)
     pub total_active_borrowed: u64,
+    /// Whether this is the protocol's own token (always gets 50% LTV)
+    pub is_protocol_token: bool,
     /// Bump seed for PDA
     pub bump: u8,
     /// Reserved for future use
@@ -165,6 +176,7 @@ impl TokenConfig {
         8 + // active_loans_count
         8 + // total_volume
         8 + // total_active_borrowed
+        1 + // is_protocol_token
         1 + // bump
         32; // _reserved
 }

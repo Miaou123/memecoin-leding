@@ -29,9 +29,23 @@ export const FEE_DISTRIBUTION = {
 
 // LTV ratios by tier (in basis points)
 export const LTV_RATIOS = {
-  BRONZE: 5000, // 50%
-  SILVER: 6000, // 60%
-  GOLD: 7000,   // 70%
+  BRONZE: 2500, // 25%
+  SILVER: 3500, // 35%
+  GOLD: 5000,   // 50%
+};
+
+// Liquidity thresholds for tier classification (in USD)
+export const LIQUIDITY_THRESHOLDS_USD = {
+  BRONZE: 0,
+  SILVER: 100_000,
+  GOLD: 300_000,
+};
+
+// Duration-based LTV scaling
+export const LTV_SCALING = {
+  BASE_DURATION_SECONDS: 48 * 60 * 60,  // 48 hours
+  MAX_BONUS_BPS: 2500,                   // +25% for 12h
+  MAX_PENALTY_BPS: 2500,                 // -25% for 7d
 };
 
 

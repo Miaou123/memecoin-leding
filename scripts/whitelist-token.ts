@@ -56,6 +56,7 @@ program
   .option('-t, --tier <tier>', 'Token tier (bronze, silver, gold)')
   .option('-p, --pool <address>', 'Pool address for price feeds')
   .option('--pool-type <type>', 'Pool type (raydium, orca, pumpfun, pumpswap)', 'pumpfun')
+  .option('--protocol-token', 'Mark as protocol token (always 50% LTV)')
   .action(async (options) => {
     try {
       console.log(chalk.blue('📝 Whitelisting token(s)...'));
@@ -100,8 +101,10 @@ program
         console.log(chalk.gray('  --tier <tier>      bronze, silver, or gold (required)'));
         console.log(chalk.gray('  --pool <address>   Pool address (optional, defaults to mint)'));
         console.log(chalk.gray('  --pool-type <type> raydium, orca, pumpfun, pumpswap (default: pumpfun)'));
+        console.log(chalk.gray('  --protocol-token   Mark as protocol token (always 50% LTV)'));
         console.log(chalk.gray('\nExample:'));
         console.log(chalk.gray('  npx tsx whitelist-token.ts --mint ABC123... --tier gold --network devnet'));
+        console.log(chalk.gray('  npx tsx whitelist-token.ts --mint ABC123... --tier bronze --protocol-token'));
         return;
       }
       
@@ -137,20 +140,22 @@ program
         poolType: poolType,
         minLoanAmount: new BN(1000000),      // 0.001 SOL min
         maxLoanAmount: new BN(100000000000), // 100 SOL max
+        isProtocolToken: options.protocolToken ?? false,
       });
       
       console.log(chalk.green('\n✅ Token whitelisted successfully!'));
       console.log(chalk.gray(`Transaction: ${txSignature}`));
       
       // Show tier info
-      const tierInfo: Record<number, { ltv: string }> = {
-        0: { ltv: '50%' },
-        1: { ltv: '60%' },
-        2: { ltv: '70%' },
+      const tierInfo: Record<number, { ltv: string; liquidityReq: string }> = {
+        0: { ltv: '25%', liquidityReq: '> $0' },
+        1: { ltv: '35%', liquidityReq: '> $100k' },
+        2: { ltv: '50%', liquidityReq: '> $300k' },
       };
       
       console.log(chalk.blue('\n📊 Token Config:'));
-      console.log(chalk.gray(`  LTV: ${tierInfo[tier].ltv}`));
+      const actualLtv = options.protocolToken ? '50%' : tierInfo[tier].ltv;
+      console.log(chalk.gray(`  LTV: ${actualLtv}${options.protocolToken ? ' (Protocol Token)' : ` (${tierInfo[tier].liquidityReq})`}`));
       console.log(chalk.gray(`  Protocol Fee: 2% flat`));
       
     } catch (error) {

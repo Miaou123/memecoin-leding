@@ -48,6 +48,7 @@ export interface TokenConfig {
   maxLoanAmount: string;
   activeLoansCount: string;
   totalVolume: string;
+  isProtocolToken: boolean;
 }
 
 export interface Loan {
@@ -103,5 +104,7 @@ export interface LoanTerms {
   protocolFeeBps: number; // Always 200 (2%)
   totalOwed: string;
   liquidationPrice: string;
-  ltv: number;
+  ltv: number;           // Effective LTV after duration adjustment
+  baseLtv?: number;      // Base LTV from tier
+  ltvModifier?: string;  // Display string like "+25%" or "-12.5%"
 }

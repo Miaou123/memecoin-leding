@@ -298,11 +298,32 @@ pnpm --filter scripts fund-treasury --amount 1000 --network devnet
 
 ## 🛡️ Risk Management
 
+### Token Tiers
+
+| Tier | Liquidity Requirement | LTV Ratio |
+|------|----------------------|-----------|
+| Bronze | > $0 | 25% |
+| Silver | > $100,000 | 35% |
+| Gold | > $300,000 | 50% |
+
+**Protocol Token:** Always receives 50% LTV regardless of tier.
+
+### Duration-Based LTV Scaling
+
+The protocol dynamically adjusts LTV based on loan duration to optimize risk:
+
+| Duration | LTV Modifier | Example (Bronze 25%) | Silver (35%) | Gold (50%) |
+|----------|--------------|---------------------|--------------|------------|
+| 12h | +25% | 31.25% | 43.75% | 62.5% |
+| 24h | +12.5% | 28.13% | 39.38% | 56.25% |
+| 48h | 0% (base) | 25% | 35% | 50% |
+| 4d | -12.5% | 21.88% | 30.63% | 43.75% |
+| 7d | -25% | 18.75% | 26.25% | 37.5% |
+
 ### Loan Parameters
-- **LTV Ratios**: 50% (Bronze), 60% (Silver), 70% (Gold)
 - **Protocol Fee**: 2% flat fee (all tiers)
 - **Liquidation Buffer**: 0.5% price threshold
-- **Maximum Duration**: 7 days
+- **Duration Range**: 12 hours to 7 days
 
 ### Auto-Liquidation
 - Automated liquidation via PumpFun/Jupiter

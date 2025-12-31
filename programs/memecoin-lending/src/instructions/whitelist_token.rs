@@ -38,6 +38,7 @@ pub fn whitelist_token_handler(
     pool_type: u8,
     min_loan_amount: u64,
     max_loan_amount: u64,
+    is_protocol_token: bool,
 ) -> Result<()> {
     let token_config = &mut ctx.accounts.token_config;
     
@@ -68,11 +69,15 @@ pub fn whitelist_token_handler(
         return Err(LendingError::InvalidLoanAmount.into());
     }
 
-    // Set LTV based on tier (liquidation bonus is deprecated)
-    let ltv_bps = match token_tier {
-        TokenTier::Bronze => 5000, // 50% LTV
-        TokenTier::Silver => 6000, // 60% LTV
-        TokenTier::Gold => 7000,   // 70% LTV
+    // Set LTV based on tier or protocol token status
+    let ltv_bps = if is_protocol_token {
+        5000 // Protocol token always gets 50% LTV
+    } else {
+        match token_tier {
+            TokenTier::Bronze => 2500, // 25% LTV
+            TokenTier::Silver => 3500, // 35% LTV
+            TokenTier::Gold => 5000,   // 50% LTV
+        }
     };
 
     // Initialize token config
@@ -87,6 +92,8 @@ pub fn whitelist_token_handler(
     token_config.max_loan_amount = max_loan_amount;
     token_config.active_loans_count = 0;
     token_config.total_volume = 0;
+    token_config.total_active_borrowed = 0;
+    token_config.is_protocol_token = is_protocol_token;
     token_config.bump = ctx.bumps.token_config;
 
     msg!("Token whitelisted: {} (tier: {:?}, pool_type: {:?})", ctx.accounts.token_mint.key(), token_tier, pool_type);

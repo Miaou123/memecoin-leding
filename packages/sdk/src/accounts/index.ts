@@ -55,6 +55,7 @@ export async function getTokenConfig(
       maxLoanAmount: account.maxLoanAmount.toString(),
       activeLoansCount: account.activeLoansCount.toString(),
       totalVolume: account.totalVolume.toString(),
+      isProtocolToken: account.isProtocolToken ?? false,
     };
   } catch (error) {
     // Account doesn't exist
@@ -185,6 +186,7 @@ export async function getAllTokenConfigs(program: Program): Promise<TokenConfig[
       maxLoanAmount: acc.account.maxLoanAmount.toString(),
       activeLoansCount: acc.account.activeLoansCount.toString(),
       totalVolume: acc.account.totalVolume.toString(),
+      isProtocolToken: acc.account.isProtocolToken ?? false,
     }));
   } catch (error) {
     return [];
