@@ -173,4 +173,7 @@ pub enum LendingError {
 
     #[msg("E6056: Invalid pool data")]
     InvalidPoolData = 6056,
+
+    #[msg("E6057: Feature temporarily disabled")]
+    FeatureTemporarilyDisabled = 6057,
 }

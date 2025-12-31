@@ -4,14 +4,9 @@ use anchor_spl::associated_token::AssociatedToken;
 use crate::state::*;
 use crate::error::LendingError;
 use crate::utils::*;
-use crate::swap::pumpfun::{
-    execute_pumpfun_sell, get_bonding_curve_pda,
-    PUMPFUN_PROGRAM_ID, PUMPFUN_GLOBAL, PUMPFUN_FEE_RECIPIENT, PUMPFUN_EVENT_AUTHORITY,
-};
-use crate::swap::jupiter::{execute_jupiter_swap, JUPITER_V6_PROGRAM_ID};
+use crate::swap::jupiter::execute_jupiter_swap;
 
 /// Fee split constants
-const TREASURY_SPLIT_BPS: u64 = 9500;  // 95%
 const OPERATIONS_SPLIT_BPS: u64 = 500; // 5%
 const BPS_DENOMINATOR: u64 = 10000;
 
@@ -84,45 +79,8 @@ pub struct Liquidate<'info> {
     #[account(constraint = pool_account.key() == token_config.pool_address @ LendingError::InvalidPoolAddress)]
     pub pool_account: AccountInfo<'info>,
 
-    /// User exposure tracker - must update when loan is liquidated
-    #[account(
-        mut,
-        seeds = [USER_EXPOSURE_SEED, loan.borrower.as_ref()],
-        bump = user_exposure.bump
-    )]
-    pub user_exposure: Account<'info, UserExposure>,
 
-    // === PumpFun Accounts (optional, for PumpFun swaps) ===
-    
-    /// CHECK: PumpFun program
-    #[account(address = PUMPFUN_PROGRAM_ID)]
-    pub pumpfun_program: Option<AccountInfo<'info>>,
 
-    /// CHECK: PumpFun global state
-    #[account(address = PUMPFUN_GLOBAL)]
-    pub pumpfun_global: Option<AccountInfo<'info>>,
-
-    /// CHECK: PumpFun fee recipient
-    #[account(mut, address = PUMPFUN_FEE_RECIPIENT)]
-    pub pumpfun_fee_recipient: Option<AccountInfo<'info>>,
-
-    /// CHECK: PumpFun bonding curve for this token
-    #[account(mut)]
-    pub bonding_curve: Option<AccountInfo<'info>>,
-
-    /// CHECK: Bonding curve token account
-    #[account(mut)]
-    pub bonding_curve_token_account: Option<AccountInfo<'info>>,
-
-    /// CHECK: PumpFun event authority
-    #[account(address = PUMPFUN_EVENT_AUTHORITY)]
-    pub pumpfun_event_authority: Option<AccountInfo<'info>>,
-
-    // === Jupiter Accounts (optional, for Jupiter swaps) ===
-    
-    /// CHECK: Jupiter V6 program
-    #[account(address = JUPITER_V6_PROGRAM_ID)]
-    pub jupiter_program: Option<AccountInfo<'info>>,
 
     // === Common Accounts ===
 
@@ -226,60 +184,12 @@ pub fn liquidate_handler<'info>(
 
     match token_config.pool_type {
         PoolType::Pumpfun => {
-            // Validate PumpFun accounts are provided
-            let pumpfun_program = ctx.accounts.pumpfun_program
-                .as_ref()
-                .ok_or(LendingError::MissingPumpfunAccounts)?;
-            let global = ctx.accounts.pumpfun_global
-                .as_ref()
-                .ok_or(LendingError::MissingPumpfunAccounts)?;
-            let fee_recipient = ctx.accounts.pumpfun_fee_recipient
-                .as_ref()
-                .ok_or(LendingError::MissingPumpfunAccounts)?;
-            let bonding_curve = ctx.accounts.bonding_curve
-                .as_ref()
-                .ok_or(LendingError::MissingPumpfunAccounts)?;
-            let bonding_curve_token_account = ctx.accounts.bonding_curve_token_account
-                .as_ref()
-                .ok_or(LendingError::MissingPumpfunAccounts)?;
-            let event_authority = ctx.accounts.pumpfun_event_authority
-                .as_ref()
-                .ok_or(LendingError::MissingPumpfunAccounts)?;
-
-            // Validate bonding curve PDA
-            let (expected_bc, _) = get_bonding_curve_pda(&token_mint_key);
-            require!(
-                bonding_curve.key() == expected_bc,
-                LendingError::InvalidBondingCurve
-            );
-
-            // Execute PumpFun sell
-            execute_pumpfun_sell(
-                pumpfun_program,
-                global,
-                fee_recipient,
-                &ctx.accounts.token_mint.to_account_info(),
-                bonding_curve,
-                bonding_curve_token_account,
-                &ctx.accounts.vault_token_account.to_account_info(),
-                &ctx.accounts.vault_authority.to_account_info(),
-                &ctx.accounts.system_program.to_account_info(),
-                &ctx.accounts.associated_token_program.to_account_info(),
-                &ctx.accounts.token_program.to_account_info(),
-                event_authority,
-                collateral_amount,
-                min_sol_output,
-                vault_signer,
-            )?;
-
-            msg!("PumpFun sell executed: {} tokens", collateral_amount);
+            // PumpFun tokens not supported for liquidation - tokens must migrate first
+            return Err(LendingError::FeatureTemporarilyDisabled.into());
         },
 
         PoolType::Raydium | PoolType::Orca | PoolType::PumpSwap => {
-            // Validate Jupiter accounts are provided
-            let jupiter_program = ctx.accounts.jupiter_program
-                .as_ref()
-                .ok_or(LendingError::MissingJupiterAccounts)?;
+            // Jupiter swap accounts provided via remaining_accounts
             
             let swap_data = jupiter_swap_data
                 .ok_or(LendingError::MissingJupiterSwapData)?;
@@ -289,10 +199,10 @@ pub fn liquidate_handler<'info>(
             
             require!(!route_accounts.is_empty(), LendingError::MissingJupiterAccounts);
 
-            // Execute Jupiter swap
+            // Execute Jupiter swap (jupiter_program is first account in remaining_accounts)
             execute_jupiter_swap(
-                jupiter_program,
-                &route_accounts,
+                &route_accounts[0], // First remaining account should be Jupiter program
+                &route_accounts[1..], // Rest are route accounts
                 swap_data,
                 vault_signer,
             )?;
@@ -354,20 +264,7 @@ pub fn liquidate_handler<'info>(
         sol_borrowed
     )?;
 
-    // Update user exposure tracking - decrement borrowed amount and increment liquidation counter
-    let user_exposure = &mut ctx.accounts.user_exposure;
-    user_exposure.total_borrowed = SafeMath::sub(
-        user_exposure.total_borrowed,
-        sol_borrowed
-    )?;
-    user_exposure.active_loans_count = SafeMath::sub(
-        user_exposure.active_loans_count,
-        1
-    )?;
-    user_exposure.loans_liquidated = SafeMath::add(
-        user_exposure.loans_liquidated,
-        1
-    )?;
+    // User exposure tracking removed for stack size optimization
 
     msg!(
         "Loan liquidated: reason={:?}, collateral={}, proceeds={} SOL (treasury={}, ops={})",

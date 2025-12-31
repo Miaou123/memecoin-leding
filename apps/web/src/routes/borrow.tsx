@@ -58,7 +58,14 @@ export default function Borrow() {
         durationSeconds: dur,
       });
     },
-    enabled: () => Boolean(selectedToken() && collateralAmount() && duration()),
+    // Enable when we have token, amount, duration AND token is verified (wallet NOT required)
+    enabled: () => Boolean(
+      selectedToken() && 
+      collateralAmount() && 
+      parseFloat(collateralAmount() || '0') > 0 &&
+      duration() && 
+      tokenVerification.data()?.isValid
+    ),
   }));
   
   const createLoanMutation = createMutation(() => ({
@@ -198,10 +205,30 @@ export default function Borrow() {
               </div>
             </div>
           </div>
-          <Show when={selectedToken() && collateralAmount()}>
+          {/* Token verification status messages */}
+          <Show when={selectedToken() && collateralAmount() && tokenVerification.isLoading()}>
+            <div class="text-xs text-muted-foreground mt-1 flex items-center gap-1">
+              <svg class="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              Verifying token...
+            </div>
+          </Show>
+          <Show when={selectedToken() && collateralAmount() && !tokenVerification.data()?.isValid && !tokenVerification.isLoading()}>
             <div class="text-xs text-muted-foreground mt-1">
               Value calculation available after token verification
             </div>
+          </Show>
+          <Show when={selectedToken() && collateralAmount() && tokenVerification.data()?.isValid}>
+            <Show when={loanEstimate.isLoading}>
+              <div class="text-xs text-muted-foreground mt-1">Calculating loan estimate...</div>
+            </Show>
+            <Show when={loanEstimate.data}>
+              <div class="text-xs text-green-600 mt-1">
+                ≈ {formatSOL(loanEstimate.data!.solAmount)} SOL available to borrow
+              </div>
+            </Show>
           </Show>
           <Show when={tokenBalance.error()}>
             <div class="text-xs text-red-500 mt-1">
@@ -245,7 +272,7 @@ export default function Borrow() {
               </div>
               <div class="flex justify-between">
                 <span>Protocol Fee</span>
-                <span>1.0%</span>
+                <span>2.0%</span>
               </div>
               <div class="flex justify-between">
                 <span>Total to Repay</span>
@@ -379,7 +406,7 @@ export default function Borrow() {
         details={loanResult() ? [
           { label: "Principal Amount", value: formatSOL(loanResult().estimate.solAmount) + " SOL", highlight: true },
           { label: "Collateral Locked", value: formatNumber(collateralAmount()) + " tokens" },
-          { label: "Protocol Fee", value: "1.0%" },
+          { label: "Protocol Fee", value: "2.0%" },
           { label: "Duration", value: formatDuration(duration()) },
           { label: "Due Date", value: new Date(Date.now() + duration() * 1000).toLocaleDateString() },
           { label: "Total to Repay", value: formatSOL(loanResult().estimate.totalOwed) + " SOL" },

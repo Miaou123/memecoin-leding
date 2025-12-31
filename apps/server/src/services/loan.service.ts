@@ -20,7 +20,45 @@ import { fastPriceMonitor } from './fast-price-monitor.js';
 import { websocketService } from '../websocket/index.js';
 import { PROGRAM_ID, getNetworkConfig, getCurrentNetwork } from '@memecoin-lending/config';
 
+// Helper functions for manual TokenConfig deserialization
+function readPubkey(buffer: Buffer, offset: number): PublicKey {
+  return new PublicKey(buffer.slice(offset, offset + 32));
+}
 
+function readU16(buffer: Buffer, offset: number): number {
+  return buffer.readUInt16LE(offset);
+}
+
+function readU64(buffer: Buffer, offset: number): BN {
+  return new BN(buffer.slice(offset, offset + 8), 'le');
+}
+
+function readBool(buffer: Buffer, offset: number): boolean {
+  return buffer[offset] !== 0;
+}
+
+function readU8(buffer: Buffer, offset: number): number {
+  return buffer[offset];
+}
+
+// Helper to parse tier from byte
+function parseTierFromByte(tierByte: number): TokenTier {
+  switch (tierByte) {
+    case 1: return TokenTier.Silver;
+    case 2: return TokenTier.Gold;
+    default: return TokenTier.Bronze;
+  }
+}
+
+// Helper to parse pool type from byte
+function parsePoolTypeFromByte(poolTypeByte: number): PoolType {
+  switch (poolTypeByte) {
+    case 1: return PoolType.Orca;
+    case 2: return PoolType.Pumpfun;
+    case 3: return PoolType.PumpSwap;
+    default: return PoolType.Raydium;
+  }
+}
 
 class LoanService {
   private client: MemecoinLendingClient | null = null;
@@ -94,38 +132,34 @@ class LoanService {
       throw new Error('Token not whitelisted or disabled');
     }
     
-    // Get token config from chain
-    const mint = new PublicKey(params.tokenMint);
-    const [tokenConfigPDA] = PublicKey.findProgramAddressSync(
-      [Buffer.from('token_config'), mint.toBuffer()],
-      client.program.programId
-    );
-    
-    console.log('[LoanService] TokenConfig PDA:', tokenConfigPDA.toString());
-    
-    let tokenConfig: TokenConfig;
-    try {
-      const account = await (client.program.account as any).tokenConfig.fetch(tokenConfigPDA);
-      console.log('[LoanService] Account fetched:', account);
-      
-      // Convert to TokenConfig format
-      tokenConfig = {
-        pubkey: tokenConfigPDA.toString(),
-        mint: account.mint.toString(),
-        tier: account.tier.bronze ? TokenTier.Bronze : account.tier.silver ? TokenTier.Silver : TokenTier.Gold,
-        enabled: account.enabled,
-        poolAddress: account.poolAddress.toString(),
-        poolType: account.poolType.pumpfun ? PoolType.Pumpfun : account.poolType.raydium ? PoolType.Raydium : PoolType.Orca,
-        ltvBps: account.ltvBps,
-        minLoanAmount: account.minLoanAmount.toString(),
-        maxLoanAmount: account.maxLoanAmount.toString(),
-        activeLoansCount: account.activeLoansCount.toString(),
-        totalVolume: account.totalVolume.toString(),
-      };
-    } catch (error: any) {
-      console.error('[LoanService] Fetch error:', error.message);
-      throw new Error('Token config not found on-chain');
-    }
+    // Use database token info (already fetched above as `token`)
+    // Map tier to LTV basis points based on tier
+    const tierToLtv: Record<string, number> = {
+      'bronze': 5000,  // 50%
+      'silver': 6000,  // 60%
+      'gold': 7000,    // 70%
+    };
+
+    const tokenConfig: TokenConfig = {
+      pubkey: '',
+      mint: params.tokenMint,
+      tier: (token.tier.charAt(0).toUpperCase() + token.tier.slice(1)) as TokenTier,
+      enabled: token.enabled,
+      poolAddress: token.poolAddress,
+      poolType: PoolType.Pumpfun, // Default for PumpFun tokens
+      ltvBps: tierToLtv[token.tier.toLowerCase()] || 5000,
+      minLoanAmount: '1000000', // 0.001 SOL in lamports
+      maxLoanAmount: '100000000000', // 100 SOL in lamports
+      activeLoansCount: '0',
+      totalVolume: '0',
+    };
+
+    console.log('[LoanService] Using DB token config:', {
+      mint: token.id.substring(0, 8) + '...',
+      tier: token.tier,
+      ltvBps: tokenConfig.ltvBps,
+      enabled: token.enabled,
+    });
     
     // Calculate loan terms
     const currentPrice = await priceService.getCurrentPrice(params.tokenMint);

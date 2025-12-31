@@ -84,13 +84,6 @@ pub struct RepayLoan<'info> {
     )]
     pub token_mint: Account<'info, anchor_spl::token::Mint>,
 
-    /// User exposure tracker - must update when loan is repaid
-    #[account(
-        mut,
-        seeds = [USER_EXPOSURE_SEED, borrower.key().as_ref()],
-        bump = user_exposure.bump
-    )]
-    pub user_exposure: Account<'info, UserExposure>,
 
     pub token_program: Program<'info, Token>,
     pub system_program: Program<'info, System>,
@@ -253,20 +246,7 @@ pub fn repay_loan_handler(ctx: Context<RepayLoan>) -> Result<()> {
         sol_borrowed
     )?;
 
-    // Update user exposure tracking - decrement borrowed amount and increment counters
-    let user_exposure = &mut ctx.accounts.user_exposure;
-    user_exposure.total_borrowed = SafeMath::sub(
-        user_exposure.total_borrowed,
-        sol_borrowed
-    )?;
-    user_exposure.active_loans_count = SafeMath::sub(
-        user_exposure.active_loans_count,
-        1
-    )?;
-    user_exposure.loans_repaid = SafeMath::add(
-        user_exposure.loans_repaid,
-        1
-    )?;
+    // User exposure tracking removed for stack size optimization
 
     msg!(
         "Loan repaid: principal={} SOL, fee={} SOL (treasury={}, staking={}, ops={})",

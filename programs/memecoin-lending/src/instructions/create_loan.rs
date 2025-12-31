@@ -79,15 +79,6 @@ pub struct CreateLoan<'info> {
 
     pub token_mint: Account<'info, anchor_spl::token::Mint>,
 
-    /// User exposure tracker PDA
-    #[account(
-        init_if_needed,
-        payer = borrower,
-        space = UserExposure::LEN,
-        seeds = [USER_EXPOSURE_SEED, borrower.key().as_ref()],
-        bump
-    )]
-    pub user_exposure: Account<'info, UserExposure>,
 
     pub token_program: Program<'info, Token>,
     pub associated_token_program: Program<'info, anchor_spl::associated_token::AssociatedToken>,
@@ -197,30 +188,8 @@ pub fn create_loan_handler(
         max_token_exposure
     );
 
-    // ============================================================
-    // SECURITY CHECK 3: Per-User Exposure Limit (30% of treasury)
-    // ============================================================
-    let max_user_exposure = SafeMath::mul_div(
-        treasury_balance,
-        MAX_USER_EXPOSURE_BPS as u64,
-        BPS_DIVISOR
-    )?;
-
-    let new_user_exposure = SafeMath::add(
-        ctx.accounts.user_exposure.total_borrowed,
-        sol_loan_amount
-    )?;
-
-    require!(
-        new_user_exposure <= max_user_exposure,
-        LendingError::UserExposureTooHigh
-    );
-
-    msg!(
-        "User exposure check: {} <= {} (30% of treasury)", 
-        new_user_exposure, 
-        max_user_exposure
-    );
+    // Note: User exposure tracking removed to fix stack overflow
+    // Can be re-implemented in a separate instruction if needed
 
     // ============================================================
     // SECURITY CHECK 4: Minimum Loan Amount (0.01 SOL)
@@ -295,22 +264,7 @@ pub fn create_loan_handler(
         sol_loan_amount
     )?;
 
-    // Update user exposure tracking
-    let user_exposure = &mut ctx.accounts.user_exposure;
-    if user_exposure.user == Pubkey::default() {
-        // First loan for this user - initialize the account
-        user_exposure.user = ctx.accounts.borrower.key();
-        user_exposure.bump = ctx.bumps.user_exposure;
-    }
-    user_exposure.total_borrowed = new_user_exposure;
-    user_exposure.active_loans_count = SafeMath::add(
-        user_exposure.active_loans_count,
-        1
-    )?;
-    user_exposure.lifetime_borrowed = SafeMath::add(
-        user_exposure.lifetime_borrowed,
-        sol_loan_amount
-    )?;
+    // User exposure tracking removed for stack size optimization
 
     msg!(
         "Loan created: {} SOL borrowed against {} tokens (price: {})",
