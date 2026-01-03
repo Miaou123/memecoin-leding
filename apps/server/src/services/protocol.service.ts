@@ -4,7 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import { ProtocolStats } from '@memecoin-lending/types';
 import { MemecoinLendingClient } from '@memecoin-lending/sdk';
-import { PROGRAM_ID, getNetworkConfig, getCurrentNetwork, NetworkType } from '@memecoin-lending/config';
+import { PROGRAM_ID, getNetworkConfig, getCurrentNetwork, getProtocolAddresses, NetworkType } from '@memecoin-lending/config';
 import { prisma } from '../db/client.js';
 
 class ProtocolService {
@@ -174,8 +174,19 @@ class ProtocolService {
   
   async getTreasuryBalance(): Promise<string> {
     const client = await this.getClient();
-    const [treasury] = client.getTreasuryPDA();
     
+    // Get treasury address from deployment file
+    const protocolAddresses = getProtocolAddresses();
+    const treasuryAddress = protocolAddresses.Treasury || protocolAddresses.treasury;
+    
+    if (!treasuryAddress) {
+      console.warn('Treasury address not found in deployment, falling back to derived PDA');
+      const [treasury] = client.getTreasuryPDA();
+      const balance = await client.connection.getBalance(treasury);
+      return balance.toString();
+    }
+    
+    const treasury = new PublicKey(treasuryAddress);
     const balance = await client.connection.getBalance(treasury);
     return balance.toString();
   }

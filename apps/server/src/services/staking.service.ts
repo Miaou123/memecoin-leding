@@ -2,9 +2,9 @@ import { Connection, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { Program, AnchorProvider } from '@coral-xyz/anchor';
 import BN from 'bn.js';
 import { StakingStats, UserStake, DEFAULT_FEE_CONFIG, FeeDistributionConfig } from '@memecoin-lending/types';
-
-// Program ID
-const PROGRAM_ID = new PublicKey('CD2sN1enC22Nyw6U6s2dYcxfbtsLVq2PhbomLBkyh1z5');
+import { getProtocolAddresses } from '@memecoin-lending/config';
+import fs from 'fs';
+import path from 'path';
 
 // Helper functions for reading account data
 function readU64(buffer: Buffer, offset: number): BN {
@@ -31,32 +31,47 @@ class StakingService {
     this.connection = new Connection(rpcUrl, 'confirmed');
   }
   
-  private getStakingPoolPDA(): [PublicKey, number] {
-    return PublicKey.findProgramAddressSync(
-      [Buffer.from('staking_pool')],
-      PROGRAM_ID
-    );
+  private getStakingPoolPDA(): PublicKey {
+    const protocolAddresses = getProtocolAddresses();
+    const stakingPoolAddress = protocolAddresses.stakingPool;
+    
+    if (!stakingPoolAddress) {
+      throw new Error('Staking pool address not found in deployment file');
+    }
+    
+    return new PublicKey(stakingPoolAddress);
   }
   
-  private getRewardVaultPDA(): [PublicKey, number] {
-    return PublicKey.findProgramAddressSync(
-      [Buffer.from('reward_vault')],
-      PROGRAM_ID
-    );
+  private getRewardVaultPDA(): PublicKey {
+    const protocolAddresses = getProtocolAddresses();
+    const rewardVaultAddress = protocolAddresses.rewardVault;
+    
+    if (!rewardVaultAddress) {
+      throw new Error('Reward vault address not found in deployment file');
+    }
+    
+    return new PublicKey(rewardVaultAddress);
   }
   
   private getUserStakePDA(stakingPool: PublicKey, user: PublicKey): [PublicKey, number] {
+    // User stake PDAs still need to be derived since they're user-specific
+    const protocolAddresses = getProtocolAddresses();
+    const programIdStr = Object.keys(protocolAddresses).length > 0 ? 
+      process.env.PROGRAM_ID || process.env.VITE_PROGRAM_ID : 
+      'CD2sN1enC22Nyw6U6s2dYcxfbtsLVq2PhbomLBkyh1z5';
+    
+    const programId = new PublicKey(programIdStr);
     return PublicKey.findProgramAddressSync(
       [Buffer.from('user_stake'), stakingPool.toBuffer(), user.toBuffer()],
-      PROGRAM_ID
+      programId
     );
   }
   
   async getStakingStats(): Promise<StakingStats> {
     try {
-      // Derive PDAs
-      const [stakingPoolPDA] = this.getStakingPoolPDA();
-      const [rewardVaultPDA] = this.getRewardVaultPDA();
+      // Get PDAs from deployment file
+      const stakingPoolPDA = this.getStakingPoolPDA();
+      const rewardVaultPDA = this.getRewardVaultPDA();
       
       // Fetch reward vault SOL balance
       const rewardVaultBalance = await this.connection.getBalance(rewardVaultPDA);
@@ -224,7 +239,7 @@ class StakingService {
       const userPubkey = new PublicKey(address);
       
       // Derive PDAs
-      const [stakingPoolPDA] = this.getStakingPoolPDA();
+      const stakingPoolPDA = this.getStakingPoolPDA();
       const [userStakePDA] = this.getUserStakePDA(stakingPoolPDA, userPubkey);
       
       // Fetch account info
@@ -275,7 +290,7 @@ class StakingService {
       }
       
       // Fetch current staking pool state to get latest rewardPerTokenStored
-      const [stakingPoolPDA] = this.getStakingPoolPDA();
+      const stakingPoolPDA = this.getStakingPoolPDA();
       const stakingPoolAccount = await this.connection.getAccountInfo(stakingPoolPDA);
       
       if (!stakingPoolAccount || !stakingPoolAccount.data) {

@@ -111,6 +111,98 @@ function closeExistingProgram(programId: string, network: string): boolean {
   }
 }
 
+async function syncAppConfigs(network: string, programId: string) {
+  console.log(chalk.gray('  Reading deployment configuration...'));
+  
+  // Read deployment config
+  const deploymentPath = path.join(ROOT_DIR, 'deployments', `${network}-latest.json`);
+  if (!fs.existsSync(deploymentPath)) {
+    throw new Error(`Deployment config not found: ${deploymentPath}`);
+  }
+  
+  const deployment = JSON.parse(fs.readFileSync(deploymentPath, 'utf8'));
+  
+  console.log(chalk.gray('  Updating frontend (.env.local)...'));
+  
+  // Update frontend .env.local
+  const frontendEnvPath = path.join(ROOT_DIR, 'apps', 'web', '.env.local');
+  let frontendEnv = '';
+  
+  if (fs.existsSync(frontendEnvPath)) {
+    frontendEnv = fs.readFileSync(frontendEnvPath, 'utf8');
+  }
+  
+  // Update or add environment variables
+  const envVars = {
+    'VITE_PROGRAM_ID': programId,
+    'VITE_SOLANA_NETWORK': network,
+  };
+  
+  // Add protocol addresses if available
+  if (deployment.pdas?.protocolState) {
+    envVars['VITE_PROTOCOL_STATE'] = deployment.pdas.protocolState;
+  }
+  if (deployment.pdas?.treasury) {
+    envVars['VITE_TREASURY'] = deployment.pdas.treasury;
+  }
+  if (deployment.pdas?.feeReceiver) {
+    envVars['VITE_FEE_RECEIVER'] = deployment.pdas.feeReceiver;
+  }
+  if (deployment.pdas?.stakingPool) {
+    envVars['VITE_STAKING_POOL'] = deployment.pdas.stakingPool;
+  }
+  
+  for (const [key, value] of Object.entries(envVars)) {
+    const regex = new RegExp(`^${key}=.*$`, 'm');
+    if (frontendEnv.match(regex)) {
+      frontendEnv = frontendEnv.replace(regex, `${key}=${value}`);
+    } else {
+      frontendEnv += `\n${key}=${value}`;
+    }
+  }
+  
+  fs.writeFileSync(frontendEnvPath, frontendEnv.trim() + '\n');
+  console.log(chalk.green(`    ✓ Updated ${frontendEnvPath}`));
+  
+  console.log(chalk.gray('  Updating backend (.env)...'));
+  
+  // Update backend .env
+  const serverEnvPath = path.join(ROOT_DIR, 'apps', 'server', '.env');
+  let serverEnv = '';
+  
+  if (fs.existsSync(serverEnvPath)) {
+    serverEnv = fs.readFileSync(serverEnvPath, 'utf8');
+  }
+  
+  // Update backend environment variables
+  const serverEnvVars = {
+    'PROGRAM_ID': `"${programId}"`,
+    'SOLANA_NETWORK': `"${network}"`,
+  };
+  
+  for (const [key, value] of Object.entries(serverEnvVars)) {
+    const regex = new RegExp(`^${key}=.*$`, 'm');
+    if (serverEnv.match(regex)) {
+      serverEnv = serverEnv.replace(regex, `${key}=${value}`);
+    } else {
+      serverEnv += `\n${key}=${value}`;
+    }
+  }
+  
+  fs.writeFileSync(serverEnvPath, serverEnv.trim() + '\n');
+  console.log(chalk.green(`    ✓ Updated ${serverEnvPath}`));
+  
+  console.log(chalk.gray('  Rebuilding packages...'));
+  
+  // Rebuild config package to pick up changes
+  try {
+    exec('pnpm build', { cwd: path.join(ROOT_DIR, 'packages', 'config') });
+    console.log(chalk.green('    ✓ Rebuilt config package'));
+  } catch (error) {
+    console.log(chalk.yellow('    ⚠ Could not rebuild config package'));
+  }
+}
+
 async function deploy(config: DeployConfig) {
   const startTime = Date.now();
   
@@ -310,6 +402,15 @@ async function deploy(config: DeployConfig) {
   }
   history.push(deploymentInfo);
   fs.writeFileSync(historyFile, JSON.stringify(history, null, 2));
+
+  // Step 16: Sync frontend and backend configs
+  console.log(chalk.blue('\n📝 Syncing frontend/backend configs...\n'));
+  try {
+    await syncAppConfigs(config.network, newProgramId);
+    console.log(chalk.green('✅ Frontend and backend configs synced!'));
+  } catch (error) {
+    console.log(chalk.yellow(`⚠️  Could not sync configs: ${error}`));
+  }
 
   // Final deployment status check
   console.log(chalk.blue('\n📊 Deployment Status Summary...\n'));

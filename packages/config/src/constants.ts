@@ -1,7 +1,79 @@
 import { PublicKey } from '@solana/web3.js';
 
+// Function to load deployment config
+function loadDeployment(network: string = 'devnet') {
+  // Don't try to load files in browser
+  if (typeof globalThis !== 'undefined' && (globalThis as any).window) {
+    return null;
+  }
+  
+  try {
+    // Dynamically require modules for Node.js environment
+    const fs = require('fs');
+    const path = require('path');
+    
+    // Try multiple paths to find the deployment file
+    const possiblePaths = [
+      path.join(process.cwd(), 'deployments', `${network}-latest.json`),
+      path.join(process.cwd(), '..', 'deployments', `${network}-latest.json`),
+      path.join(process.cwd(), '../..', 'deployments', `${network}-latest.json`),
+      path.join(__dirname, '../../..', 'deployments', `${network}-latest.json`),
+    ];
+    
+    for (const deploymentPath of possiblePaths) {
+      if (fs.existsSync(deploymentPath)) {
+        const deployment = JSON.parse(fs.readFileSync(deploymentPath, 'utf8'));
+        return deployment;
+      }
+    }
+  } catch (error) {
+    // Silently fail and use fallback
+    console.debug('Could not load deployment config:', error);
+  }
+  return null;
+}
+
+// Function to get program ID with deployment priority
+function getProgramIdForNetwork(network: string = 'devnet'): string {
+  // First try: deployment artifacts
+  const deployment = loadDeployment(network);
+  if (deployment?.programId) {
+    return deployment.programId;
+  }
+  
+  // Second try: environment variable
+  if (process.env.PROGRAM_ID) {
+    return process.env.PROGRAM_ID;
+  }
+  
+  // Third try: VITE environment variable (for frontend)
+  if (process.env.VITE_PROGRAM_ID) {
+    return process.env.VITE_PROGRAM_ID;
+  }
+  
+  // Fallback: hardcoded default
+  return 'CD2sN1enC22Nyw6U6s2dYcxfbtsLVq2PhbomLBkyh1z5';
+}
+
+// Function to get current network
+function getCurrentNetwork(): string {
+  return process.env.SOLANA_NETWORK || process.env.VITE_SOLANA_NETWORK || 'devnet';
+}
+
 // Program constants
-export const PROGRAM_ID = new PublicKey(process.env.PROGRAM_ID || 'CD2sN1enC22Nyw6U6s2dYcxfbtsLVq2PhbomLBkyh1z5');
+const currentNetwork = getCurrentNetwork();
+export const PROGRAM_ID = new PublicKey(getProgramIdForNetwork(currentNetwork));
+
+// Export function to get program ID for any network
+export const getProgramId = (network: string = currentNetwork): string => {
+  return getProgramIdForNetwork(network);
+};
+
+// Export function to get protocol addresses from deployment
+export const getProtocolAddresses = (network: string = currentNetwork) => {
+  const deployment = loadDeployment(network);
+  return deployment?.pdas || {};
+};
 export const PROTOCOL_SEED = Buffer.from('protocol_state');
 export const TREASURY_SEED = Buffer.from('treasury');
 export const TOKEN_CONFIG_SEED = Buffer.from('token_config');
