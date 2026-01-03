@@ -1,136 +1,105 @@
 #!/usr/bin/env tsx
 
-import { config } from 'dotenv';
-import { Connection, Keypair, PublicKey, Transaction, VersionedTransaction } from '@solana/web3.js';
-import { MemecoinLendingClient } from '@memecoin-lending/sdk';
-import { PROGRAM_ID, getNetworkConfig } from '@memecoin-lending/config';
+import { createClient, printHeader, printSuccess, printError, printInfo, printTxLink } from './cli-utils.js';
+import { parseNetworkArg, validateNetwork, getNetworkConfig, updateDeployment } from './config.js';
+import { PublicKey } from '@solana/web3.js';
 import chalk from 'chalk';
 import { Command } from 'commander';
-import fs from 'fs';
-import path from 'path';
-
-import { fileURLToPath } from 'url';
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-config();
-
-// Wallet wrapper for Keypair
-class NodeWallet {
-  constructor(readonly payer: Keypair) {}
-
-  async signTransaction<T extends Transaction | VersionedTransaction>(tx: T): Promise<T> {
-    if ('version' in tx) {
-      (tx as VersionedTransaction).sign([this.payer]);
-    } else {
-      (tx as Transaction).partialSign(this.payer);
-    }
-    return tx;
-  }
-
-  async signAllTransactions<T extends Transaction | VersionedTransaction>(txs: T[]): Promise<T[]> {
-    return txs.map((tx) => {
-      if ('version' in tx) {
-        (tx as VersionedTransaction).sign([this.payer]);
-      } else {
-        (tx as Transaction).partialSign(this.payer);
-      }
-      return tx;
-    });
-  }
-
-  get publicKey(): PublicKey {
-    return this.payer.publicKey;
-  }
-}
 
 const program = new Command();
 
 program
   .name('initialize-protocol')
   .description('Initialize the memecoin lending protocol')
-  .option('-n, --network <network>', 'Network to use', 'devnet')
-  .option('-k, --admin-keypair <path>', 'Path to admin keypair', './keys/admin.json')
-  .option('-a, --admin <address>', 'Admin address (if different from keypair)')
+  .requiredOption('--network <network>', 'Solana network (devnet, mainnet, localnet)')
+  .option('--admin <address>', 'Admin wallet address (defaults to keypair public key)')
+  .option('--buyback-wallet <address>', 'Buyback wallet address (defaults to admin)')
+  .option('--operations-wallet <address>', 'Operations wallet address (defaults to admin)')
+  .option('--admin-keypair <path>', 'Path to admin keypair (defaults to ./keys/admin.json)')
   .action(async (options) => {
     try {
-      console.log(chalk.blue('🔧 Initializing protocol...'));
+      printHeader('Initialize Protocol');
       
-      // Load network configuration
-      process.env.SOLANA_NETWORK = options.network;
-      const networkConfig = getNetworkConfig(options.network);
+      // Validate network
+      validateNetwork(options.network);
+      const config = getNetworkConfig(options.network);
       
-      console.log(chalk.gray(`Network: ${options.network}`));
-      console.log(chalk.gray(`Program ID: ${PROGRAM_ID.toString()}`));
+      printInfo('Network', options.network);
+      printInfo('Program ID', config.programId);
+      printInfo('RPC URL', config.rpcUrl);
       
-      // Create connection
-      const connection = new Connection(networkConfig.rpcUrl, 'confirmed');
+      // Create client
+      const { client, keypair, connection } = await createClient(options.network, options.adminKeypair);
       
-      // Load admin keypair
-      if (!fs.existsSync(options.adminKeypair)) {
-        throw new Error(`Admin keypair not found: ${options.adminKeypair}`);
-      }
+      const adminPubkey = options.admin ? new PublicKey(options.admin) : keypair.publicKey;
+      const buybackWallet = options.buybackWallet ? new PublicKey(options.buybackWallet) : adminPubkey;
+      const operationsWallet = options.operationsWallet ? new PublicKey(options.operationsWallet) : adminPubkey;
       
-      const adminKeypair = Keypair.fromSecretKey(
-        Uint8Array.from(JSON.parse(fs.readFileSync(options.adminKeypair, 'utf8')))
-      );
+      printInfo('Admin', adminPubkey.toString());
+      printInfo('Buyback Wallet', buybackWallet.toString());
+      printInfo('Operations Wallet', operationsWallet.toString());
       
-      console.log(chalk.gray(`Admin: ${adminKeypair.publicKey.toString()}`));
-
-      // Load the actual IDL
-      const idlPath = path.join(__dirname, '../target/idl/memecoin_lending.json');
-      if (!fs.existsSync(idlPath)) {
-        throw new Error(`IDL not found: ${idlPath}`);
-      }
-      const idl = JSON.parse(fs.readFileSync(idlPath, 'utf8'));
-
-      // Create wallet wrapper
-      const wallet = new NodeWallet(adminKeypair);
-
-      const client = new MemecoinLendingClient(
-        connection,
-        wallet,
-        PROGRAM_ID,
-        idl
-      );
+      console.log(chalk.yellow('\\n🔄 Sending transaction...'));
       
       // Initialize protocol
-      console.log(chalk.blue('📝 Initializing protocol state...'));
+      const signature = await client.initializeProtocol(
+        adminPubkey,
+        buybackWallet,
+        operationsWallet
+      );
       
-      const adminAddress = options.admin 
-        ? new PublicKey(options.admin)
-        : adminKeypair.publicKey;
+      printSuccess(`Protocol initialized!`);
+      printInfo('Transaction', signature);
+      printTxLink(signature, options.network);
       
-      const txSignature = await client.initializeProtocol(adminAddress);
-      
-      console.log(chalk.green('✅ Protocol initialized!'));
-      console.log(chalk.gray(`Transaction: ${txSignature}`));
-      console.log(chalk.gray(`Admin: ${adminAddress.toString()}`));
-      
-      // Get protocol state to confirm
+      // Check protocol state and derive PDAs
+      console.log(chalk.yellow('\\n📊 Verifying protocol state...'));
       const protocolState = await client.getProtocolState();
-      console.log(chalk.green('📊 Protocol State:'));
-      console.log(chalk.gray(`  Admin: ${protocolState.admin}`));
-      console.log(chalk.gray(`  Paused: ${protocolState.paused}`));
-      console.log(chalk.gray(`  Treasury Balance: ${protocolState.treasuryBalance} lamports`));
       
-      // Get PDAs for reference
-      const [protocolStatePDA] = client.getProtocolStatePDA();
-      const [treasuryPDA] = client.getTreasuryPDA();
+      // Derive protocol PDAs
+      const [protocolStatePda] = PublicKey.findProgramAddressSync(
+        [Buffer.from('protocol_state')],
+        new PublicKey(config.programId)
+      );
       
-      console.log(chalk.blue('📍 Important Addresses:'));
-      console.log(chalk.gray(`  Protocol State: ${protocolStatePDA.toString()}`));
-      console.log(chalk.gray(`  Treasury: ${treasuryPDA.toString()}`));
+      const [treasuryPda] = PublicKey.findProgramAddressSync(
+        [Buffer.from('treasury')],
+        new PublicKey(config.programId)
+      );
       
-      console.log(chalk.green('\n✅ Protocol initialization completed!'));
-      console.log(chalk.gray('Next steps:'));
-      console.log(chalk.gray('1. Run whitelist-token to add supported memecoins'));
-      console.log(chalk.gray('2. Run fund-treasury to add initial liquidity'));
+      printInfo('Protocol Admin', protocolState.admin.toString());
+      printInfo('Buyback Wallet', protocolState.buybackWallet.toString());
+      printInfo('Operations Wallet', protocolState.operationsWallet.toString());
+      printInfo('Protocol Fee', `${protocolState.protocolFeeBps / 100}%`);
+      printInfo('Paused', protocolState.paused.toString());
+      
+      // Save initialization info to deployment config
+      console.log(chalk.yellow('\\n💾 Updating deployment config...'));
+      updateDeployment(options.network, {
+        pdas: {
+          protocolState: protocolStatePda.toString(),
+          treasury: treasuryPda.toString(),
+        },
+        initialization: {
+          protocol: {
+            txSignature: signature,
+            timestamp: new Date().toISOString(),
+            admin: adminPubkey.toString(),
+          }
+        }
+      });
+      
+      printSuccess('Deployment config updated with protocol addresses');
+      printInfo('Protocol State PDA', protocolStatePda.toString());
+      printInfo('Treasury PDA', treasuryPda.toString());
+      
+      console.log(chalk.green('\\n✅ Protocol initialization complete!'));
       
     } catch (error) {
-      console.error(chalk.red('❌ Initialization failed:'), error);
+      printError(`Failed to initialize protocol: ${error instanceof Error ? error.message : String(error)}`);
       process.exit(1);
     }
   });
 
-program.parse();
+// Parse command line arguments
+program.parse(process.argv);

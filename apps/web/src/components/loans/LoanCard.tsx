@@ -1,7 +1,7 @@
 import { Show, createMemo } from 'solid-js';
 import { Button } from '@/components/ui/Button';
 import { TokenImage } from '@/components/tokens/TokenImage';
-import { formatSOL, formatNumber, formatPercentage } from '@/lib/utils';
+import { formatSOL, formatNumber } from '@/lib/utils';
 import { Loan, LoanStatus } from '@memecoin-lending/types';
 
 interface TokenMetadata {

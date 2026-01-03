@@ -9,7 +9,7 @@ pub mod events;
 
 use instructions::*;
 
-declare_id!("CD2sN1enC22Nyw6U6s2dYcxfbtsLVq2PhbomLBkyh1z5");
+declare_id!("65HMkr2uRgeiPQmC1uCtojsnfKcbCynsWGK3snnw8urs");
 
 #[program]
 pub mod memecoin_lending {

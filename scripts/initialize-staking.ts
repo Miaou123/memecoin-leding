@@ -1,49 +1,12 @@
 #!/usr/bin/env tsx
 
-import { config } from 'dotenv';
-import { Connection, Keypair, PublicKey, Transaction, VersionedTransaction, LAMPORTS_PER_SOL } from '@solana/web3.js';
-import { Program, AnchorProvider, Wallet } from '@coral-xyz/anchor';
+import { createClient, printHeader, printSuccess, printError, printInfo, printTxLink } from './cli-utils.js';
+import { validateNetwork, getNetworkConfig, updateDeployment } from './config.js';
+import { PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import BN from 'bn.js';
-import { PROGRAM_ID, getNetworkConfig } from '@memecoin-lending/config';
 import chalk from 'chalk';
 import { Command } from 'commander';
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-config();
-
-// Load IDL
-const IDL_PATH = path.join(__dirname, '../target/idl/memecoin_lending.json');
-
-// Wallet wrapper
-class NodeWallet {
-  constructor(readonly payer: Keypair) {}
-  async signTransaction<T extends Transaction | VersionedTransaction>(tx: T): Promise<T> {
-    if ('version' in tx) {
-      (tx as VersionedTransaction).sign([this.payer]);
-    } else {
-      (tx as Transaction).partialSign(this.payer);
-    }
-    return tx;
-  }
-  async signAllTransactions<T extends Transaction | VersionedTransaction>(txs: T[]): Promise<T[]> {
-    return txs.map((tx) => {
-      if ('version' in tx) {
-        (tx as VersionedTransaction).sign([this.payer]);
-      } else {
-        (tx as Transaction).partialSign(this.payer);
-      }
-      return tx;
-    });
-  }
-  get publicKey(): PublicKey {
-    return this.payer.publicKey;
-  }
-}
 
 const program = new Command();
 
@@ -59,8 +22,7 @@ program
   .option('--min-rate <lamports>', 'Min emission rate (lamports/second)', '100000')
   .action(async (options) => {
     try {
-      console.log(chalk.blue.bold('\n🎯 INITIALIZE STAKING POOL\n'));
-      console.log(chalk.gray('─'.repeat(50)));
+      printHeader('Initialize Staking Pool');
       
       // Validate token mint
       let stakingTokenMint: PublicKey;
@@ -70,46 +32,31 @@ program
         throw new Error(`Invalid token mint address: ${options.tokenMint}`);
       }
       
-      // Load config
-      process.env.SOLANA_NETWORK = options.network;
-      const networkConfig = getNetworkConfig(options.network);
+      // Validate network
+      validateNetwork(options.network);
+      const config = getNetworkConfig(options.network);
       
-      console.log(chalk.white(`  Network:     ${options.network}`));
-      console.log(chalk.white(`  Token Mint:  ${stakingTokenMint.toString()}`));
-      console.log(chalk.gray('─'.repeat(50)));
+      printInfo('Network', options.network);
+      printInfo('Program ID', config.programId);
+      printInfo('Token Mint', stakingTokenMint.toString());
       
-      // Create connection
-      const connection = new Connection(networkConfig.rpcUrl, 'confirmed');
+      // Create client
+      const { client, keypair } = await createClient(options.network, options.adminKeypair);
       
-      // Load admin keypair
-      if (!fs.existsSync(options.adminKeypair)) {
-        throw new Error(`Admin keypair not found: ${options.adminKeypair}`);
-      }
-      const adminKeypair = Keypair.fromSecretKey(
-        Uint8Array.from(JSON.parse(fs.readFileSync(options.adminKeypair, 'utf8')))
-      );
-      
-      console.log(chalk.gray(`  Admin: ${adminKeypair.publicKey.toString()}`));
-      
-      // Create provider and program
-      const wallet = new NodeWallet(adminKeypair);
-      const provider = new AnchorProvider(connection, wallet, { commitment: 'confirmed' });
-      
-      const idl = JSON.parse(fs.readFileSync(IDL_PATH, 'utf8'));
-      const programClient = new Program(idl, provider);
+      printInfo('Admin', keypair.publicKey.toString());
       
       // Derive PDAs
       const [stakingPool] = PublicKey.findProgramAddressSync(
         [Buffer.from('staking_pool')],
-        PROGRAM_ID
+        new PublicKey(config.programId)
       );
       const [stakingVaultAuthority] = PublicKey.findProgramAddressSync(
         [Buffer.from('staking_vault')],
-        PROGRAM_ID
+        new PublicKey(config.programId)
       );
       const [rewardVault] = PublicKey.findProgramAddressSync(
         [Buffer.from('reward_vault')],
-        PROGRAM_ID
+        new PublicKey(config.programId)
       );
       
       // Get associated token address for staking vault
@@ -120,10 +67,9 @@ program
         true
       );
       
-      console.log(chalk.blue('\n📍 PDAs:'));
-      console.log(chalk.gray(`  Staking Pool:   ${stakingPool.toString()}`));
-      console.log(chalk.gray(`  Staking Vault:  ${stakingVault.toString()}`));
-      console.log(chalk.gray(`  Reward Vault:   ${rewardVault.toString()}`));
+      printInfo('Staking Pool PDA', stakingPool.toString());
+      printInfo('Staking Vault', stakingVault.toString());
+      printInfo('Reward Vault', rewardVault.toString());
       
       // Parse emission parameters
       const targetPoolBalance = new BN(parseFloat(options.targetBalance) * LAMPORTS_PER_SOL);
@@ -137,54 +83,44 @@ program
       console.log(chalk.gray(`  Max Rate:        ${options.maxRate} lamports/sec`));
       console.log(chalk.gray(`  Min Rate:        ${options.minRate} lamports/sec`));
       
-      // Check if already initialized
-      try {
-        await programClient.account.stakingPool.fetch(stakingPool);
-        console.log(chalk.yellow('\n⚠️  Staking pool already initialized!'));
-        return;
-      } catch {
-        // Not initialized, continue
-      }
-      
-      console.log(chalk.yellow('\n⏳ Initializing staking pool...'));
+      console.log(chalk.yellow('\n🔄 Sending transaction...'));
       
       // Initialize staking
-      const tx = await programClient.methods
-        .initializeStaking(
-          targetPoolBalance,
-          baseEmissionRate,
-          maxEmissionRate,
-          minEmissionRate
-        )
-        .accounts({
-          stakingPool,
-          stakingTokenMint,
-          stakingVault,
-          stakingVaultAuthority,
-          rewardVault,
-          authority: adminKeypair.publicKey,
-          tokenProgram: new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'),
-          associatedTokenProgram: new PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL'),
-          systemProgram: new PublicKey('11111111111111111111111111111111'),
-        })
-        .rpc();
+      const signature = await client.initializeStaking(
+        stakingTokenMint,
+        targetPoolBalance,
+        baseEmissionRate,
+        maxEmissionRate,
+        minEmissionRate
+      );
       
-      console.log(chalk.green('\n✅ Staking pool initialized successfully!'));
-      console.log(chalk.gray(`  Transaction: ${tx}`));
-      console.log(chalk.cyan(`  Explorer: https://explorer.solana.com/tx/${tx}?cluster=${options.network}`));
+      printSuccess('Staking pool initialized successfully!');
+      printInfo('Transaction', signature);
+      printTxLink(signature, options.network);
       
-      console.log(chalk.blue('\n📋 Next Steps:'));
-      console.log(chalk.gray('  1. Run initialize-fee-receiver to set up creator fee distribution'));
-      console.log(chalk.gray('  2. Run update-fees to set protocol fee to 2%'));
-      console.log(chalk.gray('  3. Set fee_receiver PDA as PumpFun creator fee recipient'));
-      console.log('');
+      // Update deployment config with staking info
+      console.log(chalk.yellow('\n💾 Updating deployment config...'));
+      updateDeployment(options.network, {
+        pdas: {
+          stakingPool: stakingPool.toString(),
+          stakingVault: stakingVault.toString(),
+          rewardVault: rewardVault.toString(),
+        },
+        initialization: {
+          staking: {
+            txSignature: signature,
+            timestamp: new Date().toISOString(),
+            tokenMint: stakingTokenMint.toString(),
+          }
+        }
+      });
+      
+      printSuccess('Deployment config updated with staking addresses');
+      
+      console.log(chalk.green('\n✅ Staking pool initialization complete!'));
       
     } catch (error: any) {
-      console.error(chalk.red('\n❌ Failed to initialize staking:'), error.message);
-      if (error.logs) {
-        console.error(chalk.gray('\nProgram logs:'));
-        error.logs.forEach((log: string) => console.error(chalk.gray(`  ${log}`)));
-      }
+      printError(`Failed to initialize staking: ${error instanceof Error ? error.message : String(error)}`);
       process.exit(1);
     }
   });

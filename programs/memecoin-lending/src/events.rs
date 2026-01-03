@@ -45,7 +45,7 @@ pub struct LoanLiquidated {
     pub loan: Pubkey,
     pub borrower: Pubkey,
     pub liquidator: Pubkey,
-    pub reason: String, // "time" or "price"
+    pub reason: u8, // 0 = time, 1 = price
     pub collateral_amount: u64,
     pub sol_proceeds: u64,
     pub current_price: u64,

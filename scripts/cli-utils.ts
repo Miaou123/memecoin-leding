@@ -2,7 +2,7 @@
 
 import { Connection, Keypair, PublicKey, Transaction, VersionedTransaction, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { MemecoinLendingClient } from '@memecoin-lending/sdk';
-import { PROGRAM_ID, getNetworkConfig } from '@memecoin-lending/config';
+import { getProgramId, getRpcUrl, getAdminKeypair, getNetworkConfig } from './config.js';
 import chalk from 'chalk';
 import fs from 'fs';
 import path from 'path';
@@ -71,24 +71,43 @@ export function loadIdl(): any {
 // Create SDK client
 export async function createClient(
   network: string,
-  keypairPath: string
+  keypairPath?: string
 ): Promise<{ client: MemecoinLendingClient; keypair: Keypair; connection: Connection }> {
-  process.env.SOLANA_NETWORK = network;
-  const networkConfig = getNetworkConfig(network);
-  const connection = new Connection(networkConfig.rpcUrl, 'confirmed');
+  const config = getNetworkConfig(network);
+  const connection = new Connection(config.rpcUrl, 'confirmed');
   
-  const keypair = loadKeypair(keypairPath);
+  const keypair = keypairPath ? loadKeypair(keypairPath) : getAdminKeypair();
   const wallet = new NodeWallet(keypair);
   const idl = loadIdl();
   
   const client = new MemecoinLendingClient(
     connection,
     wallet,
-    PROGRAM_ID,
+    new PublicKey(config.programId),
     idl
   );
   
   return { client, keypair, connection };
+}
+
+// Create connection for a specific network
+export function createConnection(network: string): Connection {
+  const rpcUrl = getRpcUrl(network);
+  return new Connection(rpcUrl, 'confirmed');
+}
+
+// Create program instance
+export function createProgram(network: string, wallet: any): any {
+  const config = getNetworkConfig(network);
+  const connection = createConnection(network);
+  const idl = loadIdl();
+  
+  return new MemecoinLendingClient(
+    connection,
+    wallet,
+    new PublicKey(config.programId),
+    idl
+  );
 }
 
 // Format SOL amount

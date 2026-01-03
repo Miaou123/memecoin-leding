@@ -170,6 +170,50 @@ export class MemecoinLendingClient {
     return instructions.updateWallets(this.program, params);
   }
 
+  async initializeStaking(
+    stakingTokenMint: PublicKey,
+    targetPoolBalance: BN,
+    baseEmissionRate: BN,
+    maxEmissionRate: BN,
+    minEmissionRate: BN
+  ): Promise<TransactionSignature> {
+    return instructions.initializeStaking(
+      this.program,
+      stakingTokenMint,
+      targetPoolBalance,
+      baseEmissionRate,
+      maxEmissionRate,
+      minEmissionRate
+    );
+  }
+
+  async initializeFeeReceiver(
+    treasuryWallet: PublicKey,
+    operationsWallet: PublicKey,
+    treasurySplitBps: number,
+    stakingSplitBps: number,
+    operationsSplitBps: number
+  ): Promise<TransactionSignature> {
+    return instructions.initializeFeeReceiver(
+      this.program,
+      treasuryWallet,
+      operationsWallet,
+      treasurySplitBps,
+      stakingSplitBps,
+      operationsSplitBps
+    );
+  }
+
+  async updateStakingConfig(params: {
+    targetPoolBalance?: BN;
+    baseEmissionRate?: BN;
+    maxEmissionRate?: BN;
+    minEmissionRate?: BN;
+    paused?: boolean;
+  }): Promise<TransactionSignature> {
+    return instructions.updateStakingConfig(this.program, params);
+  }
+
   // Account fetchers
   async getProtocolState(): Promise<ProtocolState> {
     return accounts.getProtocolState(this.program);

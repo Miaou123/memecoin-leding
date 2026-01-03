@@ -5,6 +5,7 @@ import fs from 'fs';
 import path from 'path';
 import chalk from 'chalk';
 import { Command } from 'commander';
+import { createInitialDeployment, saveDeploymentConfig, getCurrentProgramId, getRpcUrl, getDeploymentStatus } from './config.js';
 
 import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
@@ -213,12 +214,28 @@ async function deploy(config: DeployConfig) {
     console.log(chalk.red('  ✗ Could not verify deployment'));
   }
 
+  // Step 9.5: Save deployment configuration
+  console.log(chalk.blue('\n💾 Saving deployment configuration...\n'));
+  try {
+    const deploymentConfig = createInitialDeployment({
+      network: config.network,
+      programId: newProgramId,
+      deploySignature: 'TBD', // Will be updated when we get the actual signature
+      deployerAddress: 'TBD', // Will be updated with admin address
+    });
+    
+    saveDeploymentConfig(config.network, deploymentConfig);
+    console.log(chalk.green('  ✓ Deployment configuration saved'));
+  } catch (error) {
+    console.log(chalk.yellow(`  ⚠ Could not save deployment config: ${error}`));
+  }
+
   // Step 10: Initialize protocol
   if (!config.skipInit) {
     console.log(chalk.blue('\n🔧 Initializing protocol...\n'));
     try {
-      exec(`npx tsx initialize-protocol.ts --network ${config.network}`, {
-        cwd: path.join(ROOT_DIR, 'scripts'),
+      exec(`npx tsx scripts/initialize-protocol.ts --network ${config.network}`, {
+        cwd: ROOT_DIR,
       });
     } catch (error) {
       console.log(chalk.yellow('  ⚠ Protocol may already be initialized'));
@@ -229,8 +246,8 @@ async function deploy(config: DeployConfig) {
   if (config.stakingTokenMint) {
     console.log(chalk.blue('\n🎯 Initializing staking pool...\n'));
     try {
-      exec(`npx tsx initialize-staking.ts --network ${config.network} --token-mint ${config.stakingTokenMint}`, {
-        cwd: path.join(ROOT_DIR, 'scripts'),
+      exec(`npx tsx scripts/initialize-staking.ts --network ${config.network} --token-mint ${config.stakingTokenMint}`, {
+        cwd: ROOT_DIR,
       });
     } catch (error) {
       console.log(chalk.yellow('  ⚠ Staking pool initialization failed or already initialized'));
@@ -240,8 +257,8 @@ async function deploy(config: DeployConfig) {
   // Step 12: Initialize Fee Receiver
   console.log(chalk.blue('\n💰 Initializing fee receiver...\n'));
   try {
-    exec(`npx tsx initialize-fee-receiver.ts --network ${config.network}`, {
-      cwd: path.join(ROOT_DIR, 'scripts'),
+    exec(`npx tsx scripts/initialize-fee-receiver.ts --network ${config.network}`, {
+      cwd: ROOT_DIR,
     });
   } catch (error) {
     console.log(chalk.yellow('  ⚠ Fee receiver initialization failed or already initialized'));
@@ -250,8 +267,8 @@ async function deploy(config: DeployConfig) {
   // Step 13: Update Protocol Fee to 2%
   console.log(chalk.blue('\n⚙️  Setting protocol fee to 2%...\n'));
   try {
-    exec(`npx tsx update-protocol-fees.ts --network ${config.network} --protocol-fee 200`, {
-      cwd: path.join(ROOT_DIR, 'scripts'),
+    exec(`npx tsx scripts/update-protocol-fees.ts --network ${config.network} --protocol-fee 200`, {
+      cwd: ROOT_DIR,
     });
   } catch (error) {
     console.log(chalk.yellow('  ⚠ Fee update failed'));
@@ -261,8 +278,8 @@ async function deploy(config: DeployConfig) {
   if (config.fundAmount > 0) {
     console.log(chalk.blue(`\n💰 Funding treasury with ${config.fundAmount} SOL...\n`));
     try {
-      exec(`npx tsx fund-treasury.ts --network ${config.network} --amount ${config.fundAmount}`, {
-        cwd: path.join(ROOT_DIR, 'scripts'),
+      exec(`npx tsx scripts/fund-treasury.ts --network ${config.network} --amount ${config.fundAmount}`, {
+        cwd: ROOT_DIR,
       });
     } catch (error) {
       console.log(chalk.yellow('  ⚠ Could not fund treasury'));
@@ -294,6 +311,20 @@ async function deploy(config: DeployConfig) {
   history.push(deploymentInfo);
   fs.writeFileSync(historyFile, JSON.stringify(history, null, 2));
 
+  // Final deployment status check
+  console.log(chalk.blue('\n📊 Deployment Status Summary...\n'));
+  try {
+    const status = getDeploymentStatus(config.network);
+    console.log(chalk.white(`  Program Deployed:      ${status.deployed ? '✅' : '❌'}`));
+    console.log(chalk.white(`  Protocol Initialized:  ${status.protocolInitialized ? '✅' : '❌'}`));
+    console.log(chalk.white(`  Fee Receiver Setup:    ${status.feeReceiverInitialized ? '✅' : '❌'}`));
+    console.log(chalk.white(`  Staking Initialized:   ${status.stakingInitialized ? '✅' : '❌'}`));
+    console.log(chalk.white(`  Treasury Funded:       ${status.treasuryFunded ? '✅' : '❌'}`));
+    console.log(chalk.white(`  Whitelisted Tokens:    ${status.whitelistedTokensCount}`));
+  } catch (error) {
+    console.log(chalk.yellow(`  Could not check status: ${error}`));
+  }
+
   // Summary
   const duration = ((Date.now() - startTime) / 1000).toFixed(1);
   
@@ -304,7 +335,6 @@ async function deploy(config: DeployConfig) {
   console.log(chalk.white(`  Program ID:    ${newProgramId}`));
   console.log(chalk.white(`  Network:       ${config.network}`));
   console.log(chalk.white(`  Duration:      ${duration}s`));
-  console.log(chalk.white(`  Deployment:    ${deploymentFile}`));
   console.log('');
   console.log(chalk.gray('  Explorer:'));
   console.log(chalk.cyan(`  https://explorer.solana.com/address/${newProgramId}?cluster=${config.network}`));

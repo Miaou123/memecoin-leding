@@ -1,49 +1,12 @@
 #!/usr/bin/env tsx
 
-import { config } from 'dotenv';
-import { Connection, Keypair, PublicKey, Transaction, VersionedTransaction } from '@solana/web3.js';
-import { MemecoinLendingClient } from '@memecoin-lending/sdk';
-import { PROGRAM_ID, getNetworkConfig } from '@memecoin-lending/config';
+import { createClient, printHeader, printSuccess, printError, printInfo, printTxLink } from './cli-utils.js';
+import { validateNetwork, getNetworkConfig, updateDeployment } from './config.js';
+import { PublicKey } from '@solana/web3.js';
 import chalk from 'chalk';
 import { Command } from 'commander';
-import fs from 'fs';
-import path from 'path';
 import BN from 'bn.js';
 
-import { fileURLToPath } from 'url';
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-config();
-
-// Wallet wrapper for Keypair
-class NodeWallet {
-  constructor(readonly payer: Keypair) {}
-
-  async signTransaction<T extends Transaction | VersionedTransaction>(tx: T): Promise<T> {
-    if ('version' in tx) {
-      (tx as VersionedTransaction).sign([this.payer]);
-    } else {
-      (tx as Transaction).partialSign(this.payer);
-    }
-    return tx;
-  }
-
-  async signAllTransactions<T extends Transaction | VersionedTransaction>(txs: T[]): Promise<T[]> {
-    return txs.map((tx) => {
-      if ('version' in tx) {
-        (tx as VersionedTransaction).sign([this.payer]);
-      } else {
-        (tx as Transaction).partialSign(this.payer);
-      }
-      return tx;
-    });
-  }
-
-  get publicKey(): PublicKey {
-    return this.payer.publicKey;
-  }
-}
 
 const program = new Command();
 
@@ -59,41 +22,19 @@ program
   .option('--protocol-token', 'Mark as protocol token (always 50% LTV)')
   .action(async (options) => {
     try {
-      console.log(chalk.blue('📝 Whitelisting token(s)...'));
+      printHeader('Whitelist Token');
       
-      process.env.SOLANA_NETWORK = options.network;
-      const networkConfig = getNetworkConfig(options.network);
+      // Validate network and options
+      validateNetwork(options.network);
+      const config = getNetworkConfig(options.network);
       
-      console.log(chalk.gray(`Network: ${options.network}`));
+      printInfo('Network', options.network);
+      printInfo('Program ID', config.programId);
       
-      const connection = new Connection(networkConfig.rpcUrl, 'confirmed');
+      // Create client
+      const { client, keypair } = await createClient(options.network, options.adminKeypair);
       
-      if (!fs.existsSync(options.adminKeypair)) {
-        throw new Error(`Admin keypair not found: ${options.adminKeypair}`);
-      }
-      
-      const adminKeypair = Keypair.fromSecretKey(
-        Uint8Array.from(JSON.parse(fs.readFileSync(options.adminKeypair, 'utf8')))
-      );
-      
-      console.log(chalk.gray(`Admin: ${adminKeypair.publicKey.toString()}`));
-      
-      // Load the actual IDL
-      const idlPath = path.join(__dirname, '../target/idl/memecoin_lending.json');
-      if (!fs.existsSync(idlPath)) {
-        throw new Error(`IDL not found: ${idlPath}`);
-      }
-      const idl = JSON.parse(fs.readFileSync(idlPath, 'utf8'));
-
-      // Create wallet wrapper
-      const wallet = new NodeWallet(adminKeypair);
-
-      const client = new MemecoinLendingClient(
-        connection,
-        wallet,
-        PROGRAM_ID,
-        idl
-      );
+      printInfo('Admin', keypair.publicKey.toString());
       
       if (!options.mint || !options.tier) {
         console.log(chalk.yellow('Usage:'));
@@ -127,24 +68,58 @@ program
       
       const tier = tierMap[options.tier.toLowerCase()];
       const poolType = poolTypeMap[options.poolType?.toLowerCase() || 'pumpfun'] ?? 2;
+      const mint = new PublicKey(options.mint);
+      const poolAddress = new PublicKey(options.pool || options.mint);
       
-      console.log(chalk.blue(`\n📝 Whitelisting token...`));
-      console.log(chalk.gray(`  Mint: ${options.mint}`));
-      console.log(chalk.gray(`  Tier: ${options.tier} (${tier})`));
-      console.log(chalk.gray(`  Pool Type: ${options.poolType || 'pumpfun'} (${poolType})`));
+      printInfo('Token Mint', options.mint);
+      printInfo('Tier', `${options.tier} (${tier})`);
+      printInfo('Pool Type', `${options.poolType || 'pumpfun'} (${poolType})`);
+      printInfo('Pool Address', poolAddress.toString());
+      if (options.protocolToken) {
+        printInfo('Protocol Token', 'Yes (50% LTV override)');
+      }
       
-      const txSignature = await client.whitelistToken({
-        mint: new PublicKey(options.mint),
+      console.log(chalk.yellow('\n🔄 Sending transaction...'));
+      
+      const signature = await client.whitelistToken({
+        mint: mint,
         tier: tier,
-        poolAddress: new PublicKey(options.pool || options.mint),
+        poolAddress: poolAddress,
         poolType: poolType,
         minLoanAmount: new BN(1000000),      // 0.001 SOL min
         maxLoanAmount: new BN(100000000000), // 100 SOL max
         isProtocolToken: options.protocolToken ?? false,
       });
       
-      console.log(chalk.green('\n✅ Token whitelisted successfully!'));
-      console.log(chalk.gray(`Transaction: ${txSignature}`));
+      printSuccess('Token whitelisted successfully!');
+      printInfo('Transaction', signature);
+      printTxLink(signature, options.network);
+      
+      // Derive token config PDA for saving
+      const [configPda] = PublicKey.findProgramAddressSync(
+        [Buffer.from('token_config'), mint.toBuffer()],
+        new PublicKey(config.programId)
+      );
+      
+      // Update deployment config with token info
+      console.log(chalk.yellow('\n💾 Updating deployment config...'));
+      updateDeployment(options.network, {
+        tokens: {
+          whitelisted: [{
+            mint: mint.toString(),
+            symbol: options.mint.slice(0, 8) + '...', // Truncated for display
+            tier: options.tier.toLowerCase() as 'bronze' | 'silver' | 'gold',
+            configPda: configPda.toString(),
+            whitelistedAt: new Date().toISOString(),
+            txSignature: signature,
+            poolAddress: poolAddress.toString(),
+            poolType: options.poolType || 'pumpfun',
+            isProtocolToken: options.protocolToken ?? false,
+          }]
+        }
+      });
+      
+      printSuccess('Deployment config updated with token information');
       
       // Show tier info
       const tierInfo: Record<number, { ltv: string; liquidityReq: string }> = {
@@ -153,13 +128,15 @@ program
         2: { ltv: '50%', liquidityReq: '> $300k' },
       };
       
-      console.log(chalk.blue('\n📊 Token Config:'));
+      console.log(chalk.blue('\n📊 Token Configuration:'));
       const actualLtv = options.protocolToken ? '50%' : tierInfo[tier].ltv;
       console.log(chalk.gray(`  LTV: ${actualLtv}${options.protocolToken ? ' (Protocol Token)' : ` (${tierInfo[tier].liquidityReq})`}`));
       console.log(chalk.gray(`  Protocol Fee: 2% flat`));
       
+      console.log(chalk.green('\n✅ Token whitelisting complete!'));
+      
     } catch (error) {
-      console.error(chalk.red('❌ Whitelisting failed:'), error);
+      printError(`Failed to whitelist token: ${error instanceof Error ? error.message : String(error)}`);
       process.exit(1);
     }
   });
