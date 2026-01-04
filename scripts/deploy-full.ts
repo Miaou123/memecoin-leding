@@ -351,7 +351,7 @@ async function deploy(config: DeployConfig) {
   if (config.stakingTokenMint) {
     console.log(chalk.blue('\n🎯 Initializing staking pool...\n'));
     try {
-      exec(`npx tsx scripts/initialize-staking.ts --network ${config.network} --token-mint ${config.stakingTokenMint}`, {
+      exec(`npx tsx scripts/initialize-staking-epoch.ts --network ${config.network} --token-mint ${config.stakingTokenMint}`, {
         cwd: ROOT_DIR,
       });
     } catch (error) {

@@ -87,6 +87,9 @@ export async function buildStakeTransaction(
   transaction.recentBlockhash = blockhash;
   transaction.feePayer = user;
   
+  // Explicitly set signers
+  transaction.setSigners(user);
+  
   return transaction;
 }
 
@@ -129,6 +132,9 @@ export async function buildUnstakeTransaction(
   transaction.recentBlockhash = blockhash;
   transaction.feePayer = user;
   
+  // Explicitly set signers
+  transaction.setSigners(user);
+  
   return transaction;
 }
 
@@ -162,6 +168,9 @@ export async function buildClaimRewardsTransaction(
   const { blockhash } = await connection.getLatestBlockhash();
   transaction.recentBlockhash = blockhash;
   transaction.feePayer = user;
+  
+  // Explicitly set signers
+  transaction.setSigners(user);
   
   return transaction;
 }

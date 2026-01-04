@@ -65,7 +65,7 @@ class DistributionCrankService {
     
     try {
       // Load admin wallet
-      const walletPath = process.env.ADMIN_WALLET_PATH || './keys/admin.json';
+      const walletPath = process.env.ADMIN_WALLET_PATH || '../../keys/admin.json';
       
       if (!fs.existsSync(walletPath)) {
         console.warn('⚠️ Admin keypair not found at', walletPath);
@@ -99,7 +99,6 @@ class DistributionCrankService {
         path.join(process.cwd(), 'target/idl/memecoin_lending.json'),
         path.join(process.cwd(), '../../target/idl/memecoin_lending.json'),
         path.join(process.cwd(), '../..', 'target/idl/memecoin_lending.json'),
-        path.join(__dirname, '../../../target/idl/memecoin_lending.json'),
       ].filter(Boolean);
       
       let idl;

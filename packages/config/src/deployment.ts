@@ -1,5 +1,5 @@
 // @ts-ignore: Import JSON files directly
-import devnetConfig from '../../../deployments/devnet.json';
+import devnetConfig from '../../../deployments/devnet-latest.json';
 // @ts-ignore: Import JSON files directly  
 import mainnetConfig from '../../../deployments/mainnet.json';
 
@@ -9,21 +9,38 @@ export interface DeploymentConfig {
   network: string;
   programId: string;
   deployedAt: string;
-  protocol?: {
+  previousProgramId?: string;
+  fundAmount?: number;
+  cluster?: string;
+  pdas?: {
     protocolState: string;
     treasury: string;
+    feeReceiver: string;
+    stakingPool: string;
+    stakingVault: string;
+    rewardVault: string;
   };
   staking?: {
-    stakingPool: string;
-    stakingTokenMint: string;
-    stakingVault: string;
-    stakingVaultAuthority: string;
-    rewardVault: string;
-    updatedAt: string;
+    stakingTokenMint?: string;
+    stakingPool?: string;
+    stakingVault?: string;
+    rewardVault?: string;
+    stakingVaultAuthority?: string;
+    updatedAt?: string;
   };
+  initialization?: {
+    protocol?: any;
+    feeReceiver?: any;
+    staking?: any;
+    treasury?: any;
+  };
+  tokens?: {
+    whitelisted: any[];
+  };
+  metadata?: any;
   feeReceiver?: {
-    address: string;
-    initializedAt: string;
+    address?: string;
+    initializedAt?: string;
   };
 }
 

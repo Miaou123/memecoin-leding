@@ -91,6 +91,14 @@ program
             stakingVault: stakingPool.stakingVault?.toString?.() ?? String(stakingPool.stakingVault),
             rewardVault: stakingPool.rewardVault?.toString?.() ?? String(stakingPool.rewardVault),
           },
+          // Top-level staking config (for frontend/SDK)
+          staking: {
+            stakingTokenMint: tokenMint.toString(),
+            stakingPool: stakingPoolPDA.toString(),
+            stakingVault: stakingPool.stakingVault?.toString?.() ?? String(stakingPool.stakingVault),
+            rewardVault: stakingPool.rewardVault?.toString?.() ?? String(stakingPool.rewardVault),
+          },
+          // Initialization metadata
           initialization: {
             staking: {
               txSignature: tx,
