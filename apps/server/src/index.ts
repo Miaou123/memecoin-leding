@@ -14,6 +14,7 @@ import { protocolRouter } from './api/protocol.js';
 import { userRouter } from './api/user.js';
 import pricesRouter from './routes/prices.js';
 import adminWhitelistRouter from './routes/admin/whitelist.js';
+import adminFeesRouter, { setFeeClaimerService } from './routes/admin/fees.js';
 import { stakingRoutes } from './routes/staking.js';
 
 // Import services
@@ -24,9 +25,18 @@ import { prisma } from './db/client.js';
 import { initializeFastPriceMonitor, fastPriceMonitor } from './services/fast-price-monitor.js';
 import { loanService } from './services/loan.service.js';
 import { distributionCrankService } from './services/distribution-crank.service.js';
+import { FeeClaimerService } from './services/fee-claimer.service.js';
+import { Connection, Keypair } from '@solana/web3.js';
+import { Program, AnchorProvider, Wallet, Idl } from '@coral-xyz/anchor';
+import { PROGRAM_ID } from '@memecoin-lending/config';
+import fs from 'fs';
+import path from 'path';
 
 // Create Hono app
 const app = new Hono();
+
+// Global service instance
+let feeClaimerService: FeeClaimerService | null = null;
 
 // Global middleware
 app.use('/*', cors({
@@ -62,6 +72,7 @@ app.route('/api/staking', stakingRoutes);
 
 // Admin routes
 app.route('/api/admin/whitelist', adminWhitelistRouter);
+app.route('/api/admin/fees', adminFeesRouter);
 
 // Error handler
 app.onError(errorHandler);
@@ -91,6 +102,17 @@ const validateEnvironment = () => {
   if (!process.env.REDIS_URL) {
     warnings.push('⚠️  REDIS_URL not set - background jobs may not work properly');
   }
+  
+  if (!process.env.ADMIN_API_KEY) {
+    warnings.push('⚠️  ADMIN_API_KEY not set - admin endpoints will not work');
+  }
+  
+  const enableFeeClaimer = process.env.ENABLE_FEE_CLAIMER !== 'false';
+  if (enableFeeClaimer) {
+    if (!process.env.ADMIN_KEYPAIR_PATH && !process.env.ADMIN_PRIVATE_KEY) {
+      warnings.push('⚠️  Neither ADMIN_KEYPAIR_PATH nor ADMIN_PRIVATE_KEY set - fee claimer disabled');
+    }
+  }
 
   if (warnings.length > 0) {
     console.log('\n🔶 Environment Warnings:');
@@ -109,6 +131,106 @@ const validateEnvironment = () => {
 };
 
 validateEnvironment();
+
+// Initialize fee claimer service
+async function initializeFeeClaimerService() {
+  const enabled = process.env.ENABLE_FEE_CLAIMER !== 'false';
+  
+  if (!enabled) {
+    console.log('💰 Fee claimer service disabled');
+    return;
+  }
+  
+  try {
+    // Load admin keypair
+    let adminKeypair: Keypair;
+    
+    if (process.env.ADMIN_PRIVATE_KEY) {
+      // Production: use base58 encoded private key
+      const privateKeyBytes = Buffer.from(process.env.ADMIN_PRIVATE_KEY, 'base64');
+      adminKeypair = Keypair.fromSecretKey(new Uint8Array(privateKeyBytes));
+    } else if (process.env.ADMIN_KEYPAIR_PATH) {
+      // Development: use keypair file
+      const keypairPath = path.resolve(process.env.ADMIN_KEYPAIR_PATH);
+      
+      if (!fs.existsSync(keypairPath)) {
+        console.warn(`⚠️ Admin keypair not found at ${keypairPath}`);
+        return;
+      }
+      
+      const keypairData = JSON.parse(fs.readFileSync(keypairPath, 'utf-8'));
+      adminKeypair = Keypair.fromSecretKey(Uint8Array.from(keypairData));
+    } else {
+      console.warn('⚠️ No admin keypair configured - fee claimer disabled');
+      return;
+    }
+    
+    console.log(`🔑 Fee claimer admin wallet: ${adminKeypair.publicKey.toString()}`);
+    
+    // Initialize connection and provider
+    const rpcUrl = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
+    const connection = new Connection(rpcUrl, 'confirmed');
+    
+    const provider = new AnchorProvider(
+      connection,
+      new Wallet(adminKeypair),
+      { commitment: 'confirmed' }
+    );
+    
+    // Load IDL
+    const idlPaths = [
+      process.env.IDL_PATH,
+      './target/idl/memecoin_lending.json',
+      '../../target/idl/memecoin_lending.json',
+      '../../../target/idl/memecoin_lending.json',
+    ].filter(Boolean);
+    
+    let idl: Idl | null = null;
+    for (const p of idlPaths) {
+      if (p && fs.existsSync(p)) {
+        idl = JSON.parse(fs.readFileSync(p, 'utf-8'));
+        break;
+      }
+    }
+    
+    if (!idl) {
+      console.warn('⚠️ IDL file not found - fee claimer disabled');
+      return;
+    }
+    
+    // Create program
+    const program = new Program(idl, provider);
+    
+    // Parse configuration
+    const minClaimThreshold = parseFloat(process.env.MIN_FEE_CLAIM_THRESHOLD || '0.01') * 1e9; // Convert to lamports
+    const intervalMs = parseInt(process.env.FEE_CLAIM_INTERVAL_MS || '300000'); // Default 5 minutes
+    
+    // Create service
+    feeClaimerService = new FeeClaimerService(connection, adminKeypair, program, {
+      minClaimThreshold,
+      intervalMs,
+      enabled: true,
+    });
+    
+    // Inject into routes
+    setFeeClaimerService(feeClaimerService);
+    
+    // Check wallet balance
+    const balance = await connection.getBalance(adminKeypair.publicKey);
+    console.log(`💰 Fee claimer wallet balance: ${(balance / 1e9).toFixed(4)} SOL`);
+    
+    if (balance < 0.01 * 1e9) {
+      console.warn('⚠️ Fee claimer wallet has low balance - may fail to pay transaction fees');
+    }
+    
+    // Start auto-claiming
+    feeClaimerService.startAutoClaim();
+    console.log('✅ Fee claimer service initialized and running');
+    
+  } catch (error: any) {
+    console.error('❌ Failed to initialize fee claimer:', error.message);
+  }
+}
 
 // Start server
 const port = parseInt(process.env.PORT || '3002');
@@ -168,6 +290,13 @@ const server = serve({
   }).catch((error) => {
     console.error('Failed to initialize distribution crank:', error);
   });
+  
+  // Initialize fee claimer service
+  initializeFeeClaimerService().then(() => {
+    console.log('💰 Fee claimer service startup complete');
+  }).catch((error) => {
+    console.error('Failed to start fee claimer:', error);
+  });
 });
 
 // Initialize WebSocket - pass the server, it creates WebSocketServer internally
@@ -178,6 +307,12 @@ async function gracefulShutdown(signal: string) {
   console.log(`\n${signal} received. Shutting down...`);
   
   try {
+    // Stop fee claimer if running
+    if (feeClaimerService) {
+      console.log('Stopping fee claimer service...');
+      feeClaimerService.stopAutoClaim();
+    }
+    
     await fastPriceMonitor.shutdown();
     wss.close();
     server.close();

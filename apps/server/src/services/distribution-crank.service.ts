@@ -8,6 +8,9 @@ import * as path from 'path';
 const BATCH_SIZE = 10; // 10 users per transaction (20 accounts total)
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 2000;
+const USER_STAKE_DISCRIMINATOR = Buffer.from([102, 53, 163, 107, 9, 138, 87, 153]); // UserStake discriminator
+const MIN_INTERVAL_BETWEEN_DISTRIBUTIONS_MS = 10000; // Minimum 10 seconds between distributions
+const MAX_DISTRIBUTIONS_PER_HOUR = 100; // Maximum 100 distribution transactions per hour
 
 // PDA Seeds (must match your program)
 const STAKING_POOL_SEED = Buffer.from('staking_pool');
@@ -51,6 +54,8 @@ class DistributionCrankService {
   private stakingPoolPDA: PublicKey | null = null;
   private rewardVaultPDA: PublicKey | null = null;
   private initialized = false;
+  private lastDistributionTime = 0;
+  private distributionsThisHour: { timestamp: number }[] = [];
   
   constructor() {
     const rpcUrl = process.env.SOLANA_RPC_URL || getNetworkConfig('devnet').rpcUrl;
@@ -166,8 +171,9 @@ class DistributionCrankService {
         return result;
       }
       
+      // SECURITY: Check pause status
       if (poolState.paused) {
-        console.log('⏸️ Staking is paused. Skipping distribution.');
+        console.log('⏸️ SECURITY: Staking is paused. Skipping distribution.');
         result.success = true;
         return result;
       }
@@ -335,6 +341,26 @@ class DistributionCrankService {
       return;
     }
     
+    // Rate limiting: Check minimum interval
+    const now = Date.now();
+    const timeSinceLastDistribution = now - this.lastDistributionTime;
+    
+    if (timeSinceLastDistribution < MIN_INTERVAL_BETWEEN_DISTRIBUTIONS_MS) {
+      console.log(`⏳ Rate limit: Must wait ${MIN_INTERVAL_BETWEEN_DISTRIBUTIONS_MS - timeSinceLastDistribution}ms before next distribution`);
+      result.errors.push('Rate limit: Too soon after last distribution');
+      return;
+    }
+    
+    // Rate limiting: Check hourly limit
+    const oneHourAgo = now - (60 * 60 * 1000);
+    this.distributionsThisHour = this.distributionsThisHour.filter(d => d.timestamp > oneHourAgo);
+    
+    if (this.distributionsThisHour.length >= MAX_DISTRIBUTIONS_PER_HOUR) {
+      console.log(`⚠️ Rate limit: Reached maximum distributions per hour (${MAX_DISTRIBUTIONS_PER_HOUR})`);
+      result.errors.push('Rate limit: Maximum distributions per hour exceeded');
+      return;
+    }
+    
     try {
       // Get all eligible stakers
       const stakers = await this.getEligibleStakers(forEpoch);
@@ -372,6 +398,12 @@ class DistributionCrankService {
       }
       
       console.log(`✅ Distribution complete: ${result.usersDistributed} users, ${result.totalDistributed} lamports total`);
+      
+      // Update rate limiting tracking
+      if (result.batches > 0) {
+        this.lastDistributionTime = Date.now();
+        this.distributionsThisHour.push({ timestamp: Date.now() });
+      }
       
     } catch (error: any) {
       console.error('❌ Distribution error:', error.message);
@@ -411,6 +443,14 @@ class DistributionCrankService {
       
       for (const { pubkey, account } of accounts) {
         const data = account.data;
+        
+        // SECURITY: Validate discriminator
+        const discriminator = data.slice(0, 8);
+        if (!discriminator.equals(USER_STAKE_DISCRIMINATOR)) {
+          console.warn(`⚠️ SECURITY: Invalid discriminator for account ${pubkey.toString()}`);
+          continue;
+        }
+        
         let offset = 8; // Skip discriminator
         
         // Read owner
@@ -423,8 +463,22 @@ class DistributionCrankService {
         const pool = new PublicKey(poolBytes);
         offset += 32;
         
-        // Check if this is for our staking pool
-        if (!pool.equals(this.stakingPoolPDA)) continue;
+        // SECURITY: Validate pool matches
+        if (!pool.equals(this.stakingPoolPDA)) {
+          console.warn(`⚠️ SECURITY: Pool mismatch for account ${pubkey.toString()}. Expected ${this.stakingPoolPDA.toString()}, got ${pool.toString()}`);
+          continue;
+        }
+        
+        // SECURITY: Validate PDA derivation
+        const [expectedPDA] = PublicKey.findProgramAddressSync(
+          [USER_STAKE_SEED, this.stakingPoolPDA.toBuffer(), owner.toBuffer()],
+          new PublicKey(PROGRAM_ID)
+        );
+        
+        if (!pubkey.equals(expectedPDA)) {
+          console.warn(`⚠️ SECURITY: UserStake PDA mismatch! Expected ${expectedPDA.toString()}, got ${pubkey.toString()}`);
+          continue;
+        }
         
         // Read staked amount
         const stakedAmount = data.readBigUInt64LE(offset);
@@ -456,6 +510,7 @@ class DistributionCrankService {
         }
       }
       
+      console.log(`✅ Security validation complete: ${eligible.length} eligible stakers verified`);
       return eligible;
       
     } catch (error: any) {
@@ -482,6 +537,7 @@ class DistributionCrankService {
           { pubkey: s.owner, isSigner: false, isWritable: true },
         ]);
         
+        // SECURITY: Simulate transaction first
         const tx = await this.program.methods
           .distributeRewards()
           .accounts({
@@ -491,23 +547,57 @@ class DistributionCrankService {
             systemProgram: SystemProgram.programId,
           })
           .remainingAccounts(remainingAccounts)
-          .rpc();
+          .transaction();
         
-        console.log(`📤 Distribution TX: ${tx}`);
+        // Add recent blockhash and fee payer
+        const { blockhash } = await this.connection.getLatestBlockhash();
+        tx.recentBlockhash = blockhash;
+        tx.feePayer = this.wallet.publicKey;
         
-        // TODO: Parse transaction logs to get actual distributed amount
-        // For now, estimate based on stakers
+        // Sign transaction
+        tx.sign(this.wallet);
+        
+        // Simulate before sending
+        const simulation = await this.connection.simulateTransaction(tx);
+        
+        if (simulation.value.err) {
+          throw new Error(`Transaction simulation failed: ${JSON.stringify(simulation.value.err)}`);
+        }
+        
+        // Send transaction
+        const signature = await this.connection.sendRawTransaction(tx.serialize());
+        await this.connection.confirmTransaction(signature, 'confirmed');
+        
+        console.log(`📤 Distribution TX: ${signature}`);
+        
+        // Parse logs to get distributed amount
+        let amountDistributed = BigInt(0);
+        if (simulation.value.logs) {
+          for (const log of simulation.value.logs) {
+            if (log.includes('Distributed')) {
+              const match = log.match(/Distributed (\d+) lamports/);
+              if (match) {
+                amountDistributed = BigInt(match[1]);
+              }
+            }
+          }
+        }
+        
         return {
           success: true,
           usersDistributed: stakers.length,
-          amountDistributed: BigInt(0), // Would parse from logs
+          amountDistributed,
         };
         
       } catch (error: any) {
         console.error(`❌ Batch distribution attempt ${attempt} failed:`, error.message);
         
+        // Exponential backoff
+        const delay = RETRY_DELAY_MS * Math.pow(2, attempt - 1);
+        
         if (attempt < MAX_RETRIES) {
-          await this.sleep(RETRY_DELAY_MS);
+          console.log(`⏳ Retrying in ${delay}ms...`);
+          await this.sleep(delay);
         } else {
           return {
             success: false,

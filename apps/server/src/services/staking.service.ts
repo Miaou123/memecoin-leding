@@ -32,6 +32,7 @@ class StakingService {
   
   async getStakingStats(): Promise<StakingStats> {
     try {
+      console.log('[SECURITY] Fetching staking stats...');
       // Get PDAs from deployment file
       const [stakingPoolPDA] = getStakingPoolPDA();
       const [rewardVaultPDA] = getRewardVaultPDA();
@@ -198,6 +199,7 @@ class StakingService {
         lastEpochDistributed: lastEpochDistributed.toString(),
         totalRewardsDistributed: totalRewardsDistributed.toString(),
         totalRewardsDeposited: totalRewardsDeposited.toString(),
+        paused,
       };
       
     } catch (error: any) {
@@ -226,8 +228,14 @@ class StakingService {
     try {
       if (!address) return null;
       
-      // Parse address to PublicKey
-      const userPubkey = new PublicKey(address);
+      // Validate address format
+      let userPubkey: PublicKey;
+      try {
+        userPubkey = new PublicKey(address);
+      } catch (e) {
+        console.warn(`[SECURITY] Invalid public key format: ${address}`);
+        return null;
+      }
       
       // Derive PDAs
       const [stakingPoolPDA] = getStakingPoolPDA();
@@ -235,6 +243,17 @@ class StakingService {
         throw new Error('Staking pool PDA not found in deployment');
       }
       const [userStakePDA] = deriveUserStakePDA(stakingPoolPDA, userPubkey);
+      
+      // Verify PDA derivation
+      const [expectedPDA] = PublicKey.findProgramAddressSync(
+        [Buffer.from('user_stake'), stakingPoolPDA.toBuffer(), userPubkey.toBuffer()],
+        new PublicKey(PROGRAM_ID)
+      );
+      
+      if (!userStakePDA.equals(expectedPDA)) {
+        console.error(`[SECURITY] UserStake PDA mismatch! Config: ${userStakePDA.toString()}, Expected: ${expectedPDA.toString()}`);
+        return null;
+      }
       
       // Fetch account info
       const accountInfo = await this.connection.getAccountInfo(userStakePDA);

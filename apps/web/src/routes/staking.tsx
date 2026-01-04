@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/Button';
 import { formatNumber, formatPercentage } from '@/lib/utils';
 import { api } from '@/lib/api';
 import { useWallet } from '@/components/wallet/WalletProvider';
-import { buildStakeTransaction, buildUnstakeTransaction } from '@/lib/staking-transactions';
+import { buildStakeTransaction, buildUnstakeTransaction, simulateTransaction } from '@/lib/staking-transactions';
 import { getStakingConfig, type Network } from '@memecoin-lending/config';
 import { EpochCountdown } from '@/components/EpochCountdown';
 
@@ -109,6 +109,12 @@ export default function Staking() {
         connection
       );
       
+      // SECURITY: Simulate transaction first
+      const simulationResult = await simulateTransaction(transaction, connection);
+      if (!simulationResult.success) {
+        throw new Error(simulationResult.error);
+      }
+      
       // Sign and send
       const signed = await wallet.signTransaction(transaction);
       const signature = await connection.sendRawTransaction(signed.serialize());
@@ -156,6 +162,12 @@ export default function Staking() {
         rawAmount,
         connection
       );
+      
+      // SECURITY: Simulate transaction first
+      const simulationResult = await simulateTransaction(transaction, connection);
+      if (!simulationResult.success) {
+        throw new Error(simulationResult.error);
+      }
       
       // Sign and send
       const signed = await wallet.signTransaction(transaction);
@@ -354,11 +366,11 @@ export default function Staking() {
                   
                   <Button
                     onClick={handleStake}
-                    disabled={!canStake() || stakeMutation.isPending}
+                    disabled={!canStake() || stakeMutation.isPending || stakingStats.data?.paused}
                     loading={stakeMutation.isPending}
                     class="w-full bg-accent-green text-bg-primary hover:bg-accent-green/90"
                   >
-                    {stakeMutation.isPending ? 'STAKING...' : '[STAKE_TOKENS]'}
+                    {stakingStats.data?.paused ? 'STAKING PAUSED' : stakeMutation.isPending ? 'STAKING...' : '[STAKE_TOKENS]'}
                   </Button>
                 </div>
               </Show>
@@ -390,12 +402,12 @@ export default function Staking() {
                   
                   <Button
                     onClick={handleUnstake}
-                    disabled={!canUnstake() || unstakeMutation.isPending}
+                    disabled={!canUnstake() || unstakeMutation.isPending || stakingStats.data?.paused}
                     loading={unstakeMutation.isPending}
                     variant="outline"
                     class="w-full border-accent-yellow text-accent-yellow hover:bg-accent-yellow hover:text-bg-primary"
                   >
-                    {unstakeMutation.isPending ? 'UNSTAKING...' : '[UNSTAKE_TOKENS]'}
+                    {stakingStats.data?.paused ? 'STAKING PAUSED' : unstakeMutation.isPending ? 'UNSTAKING...' : '[UNSTAKE_TOKENS]'}
                   </Button>
                 </div>
               </Show>

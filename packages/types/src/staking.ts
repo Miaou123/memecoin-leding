@@ -59,6 +59,7 @@ export interface StakingStats {
   lastEpochDistributed?: string;
   totalRewardsDistributed?: string;
   totalRewardsDeposited?: string;
+  paused?: boolean;
 }
 
 export interface StakeParams {

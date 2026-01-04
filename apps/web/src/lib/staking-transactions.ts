@@ -87,6 +87,42 @@ export async function buildStakeTransaction(
   return transaction;
 }
 
+// SECURITY: Simulate transaction before sending
+export async function simulateTransaction(
+  transaction: Transaction,
+  connection: Connection
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const simulation = await connection.simulateTransaction(transaction);
+    
+    if (simulation.value.err) {
+      return {
+        success: false,
+        error: `Simulation failed: ${JSON.stringify(simulation.value.err)}`
+      };
+    }
+    
+    // Check logs for errors
+    if (simulation.value.logs) {
+      for (const log of simulation.value.logs) {
+        if (log.includes('Error') || log.includes('failed')) {
+          return {
+            success: false,
+            error: `Program error in logs: ${log}`
+          };
+        }
+      }
+    }
+    
+    return { success: true };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: `Simulation exception: ${error.message}`
+    };
+  }
+}
+
 export async function buildUnstakeTransaction(
   user: PublicKey,
   amount: BN,
