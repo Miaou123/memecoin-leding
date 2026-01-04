@@ -127,7 +127,7 @@ export function saveDeployment(network: string, config: DeploymentConfig): void 
 }
 
 /**
- * Update deployment configuration with partial data
+ * Update deployment configuration with partial data (deep merge)
  */
 export function updateDeployment(network: string, updates: Partial<DeploymentConfig>): void {
   const existing = loadDeployment(network) || {
@@ -140,17 +140,27 @@ export function updateDeployment(network: string, updates: Partial<DeploymentCon
     tokens: { whitelisted: [] }
   };
 
-  // Deep merge updates
-  const updated: DeploymentConfig = {
-    ...existing,
-    ...updates,
-    pdas: { ...existing.pdas, ...updates.pdas },
-    initialization: { ...existing.initialization, ...updates.initialization },
-    tokens: {
-      whitelisted: updates.tokens?.whitelisted || existing.tokens.whitelisted
-    },
-    metadata: { ...existing.metadata, ...updates.metadata }
+  // Deep merge function
+  const deepMerge = (target: any, source: any): any => {
+    const result = { ...target };
+    for (const key of Object.keys(source)) {
+      if (source[key] !== undefined && source[key] !== null) {
+        if (typeof source[key] === 'object' && !Array.isArray(source[key])) {
+          result[key] = deepMerge(result[key] || {}, source[key]);
+        } else {
+          result[key] = source[key];
+        }
+      }
+    }
+    return result;
   };
+
+  const updated = deepMerge(existing, updates);
+  
+  // Ensure required structures exist
+  updated.pdas = updated.pdas || {};
+  updated.initialization = updated.initialization || {};
+  updated.tokens = updated.tokens || { whitelisted: [] };
 
   saveDeployment(network, updated);
 }

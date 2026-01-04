@@ -5,7 +5,8 @@ import fs from 'fs';
 import path from 'path';
 import chalk from 'chalk';
 import { Command } from 'commander';
-import { createInitialDeployment, saveDeploymentConfig, getCurrentProgramId, getRpcUrl, getDeploymentStatus } from './config.js';
+import { createInitialDeployment, saveDeploymentConfig, updateDeployment, getCurrentProgramId, getRpcUrl, getDeploymentStatus } from './config.js';
+import { loadDeployment } from './deployment-store.js';
 
 import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
@@ -306,18 +307,30 @@ async function deploy(config: DeployConfig) {
     console.log(chalk.red('  ✗ Could not verify deployment'));
   }
 
-  // Step 9.5: Save deployment configuration
-  console.log(chalk.blue('\n💾 Saving deployment configuration...\n'));
+  // Step 9.5: Create initial deployment record (ONLY if it doesn't exist)
+  console.log(chalk.blue('\n💾 Creating initial deployment record...\n'));
   try {
-    const deploymentConfig = createInitialDeployment({
-      network: config.network,
-      programId: newProgramId,
-      deploySignature: 'TBD', // Will be updated when we get the actual signature
-      deployerAddress: 'TBD', // Will be updated with admin address
-    });
+    const existingDeployment = loadDeployment(config.network);
     
-    saveDeploymentConfig(config.network, deploymentConfig);
-    console.log(chalk.green('  ✓ Deployment configuration saved'));
+    if (!existingDeployment || existingDeployment.programId !== newProgramId) {
+      // Only create fresh if program ID changed or no deployment exists
+      const deploymentConfig = createInitialDeployment({
+        network: config.network,
+        programId: newProgramId,
+        deploySignature: 'TBD',
+        deployerAddress: 'TBD',
+      });
+      
+      saveDeploymentConfig(config.network, deploymentConfig);
+      console.log(chalk.green('  ✓ Initial deployment config created'));
+    } else {
+      // Just update the program ID if it changed
+      updateDeployment(config.network, {
+        programId: newProgramId,
+        deployedAt: new Date().toISOString(),
+      });
+      console.log(chalk.green('  ✓ Deployment config updated with new program ID'));
+    }
   } catch (error) {
     console.log(chalk.yellow(`  ⚠ Could not save deployment config: ${error}`));
   }
@@ -378,29 +391,35 @@ async function deploy(config: DeployConfig) {
     }
   }
 
-  // Step 15: Save deployment info
-  const deploymentInfo = {
+  // Step 15: Update deployment info (merge with existing, don't overwrite)
+  console.log(chalk.blue('\n💾 Updating deployment metadata...\n'));
+
+  // Use updateDeployment to MERGE, not overwrite
+  // This preserves PDAs and initialization data saved by previous steps
+  updateDeployment(config.network, {
+    previousProgramId: oldProgramId,
+    fundAmount: config.fundAmount,
+  });
+
+  console.log(chalk.green('  ✓ Deployment metadata updated (PDAs preserved)'));
+
+  // Update deployment history
+  const deploymentsDir = path.join(ROOT_DIR, 'deployments');
+  const historyFile = path.join(deploymentsDir, `${config.network}-history.json`);
+  let history: any[] = [];
+  if (fs.existsSync(historyFile)) {
+    history = JSON.parse(fs.readFileSync(historyFile, 'utf8'));
+  }
+  
+  const historyEntry = {
     programId: newProgramId,
     network: config.network,
     deployedAt: new Date().toISOString(),
     previousProgramId: oldProgramId,
     fundAmount: config.fundAmount,
   };
-
-  const deploymentsDir = path.join(ROOT_DIR, 'deployments');
-  if (!fs.existsSync(deploymentsDir)) {
-    fs.mkdirSync(deploymentsDir);
-  }
-
-  const deploymentFile = path.join(deploymentsDir, `${config.network}-latest.json`);
-  fs.writeFileSync(deploymentFile, JSON.stringify(deploymentInfo, null, 2));
-
-  const historyFile = path.join(deploymentsDir, `${config.network}-history.json`);
-  let history: any[] = [];
-  if (fs.existsSync(historyFile)) {
-    history = JSON.parse(fs.readFileSync(historyFile, 'utf8'));
-  }
-  history.push(deploymentInfo);
+  
+  history.push(historyEntry);
   fs.writeFileSync(historyFile, JSON.stringify(history, null, 2));
 
   // Step 16: Sync frontend and backend configs

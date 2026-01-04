@@ -33,8 +33,8 @@ class StakingService {
   async getStakingStats(): Promise<StakingStats> {
     try {
       // Get PDAs from deployment file
-      const stakingPoolPDA = getStakingPoolPDA();
-      const rewardVaultPDA = getRewardVaultPDA();
+      const [stakingPoolPDA] = getStakingPoolPDA();
+      const [rewardVaultPDA] = getRewardVaultPDA();
       
       if (!stakingPoolPDA || !rewardVaultPDA) {
         throw new Error('Staking PDAs not found in deployment file');
@@ -230,7 +230,7 @@ class StakingService {
       const userPubkey = new PublicKey(address);
       
       // Derive PDAs
-      const stakingPoolPDA = getStakingPoolPDA();
+      const [stakingPoolPDA] = getStakingPoolPDA();
       if (!stakingPoolPDA) {
         throw new Error('Staking pool PDA not found in deployment');
       }

@@ -4,7 +4,7 @@ import { liquidationJob } from './liquidation.job.js';
 import { priceMonitorJob } from './price-monitor.job.js';
 import { syncJob } from './sync.job.js';
 import { notificationJob } from './notification.job.js';
-import { distributionCrankQueue, distributionCrankWorker, scheduleDistributionCrankJob } from './distribution-crank.job.js';
+import { distributionCrankJob } from './distribution-crank.job.js';
 
 // BullMQ requires maxRetriesPerRequest: null for blocking operations
 const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', {
@@ -16,8 +16,7 @@ export const liquidationQueue = new Queue('liquidation', { connection: redis });
 export const priceMonitorQueue = new Queue('price-monitor', { connection: redis });
 export const syncQueue = new Queue('sync', { connection: redis });
 export const notificationQueue = new Queue('notification', { connection: redis });
-// Distribution crank queue is exported from distribution-crank.job.ts
-export { distributionCrankQueue };
+export const distributionCrankQueue = new Queue('distribution-crank', { connection: redis });
 
 // Job workers
 const liquidationWorker = new Worker('liquidation', liquidationJob, { 
@@ -40,9 +39,13 @@ const notificationWorker = new Worker('notification', notificationJob, {
   concurrency: 5,
 });
 
+const distributionCrankWorker = new Worker('distribution-crank', distributionCrankJob, {
+  connection: redis,
+  concurrency: 1,
+});
+
 /**
  * Gracefully clean up and re-register repeatable jobs for a queue
- * This removes old repeatable job configurations without affecting active jobs
  */
 async function setupRepeatableJobs(
   queue: Queue,
@@ -54,10 +57,8 @@ async function setupRepeatableJobs(
     removeOnFail?: number;
   }>
 ) {
-  // Get existing repeatable jobs
   const existingRepeatables = await queue.getRepeatableJobs();
   
-  // Remove all existing repeatable job configurations
   for (const job of existingRepeatables) {
     try {
       await queue.removeRepeatableByKey(job.key);
@@ -66,7 +67,6 @@ async function setupRepeatableJobs(
     }
   }
   
-  // Add fresh repeatable jobs
   for (const job of jobs) {
     await queue.add(
       job.name,
@@ -81,65 +81,40 @@ async function setupRepeatableJobs(
 }
 
 /**
- * Initialize all background jobs gracefully
- * - Cleans up old repeatable configurations
- * - Preserves in-progress jobs
- * - Re-registers all repeatable jobs
+ * Initialize all background jobs
  */
 export async function initializeJobs() {
   try {
     console.log('🔄 Initializing background jobs...');
     
-    // Setup liquidation queue jobs - BACKUP: Liquidation checks (5s backup to fast monitor)
+    // Liquidation checks (5s backup)
     await setupRepeatableJobs(liquidationQueue, [
-      {
-        name: 'check-liquidations',
-        data: {},
-        every: 5000, // Every 5 seconds (backup to fast monitor)
-      },
+      { name: 'check-liquidations', data: {}, every: 5000 },
     ]);
     
-    // Setup price monitor queue jobs - SECURITY: Fast price monitoring (3s)
+    // Price monitoring (3s)
     await setupRepeatableJobs(priceMonitorQueue, [
-      {
-        name: 'update-prices',
-        data: {},
-        every: 3000, // Every 3 seconds (was 10s)
-      },
-      {
-        name: 'check-price-alerts',
-        data: {},
-        every: 15000, // Every 15 seconds (reduced from 30s)
-      },
+      { name: 'update-prices', data: {}, every: 3000 },
+      { name: 'check-price-alerts', data: {}, every: 15000 },
     ]);
     
-    // Setup sync queue jobs
+    // Sync jobs
     await setupRepeatableJobs(syncQueue, [
-      {
-        name: 'sync-protocol-state',
-        data: {},
-        every: 120000, // Every 2 minutes
-      },
-      {
-        name: 'sync-loans',
-        data: {},
-        every: 60000, // Every minute
-      },
+      { name: 'sync-protocol-state', data: {}, every: 120000 },
+      { name: 'sync-loans', data: {}, every: 60000 },
     ]);
     
-    // Setup notification queue jobs
+    // Notifications
     await setupRepeatableJobs(notificationQueue, [
-      {
-        name: 'check-due-notifications',
-        data: {},
-        every: 60000, // Every minute
-      },
+      { name: 'check-due-notifications', data: {}, every: 60000 },
     ]);
     
-    // Schedule distribution crank job
-    await scheduleDistributionCrankJob();
+    // Distribution crank (30s)
+    await setupRepeatableJobs(distributionCrankQueue, [
+      { name: 'distribution-tick', data: {}, every: 30000 },
+    ]);
     
-    // Setup error handlers
+    // Error handlers
     liquidationWorker.on('failed', (job, err) => {
       console.error(`❌ Liquidation job failed:`, job?.name, err.message);
     });
@@ -156,9 +131,11 @@ export async function initializeJobs() {
       console.error(`❌ Notification job failed:`, job?.name, err.message);
     });
     
-    // Distribution crank worker error handling is in distribution-crank.job.ts
+    distributionCrankWorker.on('failed', (job, err) => {
+      console.error(`❌ Distribution crank job failed:`, job?.name, err.message);
+    });
     
-    // Log active job counts
+    // Log active counts
     const [liquidationActive, priceActive, syncActive, notificationActive, distributionActive] = await Promise.all([
       liquidationQueue.getActiveCount(),
       priceMonitorQueue.getActiveCount(),
@@ -181,7 +158,7 @@ export async function initializeJobs() {
 }
 
 /**
- * Graceful shutdown - close all workers
+ * Graceful shutdown
  */
 export async function closeJobs() {
   console.log('🛑 Closing background job workers...');
@@ -194,7 +171,6 @@ export async function closeJobs() {
     distributionCrankWorker.close(),
   ]);
   
-  // Close queues
   await Promise.all([
     liquidationQueue.close(),
     priceMonitorQueue.close(),
@@ -203,7 +179,6 @@ export async function closeJobs() {
     distributionCrankQueue.close(),
   ]);
   
-  // Close Redis connection
   await redis.quit();
   
   console.log('✅ Background jobs closed');

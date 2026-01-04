@@ -107,6 +107,7 @@ export function getAdminKeypair(keypairPath?: string): Keypair {
 
 // Re-export deployment functions from deployment-store
 export { 
+  loadDeployment,  // ADD THIS DIRECT EXPORT
   loadDeployment as loadDeploymentConfig,
   saveDeployment as saveDeploymentConfig,
   updateDeployment,

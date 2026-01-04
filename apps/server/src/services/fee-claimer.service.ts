@@ -88,7 +88,7 @@ class FeeClaimerService {
       await new Promise(r => setTimeout(r, 2000));
 
       // 2. Transfer to FeeReceiver
-      const feeReceiverPda = getFeeReceiverPDA();
+      const [feeReceiverPda] = getFeeReceiverPDA();
       if (!feeReceiverPda) throw new Error('Fee receiver PDA not found');
 
       const walletBalance = await this.connection.getBalance(this.adminKeypair.publicKey);

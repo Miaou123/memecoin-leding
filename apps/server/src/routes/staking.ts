@@ -1,7 +1,6 @@
 import { Hono } from 'hono';
 import { stakingService } from '../services/staking.service.js';
 import { distributionCrankService } from '../services/distribution-crank.service.js';
-import { getDistributionCrankStatus } from '../jobs/distribution-crank.job.js';
 
 const stakingRoutes = new Hono();
 
@@ -113,17 +112,11 @@ stakingRoutes.get('/fees/breakdown', async (c) => {
 // Get distribution crank status
 stakingRoutes.get('/crank/status', async (c) => {
   try {
-    const [serviceStatus, jobStatus] = await Promise.all([
-      distributionCrankService.getStatus(),
-      getDistributionCrankStatus(),
-    ]);
+    const serviceStatus = await distributionCrankService.getStatus();
 
     return c.json({
       success: true,
-      data: {
-        service: serviceStatus,
-        jobs: jobStatus,
-      }
+      data: serviceStatus
     });
   } catch (error: any) {
     console.error('Error fetching crank status:', error);

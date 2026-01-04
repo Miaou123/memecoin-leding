@@ -1,6 +1,6 @@
-import { Connection, PublicKey, Keypair, LAMPORTS_PER_SOL, AccountMeta } from '@solana/web3.js';
-import { Program, AnchorProvider, Wallet, BN } from '@coral-xyz/anchor';
-import { PROGRAM_ID, NETWORK_CONFIG } from '@memecoin-lending/config';
+import { Connection, PublicKey, Keypair, LAMPORTS_PER_SOL, AccountMeta, SystemProgram } from '@solana/web3.js';
+import { Program, AnchorProvider, Wallet, BN, Idl } from '@coral-xyz/anchor';
+import { PROGRAM_ID, getNetworkConfig } from '@memecoin-lending/config';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -53,7 +53,7 @@ class DistributionCrankService {
   private initialized = false;
   
   constructor() {
-    const rpcUrl = process.env.SOLANA_RPC_URL || NETWORK_CONFIG.devnet.rpcUrl;
+    const rpcUrl = process.env.SOLANA_RPC_URL || getNetworkConfig('devnet').rpcUrl;
     this.connection = new Connection(rpcUrl, 'confirmed');
   }
   
@@ -65,7 +65,7 @@ class DistributionCrankService {
     
     try {
       // Load admin wallet
-      const walletPath = process.env.ADMIN_KEYPAIR_PATH || './keys/admin.json';
+      const walletPath = process.env.ADMIN_WALLET_PATH || './keys/admin.json';
       
       if (!fs.existsSync(walletPath)) {
         console.warn('⚠️ Admin keypair not found at', walletPath);
@@ -93,23 +93,30 @@ class DistributionCrankService {
         { commitment: 'confirmed' }
       );
       
-      // Load IDL
-      const idlPath = process.env.IDL_PATH || path.join(process.cwd(), '../../target/idl/memecoin_lending.json');
+      // Load IDL with better path resolution
+      const idlPaths = [
+        process.env.IDL_PATH,
+        path.join(process.cwd(), 'target/idl/memecoin_lending.json'),
+        path.join(process.cwd(), '../../target/idl/memecoin_lending.json'),
+        path.join(process.cwd(), '../..', 'target/idl/memecoin_lending.json'),
+        path.join(__dirname, '../../../target/idl/memecoin_lending.json'),
+      ].filter(Boolean);
       
-      if (!fs.existsSync(idlPath)) {
-        // Try alternate path
-        const altIdlPath = path.join(process.cwd(), '../..', 'target/idl/memecoin_lending.json');
-        if (fs.existsSync(altIdlPath)) {
-          const idl = JSON.parse(fs.readFileSync(altIdlPath, 'utf-8'));
-          this.program = new Program(idl, new PublicKey(PROGRAM_ID), provider);
-        } else {
-          console.warn('⚠️ IDL file not found. Distribution crank will not function.');
-          return;
+      let idl;
+      for (const p of idlPaths) {
+        if (p && fs.existsSync(p)) {
+          idl = JSON.parse(fs.readFileSync(p, 'utf-8'));
+          break;
         }
-      } else {
-        const idl = JSON.parse(fs.readFileSync(idlPath, 'utf-8'));
-        this.program = new Program(idl, new PublicKey(PROGRAM_ID), provider);
       }
+      
+      if (!idl) {
+        console.warn('⚠️ IDL file not found. Distribution crank will not function.');
+        return;
+      }
+      
+      // Create program with proper IDL type
+      this.program = new Program(idl as Idl, provider);
       
       // Derive PDAs
       [this.stakingPoolPDA] = PublicKey.findProgramAddressSync(
@@ -381,11 +388,18 @@ class DistributionCrankService {
         new PublicKey(PROGRAM_ID),
         {
           filters: [
-            // Filter by account size (UserStake::LEN)
-            // disc(8) + owner(32) + pool(32) + stakedAmount(8) + stakeStartEpoch(8) 
-            // + lastRewardedEpoch(8) + totalRewardsReceived(8) + firstStakeTime(8) + bump(1) + reserved(32)
-            // = 145 bytes
-            { dataSize: 145 },
+            {
+              memcmp: {
+                offset: 0,
+                bytes: 'J6ZWGMgjwQC', // UserStake discriminator [102,53,163,107,9,138,87,153] in base58
+              },
+            },
+            {
+              memcmp: {
+                offset: 40, // Skip discriminator (8) + owner (32) = position of pool pubkey
+                bytes: this.stakingPoolPDA.toBase58(),
+              },
+            },
           ],
         }
       );
@@ -471,7 +485,7 @@ class DistributionCrankService {
             stakingPool: this.stakingPoolPDA,
             rewardVault: this.rewardVaultPDA,
             caller: this.wallet.publicKey,
-            systemProgram: PublicKey.default,
+            systemProgram: SystemProgram.programId,
           })
           .remainingAccounts(remainingAccounts)
           .rpc();

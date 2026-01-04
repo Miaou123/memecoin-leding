@@ -1,83 +1,173 @@
 import { PublicKey } from '@solana/web3.js';
+import * as fs from 'fs';
+import * as path from 'path';
+import { config as dotenvConfig } from 'dotenv';
 
-// Hard-coded deployment data for current devnet deployment
-// TODO: Replace with proper file loading once ESM issues are resolved
-const CURRENT_DEPLOYMENT_DATA = {
-  programId: "DWPzC5B8wCYFJFw9khPiCwSvErNJTVaBxpUzrxbTCNJk",
-  network: "devnet",
-  pdas: {
-    "Protocol State": "Fdy6iz7KxM3i4i8frarTY2GUvhJfyWCBq5VMypUrHjQA",
-    "Treasury": "4ApW4miBk8GcDqLGVwqFUssuTJ62Eo1hCFWe13YcgyaG",
-    "feeReceiver": "9TS7qCWqARwMx7uCtCyXkLKaMxBRSw4nY4FzWk559LNH",
-    "rewardVault": "29Hm7e7E8b2V4Wrrr3crQmdPb3kGgMYWnd935QewwDUq",
-    "stakingPool": "RJqhZhEWaWqiFDGJfTBtJeCsANnjRuMmTzC2E9FPqjN",
-    "stakingVault": "BARUuKxxQa8uxkPirTpVn4jiiYS2RSwvNkwiUZqYsMFz"
+// Load environment variables from root .env file
+try {
+  // Try to load from various possible locations
+  const rootPaths = [
+    path.join(process.cwd(), '.env'),
+    path.join(__dirname, '../../../.env'),
+    path.join(__dirname, '../../.env'),
+    path.join(__dirname, '../.env'),
+  ];
+  
+  for (const envPath of rootPaths) {
+    if (fs.existsSync(envPath)) {
+      dotenvConfig({ path: envPath });
+      break;
+    }
   }
-};
+} catch (e) {
+  // Silently fail if dotenv can't be loaded
+}
 
-// Function to load deployment config
-function loadDeployment(network: string = 'devnet') {
-  // For now, return hard-coded deployment for devnet
-  if (network === 'devnet') {
-    console.debug('Using hard-coded deployment config for devnet');
-    return CURRENT_DEPLOYMENT_DATA;
+// Seeds for PDA derivation
+const STAKING_POOL_SEED = Buffer.from('staking_pool');
+const REWARD_VAULT_SEED = Buffer.from('reward_vault');
+const STAKING_VAULT_SEED = Buffer.from('staking_vault');
+const PROTOCOL_SEED = Buffer.from('protocol_state');
+const TREASURY_SEED = Buffer.from('treasury');
+const FEE_RECEIVER_SEED = Buffer.from('fee_receiver');
+
+// Try to load deployment config from JSON
+function loadDeploymentConfig(network: string = 'devnet'): { programId: string } | null {
+  // In browser, can't read files - use env vars
+  if (typeof globalThis !== 'undefined' && (globalThis as any).window !== 'undefined') {
+    const programId = (globalThis as any).VITE_PROGRAM_ID || 
+                     (typeof process !== 'undefined' && process.env?.VITE_PROGRAM_ID);
+    return programId ? { programId } : null;
   }
   
-  // Don't try to load files in browser
-  if (typeof globalThis !== 'undefined' && (globalThis as any).window) {
-    return null;
+  // In Node.js, try to read the deployment file
+  try {
+    const possiblePaths = [
+      path.join(process.cwd(), 'deployments', `${network}-latest.json`),
+      path.join(process.cwd(), '..', 'deployments', `${network}-latest.json`),
+      path.join(process.cwd(), '..', '..', 'deployments', `${network}-latest.json`),
+      path.join(__dirname, '..', '..', '..', 'deployments', `${network}-latest.json`),
+    ];
+    
+    for (const p of possiblePaths) {
+      if (fs.existsSync(p)) {
+        const content = fs.readFileSync(p, 'utf8');
+        const parsed = JSON.parse(content);
+        if (parsed.programId) {
+          return parsed;
+        }
+      }
+    }
+  } catch (e) {
+    // Silently fail in production, debug in development
+    if (process.env.NODE_ENV === 'development') {
+      console.debug('Could not load deployment file:', e);
+    }
   }
   
-  // For other networks, return null for now
-  console.debug('No deployment config available for network:', network);
   return null;
 }
 
-// Function to get program ID with deployment priority
+// Get program ID from deployment or env
 function getProgramIdForNetwork(network: string = 'devnet'): string {
-  // First try: deployment artifacts
-  const deployment = loadDeployment(network);
+  // Priority 1: Deployment file
+  const deployment = loadDeploymentConfig(network);
   if (deployment?.programId) {
     return deployment.programId;
   }
   
-  // Second try: environment variable
-  if (process.env.PROGRAM_ID) {
-    return process.env.PROGRAM_ID;
-  }
+  // Priority 2: Environment variables
+  if (process.env.PROGRAM_ID) return process.env.PROGRAM_ID;
+  if (process.env.VITE_PROGRAM_ID) return process.env.VITE_PROGRAM_ID;
   
-  // Third try: VITE environment variable (for frontend)
-  if (process.env.VITE_PROGRAM_ID) {
-    return process.env.VITE_PROGRAM_ID;
-  }
-  
-  // Fallback: hardcoded default
-  return 'CD2sN1enC22Nyw6U6s2dYcxfbtsLVq2PhbomLBkyh1z5';
+  // Fallback (should not reach here in production)
+  console.warn('No program ID found! Using fallback.');
+  return 'DWPzC5B8wCYFJFw9khPiCwSvErNJTVaBxpUzrxbTCNJk';
 }
 
-// Function to get current network
+// Current network
 function getCurrentNetwork(): string {
   return process.env.SOLANA_NETWORK || process.env.VITE_SOLANA_NETWORK || 'devnet';
 }
 
-// Program constants
 const currentNetwork = getCurrentNetwork();
+
+// Export program ID
 export const PROGRAM_ID = new PublicKey(getProgramIdForNetwork(currentNetwork));
 
-// Export function to get program ID for any network
+// Export function to get program ID string
 export const getProgramId = (network: string = currentNetwork): string => {
   return getProgramIdForNetwork(network);
 };
 
-// Export function to get protocol addresses from deployment
+// ============= PDA DERIVATION FUNCTIONS =============
+// These derive PDAs from the program ID - NO HARD-CODED ADDRESSES!
+
+export function getStakingPoolPDA(programId: PublicKey = PROGRAM_ID): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync([STAKING_POOL_SEED], programId);
+}
+
+export function getRewardVaultPDA(programId: PublicKey = PROGRAM_ID): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync([REWARD_VAULT_SEED], programId);
+}
+
+export function getStakingVaultPDA(programId: PublicKey = PROGRAM_ID): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync([STAKING_VAULT_SEED], programId);
+}
+
+export function getProtocolStatePDA(programId: PublicKey = PROGRAM_ID): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync([PROTOCOL_SEED], programId);
+}
+
+export function getTreasuryPDA(programId: PublicKey = PROGRAM_ID): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync([TREASURY_SEED], programId);
+}
+
+export function getFeeReceiverPDA(programId: PublicKey = PROGRAM_ID): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync([FEE_RECEIVER_SEED], programId);
+}
+
+export function getUserStakePDA(
+  stakingPool: PublicKey, 
+  user: PublicKey, 
+  programId: PublicKey = PROGRAM_ID
+): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from('user_stake'), stakingPool.toBuffer(), user.toBuffer()],
+    programId
+  );
+}
+
+// Legacy export for backwards compatibility - but these now DERIVE, not hard-code
 export const getProtocolAddresses = (network: string = currentNetwork) => {
-  const deployment = loadDeployment(network);
-  return deployment?.pdas || {};
+  const programId = new PublicKey(getProgramIdForNetwork(network));
+  const [stakingPool] = getStakingPoolPDA(programId);
+  const [rewardVault] = getRewardVaultPDA(programId);
+  const [stakingVault] = getStakingVaultPDA(programId);
+  const [protocolState] = getProtocolStatePDA(programId);
+  const [treasury] = getTreasuryPDA(programId);
+  const [feeReceiver] = getFeeReceiverPDA(programId);
+  
+  return {
+    stakingPool: stakingPool.toString(),
+    rewardVault: rewardVault.toString(),
+    stakingVault: stakingVault.toString(),
+    protocolState: protocolState.toString(),
+    treasury: treasury.toString(),
+    feeReceiver: feeReceiver.toString(),
+  };
 };
-export const PROTOCOL_SEED = Buffer.from('protocol_state');
-export const TREASURY_SEED = Buffer.from('treasury');
+
+// ============= OTHER CONSTANTS (unchanged) =============
+
+// Export seed constants for backwards compatibility
+export const PROTOCOL_SEED_BUFFER = PROTOCOL_SEED;
+export const TREASURY_SEED_BUFFER = TREASURY_SEED;
 export const TOKEN_CONFIG_SEED = Buffer.from('token_config');
 export const LOAN_SEED = Buffer.from('loan');
+
+// Export seeds directly (needed by SDK)
+export { PROTOCOL_SEED, TREASURY_SEED };
 
 // Protocol parameters
 export const LOAN_DURATION = {
@@ -97,7 +187,6 @@ export const FEE_DISTRIBUTION = {
   BUYBACK_BPS: 500,   // 5%
   OPERATIONS_BPS: 500, // 5%
 };
-
 
 // LTV ratios by tier (in basis points)
 export const LTV_RATIOS = {
@@ -119,7 +208,6 @@ export const LTV_SCALING = {
   MAX_BONUS_BPS: 2500,                   // +25% for 12h
   MAX_PENALTY_BPS: 2500,                 // -25% for 7d
 };
-
 
 // API endpoints
 export const API_ENDPOINTS = {
