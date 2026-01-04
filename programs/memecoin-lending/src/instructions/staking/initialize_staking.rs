@@ -73,9 +73,13 @@ pub fn initialize_staking_handler(
     staking_pool.total_staked = 0;
     staking_pool.current_epoch_eligible_stake = 0;
     
-    // Reward accumulator - starts at 0
-    staking_pool.reward_per_token_accumulated = 0;
+    // Current epoch rewards
     staking_pool.current_epoch_rewards = 0;
+    
+    // Last epoch distribution tracking
+    staking_pool.last_epoch_rewards = 0;
+    staking_pool.last_epoch_eligible_stake = 0;
+    staking_pool.last_epoch_distributed = 0;
     
     // Stats
     staking_pool.total_rewards_distributed = 0;
@@ -87,7 +91,7 @@ pub fn initialize_staking_handler(
     staking_pool.bump = ctx.bumps.staking_pool;
     
     msg!(
-        "Initialized staking pool. Token: {}. Epoch duration: {}s. RPT: 0",
+        "Initialized staking pool. Token: {}. Epoch duration: {}s. Direct distribution mode.",
         staking_pool.staking_token_mint,
         epoch_duration
     );

@@ -26,7 +26,7 @@ program
   .name('staking-info')
   .description('Get staking pool information and statistics')
   .option('-n, --network <network>', 'Network to use', 'devnet')
-  .option('-k, --keypair <path>', 'Path to keypair', '../keys/admin.json')
+  .option('-k, --keypair <path>', 'Path to keypair', './keys/admin.json')
   .option('-u, --user <address>', 'Check specific user stake')
   .action(async (options) => {
     try {

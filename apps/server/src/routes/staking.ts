@@ -1,5 +1,7 @@
 import { Hono } from 'hono';
 import { stakingService } from '../services/staking.service.js';
+import { distributionCrankService } from '../services/distribution-crank.service.js';
+import { getDistributionCrankStatus } from '../jobs/distribution-crank.job.js';
 
 const stakingRoutes = new Hono();
 
@@ -103,6 +105,57 @@ stakingRoutes.get('/fees/breakdown', async (c) => {
     return c.json({ success: true, data: breakdown });
   } catch (error: any) {
     return c.json({ success: false, error: error.message }, 500);
+  }
+});
+
+// Distribution crank endpoints
+
+// Get distribution crank status
+stakingRoutes.get('/crank/status', async (c) => {
+  try {
+    const [serviceStatus, jobStatus] = await Promise.all([
+      distributionCrankService.getStatus(),
+      getDistributionCrankStatus(),
+    ]);
+
+    return c.json({
+      success: true,
+      data: {
+        service: serviceStatus,
+        jobs: jobStatus,
+      }
+    });
+  } catch (error: any) {
+    console.error('Error fetching crank status:', error);
+    return c.json({
+      success: false,
+      error: 'Failed to fetch distribution crank status'
+    }, 500);
+  }
+});
+
+// Manual trigger distribution tick (admin/debugging)
+stakingRoutes.post('/crank/tick', async (c) => {
+  try {
+    // Initialize if needed
+    await distributionCrankService.initialize();
+    
+    // Run a manual tick
+    const result = await distributionCrankService.tick();
+    
+    return c.json({
+      success: true,
+      data: {
+        ...result,
+        totalDistributed: result.totalDistributed.toString(), // Convert BigInt to string
+      }
+    });
+  } catch (error: any) {
+    console.error('Error running manual tick:', error);
+    return c.json({
+      success: false,
+      error: error.message || 'Failed to execute distribution tick'
+    }, 500);
   }
 });
 

@@ -58,7 +58,7 @@ class StakingService {
       }
       
       // Deserialize staking pool account (skip 8-byte discriminator)
-      // New Rust struct layout with accumulator:
+      // New Rust struct layout with direct distribution:
       // pub struct StakingPool {
       //     pub authority: Pubkey,              // 32 bytes
       //     pub staking_token_mint: Pubkey,     // 32 bytes
@@ -69,8 +69,10 @@ class StakingService {
       //     pub epoch_start_time: i64,          // 8 bytes
       //     pub total_staked: u64,              // 8 bytes
       //     pub current_epoch_eligible_stake: u64, // 8 bytes
-      //     pub reward_per_token_accumulated: u128, // 16 bytes
       //     pub current_epoch_rewards: u64,     // 8 bytes
+      //     pub last_epoch_rewards: u64,        // 8 bytes (NEW)
+      //     pub last_epoch_eligible_stake: u64, // 8 bytes (NEW)
+      //     pub last_epoch_distributed: u64,    // 8 bytes (NEW)
       //     pub total_rewards_distributed: u64, // 8 bytes
       //     pub total_rewards_deposited: u64,   // 8 bytes
       //     pub total_epochs_completed: u64,    // 8 bytes
@@ -91,8 +93,10 @@ class StakingService {
       const epochStartTime = readI64(data, offset); offset += 8;
       const totalStaked = readU64(data, offset); offset += 8;
       const currentEpochEligibleStake = readU64(data, offset); offset += 8;
-      const rewardPerTokenAccumulated = readU128(data, offset); offset += 16;
       const currentEpochRewards = readU64(data, offset); offset += 8;
+      const lastEpochRewards = readU64(data, offset); offset += 8;
+      const lastEpochEligibleStake = readU64(data, offset); offset += 8;
+      const lastEpochDistributed = readU64(data, offset); offset += 8;
       const totalRewardsDistributed = readU64(data, offset); offset += 8;
       const totalRewardsDeposited = readU64(data, offset); offset += 8;
       const totalEpochsCompleted = readU64(data, offset); offset += 8;
@@ -173,7 +177,8 @@ class StakingService {
         currentEpoch: currentEpoch.toString(),
         timeUntilNextEpoch,
         currentEpochRewards: currentEpochRewards.toString(),
-        rewardPerTokenAccumulated: rewardPerTokenAccumulated.toString(),
+        lastEpochRewards: lastEpochRewards.toString(),
+        lastEpochDistributed: lastEpochDistributed.toString(),
         paused
       });
       
@@ -188,7 +193,9 @@ class StakingService {
         timeUntilNextEpoch,
         currentEpochRewards: currentEpochRewards.toString(),
         currentEpochEligibleStake: currentEpochEligibleStake.toString(),
-        rewardPerTokenAccumulated: rewardPerTokenAccumulated.toString(),
+        lastEpochRewards: lastEpochRewards.toString(),
+        lastEpochEligibleStake: lastEpochEligibleStake.toString(),
+        lastEpochDistributed: lastEpochDistributed.toString(),
         totalRewardsDistributed: totalRewardsDistributed.toString(),
         totalRewardsDeposited: totalRewardsDeposited.toString(),
       };
@@ -204,8 +211,13 @@ class StakingService {
         emissionRate: '0',
         currentEpoch: 0,
         timeUntilNextEpoch: 0,
-        epochRewards: '0',
-        eligibleStake: '0',
+        currentEpochRewards: '0',
+        currentEpochEligibleStake: '0',
+        lastEpochRewards: '0',
+        lastEpochEligibleStake: '0',
+        lastEpochDistributed: '0',
+        totalRewardsDistributed: '0',
+        totalRewardsDeposited: '0',
       };
     }
   }
@@ -233,16 +245,14 @@ class StakingService {
       }
       
       // Deserialize user stake account (skip 8-byte discriminator)
-      // New struct with accumulator fields:
+      // New struct with direct distribution:
       // pub struct UserStake {
       //     pub owner: Pubkey,                     // 32 bytes
       //     pub pool: Pubkey,                      // 32 bytes  
       //     pub staked_amount: u64,                // 8 bytes
       //     pub stake_start_epoch: u64,            // 8 bytes
-      //     pub reward_per_token_snapshot: u128,   // 16 bytes
-      //     pub snapshot_initialized: bool,        // 1 byte
-      //     pub last_claimed_epoch: u64,           // 8 bytes
-      //     pub total_rewards_claimed: u64,        // 8 bytes
+      //     pub last_rewarded_epoch: u64,          // 8 bytes
+      //     pub total_rewards_received: u64,       // 8 bytes
       //     pub first_stake_time: i64,             // 8 bytes
       //     pub bump: u8,                          // 1 byte
       //     pub _reserved: [u8; 32],               // 32 bytes
@@ -254,10 +264,8 @@ class StakingService {
       const pool = readPubkey(data, offset); offset += 32;
       const stakedAmount = readU64(data, offset); offset += 8;
       const stakeStartEpoch = readU64(data, offset); offset += 8;
-      const rewardPerTokenSnapshot = readU128(data, offset); offset += 16;
-      const snapshotInitialized = data[offset] !== 0; offset += 1;
-      const lastClaimedEpoch = readU64(data, offset); offset += 8;
-      const totalRewardsClaimed = readU64(data, offset); offset += 8;
+      const lastRewardedEpoch = readU64(data, offset); offset += 8;
+      const totalRewardsReceived = readU64(data, offset); offset += 8;
       const firstStakeTime = readI64(data, offset); offset += 8;
       const bump = data[offset];
       
@@ -266,10 +274,8 @@ class StakingService {
         pool: pool.toString(),
         stakedAmount: stakedAmount.toString(),
         stakeStartEpoch: stakeStartEpoch.toNumber(),
-        rewardPerTokenSnapshot: rewardPerTokenSnapshot.toString(),
-        snapshotInitialized,
-        lastClaimedEpoch: lastClaimedEpoch.toNumber(),
-        totalRewardsClaimed: totalRewardsClaimed.toString(),
+        lastRewardedEpoch: lastRewardedEpoch.toNumber(),
+        totalRewardsReceived: totalRewardsReceived.toString(),
         firstStakeTime: firstStakeTime.toNumber(),
         bump,
       };
@@ -282,44 +288,33 @@ class StakingService {
   
   async getPendingRewards(address: string): Promise<{ pending: string; pendingSol: number; isEligibleCurrentEpoch: boolean }> {
     try {
-      // Get user stake
+      // In direct distribution system, there are no "pending" rewards to claim
+      // Rewards are automatically distributed to user wallets by the crank
+      // Users are eligible if they staked before the current epoch
+      
       const userStake = await this.getUserStake(address);
       
       if (!userStake || userStake.stakedAmount === '0') {
         return { pending: '0', pendingSol: 0, isEligibleCurrentEpoch: false };
       }
       
-      // Not eligible yet
-      if (!userStake.snapshotInitialized) {
-        return { pending: '0', pendingSol: 0, isEligibleCurrentEpoch: false };
-      }
-      
       const stats = await this.getStakingStats();
-      if (!stats) {
+      if (!stats || !stats.currentEpoch) {
         return { pending: '0', pendingSol: 0, isEligibleCurrentEpoch: false };
       }
       
-      // Calculate using accumulator: rewards = stake * (current_rpt - user_snapshot) / PRECISION
-      const PRECISION = BigInt('1000000000000'); // 1e12
-      const stakedAmount = BigInt(userStake.stakedAmount);
-      const currentRpt = BigInt(stats.rewardPerTokenAccumulated);
-      const userSnapshot = BigInt(userStake.rewardPerTokenSnapshot);
+      // User is eligible for current epoch if they staked before it started
+      const isEligibleCurrentEpoch = userStake.stakeStartEpoch < stats.currentEpoch;
       
-      if (currentRpt <= userSnapshot) {
-        return { pending: '0', pendingSol: 0, isEligibleCurrentEpoch: true };
-      }
-      
-      const rptDiff = currentRpt - userSnapshot;
-      const rewards = (stakedAmount * rptDiff) / PRECISION;
-      
-      return {
-        pending: rewards.toString(),
-        pendingSol: Number(rewards) / LAMPORTS_PER_SOL,
-        isEligibleCurrentEpoch: true,
+      // No pending rewards - they are distributed automatically
+      return { 
+        pending: '0', 
+        pendingSol: 0, 
+        isEligibleCurrentEpoch 
       };
       
     } catch (error: any) {
-      console.error('❌ Failed to calculate pending rewards:', error.message);
+      console.error('❌ Failed to get eligibility status:', error.message);
       return { pending: '0', pendingSol: 0, isEligibleCurrentEpoch: false };
     }
   }

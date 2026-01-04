@@ -2,7 +2,6 @@ use anchor_lang::prelude::*;
 use anchor_spl::token::{self, Token, TokenAccount, Transfer};
 use crate::state::*;
 use crate::error::LendingError;
-use super::epoch_helpers::{maybe_advance_epoch, maybe_initialize_user_snapshot};
 
 #[derive(Accounts)]
 pub struct Unstake<'info> {
@@ -50,20 +49,13 @@ pub struct Unstake<'info> {
 pub fn unstake_handler(ctx: Context<Unstake>, amount: u64) -> Result<()> {
     require!(amount > 0, LendingError::InvalidAmount);
     
-    let clock = Clock::get()?;
     let staking_pool = &mut ctx.accounts.staking_pool;
     let user_stake = &mut ctx.accounts.user_stake;
     
     require!(user_stake.staked_amount >= amount, LendingError::InsufficientStakedBalance);
     
-    // Auto-advance epoch if needed
-    maybe_advance_epoch(staking_pool, clock.unix_timestamp)?;
-    
-    // Initialize snapshot if user just became eligible
-    maybe_initialize_user_snapshot(user_stake, staking_pool)?;
-    
-    // Check if user was eligible (affects current_epoch_eligible_stake)
-    let was_eligible = user_stake.snapshot_initialized;
+    // Check if user was eligible (staked before current epoch)
+    let was_eligible = user_stake.stake_start_epoch < staking_pool.current_epoch;
     
     // Update amounts
     user_stake.staked_amount = user_stake.staked_amount
@@ -74,8 +66,7 @@ pub fn unstake_handler(ctx: Context<Unstake>, amount: u64) -> Result<()> {
         .checked_sub(amount)
         .ok_or(LendingError::MathUnderflow)?;
     
-    // If user was eligible, reduce eligible stake
-    // This means they LOSE current epoch rewards proportionally (anti-gaming)
+    // If was eligible, reduce eligible stake (loses current epoch rewards - anti-gaming)
     if was_eligible {
         staking_pool.current_epoch_eligible_stake = staking_pool.current_epoch_eligible_stake
             .saturating_sub(amount);
@@ -84,9 +75,8 @@ pub fn unstake_handler(ctx: Context<Unstake>, amount: u64) -> Result<()> {
     // If fully unstaked, reset for anti-gaming
     if user_stake.staked_amount == 0 {
         user_stake.stake_start_epoch = staking_pool.current_epoch;
-        user_stake.reward_per_token_snapshot = 0;
-        user_stake.snapshot_initialized = false;
-        msg!("Fully unstaked. User must wait full epoch to earn again.");
+        user_stake.last_rewarded_epoch = staking_pool.current_epoch;
+        msg!("Fully unstaked. Must wait full epoch to earn again.");
     }
     
     // Transfer tokens back to user

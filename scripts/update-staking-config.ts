@@ -13,7 +13,7 @@ program
   .name('update-staking-config')
   .description('Update staking pool configuration')
   .requiredOption('--network <network>', 'Solana network (devnet, mainnet, localnet)')
-  .option('--admin-keypair <path>', 'Path to admin keypair (defaults to ./keys/admin.json)')
+  .option('--admin-keypair <path>', 'Path to admin keypair (defaults to./keys/admin.json)')
   .option('--target-balance <sol>', 'Target pool balance in SOL for optimal APR')
   .option('--base-rate <lamports>', 'Base emission rate in lamports/second')
   .option('--max-rate <lamports>', 'Max emission rate in lamports/second')

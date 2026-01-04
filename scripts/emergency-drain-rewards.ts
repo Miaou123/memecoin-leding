@@ -31,7 +31,7 @@ program
   .name('emergency-drain-rewards')
   .description('Emergency drain all SOL from staking reward vault to admin')
   .option('-n, --network <network>', 'Network to use', 'devnet')
-  .option('-k, --keypair <path>', 'Path to admin keypair', '../keys/admin.json')
+  .option('-k, --keypair <path>', 'Path to admin keypair', './keys/admin.json')
   .action(async (options) => {
     try {
       printHeader('🚨 Emergency Drain Staking Rewards');

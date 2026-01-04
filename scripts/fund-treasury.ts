@@ -14,7 +14,7 @@ program
   .description('Fund the protocol treasury with SOL')
   .requiredOption('--network <network>', 'Solana network (devnet, mainnet, localnet)')
   .requiredOption('--amount <amount>', 'Amount of SOL to fund (e.g., 10)')
-  .option('--admin-keypair <path>', 'Path to admin keypair (defaults to ./keys/admin.json)')
+  .option('--admin-keypair <path>', 'Path to admin keypair (defaults to./keys/admin.json)')
   .action(async (options) => {
     try {
       printHeader('Fund Treasury');

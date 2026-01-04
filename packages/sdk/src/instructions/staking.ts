@@ -1,5 +1,5 @@
 import { Program, BN } from '@coral-xyz/anchor';
-import { PublicKey, SystemProgram, TransactionSignature } from '@solana/web3.js';
+import { PublicKey, SystemProgram, TransactionSignature, AccountMeta } from '@solana/web3.js';
 import { TOKEN_PROGRAM_ID, getAssociatedTokenAddress, ASSOCIATED_TOKEN_PROGRAM_ID } from '@solana/spl-token';
 import * as pda from '../pda';
 
@@ -93,22 +93,39 @@ export async function unstake(
     .rpc();
 }
 
-export async function claimRewards(
-  program: Program,
-): Promise<TransactionSignature> {
+export async function advanceEpoch(program: Program): Promise<string> {
   const [stakingPool] = pda.getStakingPoolPDA(program.programId);
-  const [userStake] = pda.getUserStakePDA(stakingPool, program.provider.publicKey!, program.programId);
-  const [rewardVault] = pda.getRewardVaultPDA(program.programId);
 
   return program.methods
-    .claimRewards()
+    .advanceEpoch()
     .accounts({
       stakingPool,
-      userStake,
+      caller: program.provider.publicKey!,
+    })
+    .rpc();
+}
+
+export async function distributeRewards(
+  program: Program,
+  userStakeAccounts: { userStake: PublicKey; userWallet: PublicKey }[],
+): Promise<string> {
+  const [stakingPool] = pda.getStakingPoolPDA(program.programId);
+  const [rewardVault] = pda.getRewardVaultPDA(program.programId);
+
+  const remainingAccounts: AccountMeta[] = userStakeAccounts.flatMap(({ userStake, userWallet }) => [
+    { pubkey: userStake, isSigner: false, isWritable: true },
+    { pubkey: userWallet, isSigner: false, isWritable: true },
+  ]);
+
+  return program.methods
+    .distributeRewards()
+    .accounts({
+      stakingPool,
       rewardVault,
-      user: program.provider.publicKey!,
+      caller: program.provider.publicKey!,
       systemProgram: SystemProgram.programId,
     })
+    .remainingAccounts(remainingAccounts)
     .rpc();
 }
 

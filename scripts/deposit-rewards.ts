@@ -30,7 +30,7 @@ program
   .description('Deposit SOL rewards to the staking pool')
   .requiredOption('-a, --amount <sol>', 'Amount of SOL to deposit')
   .option('-n, --network <network>', 'Network to use', 'devnet')
-  .option('-k, --keypair <path>', 'Path to depositor keypair', '../keys/admin.json')
+  .option('-k, --keypair <path>', 'Path to depositor keypair', './keys/admin.json')
   .action(async (options) => {
     try {
       printHeader('💰 Deposit Staking Rewards');

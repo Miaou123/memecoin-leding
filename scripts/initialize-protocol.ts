@@ -15,7 +15,7 @@ program
   .option('--admin <address>', 'Admin wallet address (defaults to keypair public key)')
   .option('--buyback-wallet <address>', 'Buyback wallet address (defaults to admin)')
   .option('--operations-wallet <address>', 'Operations wallet address (defaults to admin)')
-  .option('--admin-keypair <path>', 'Path to admin keypair (defaults to ./keys/admin.json)')
+  .option('--admin-keypair <path>', 'Path to admin keypair (defaults to./keys/admin.json)')
   .action(async (options) => {
     try {
       printHeader('Initialize Protocol');

@@ -31,7 +31,7 @@ program
   .description('Update the staking token mint (only when total_staked == 0)')
   .requiredOption('-m, --mint <address>', 'New staking token mint address')
   .option('-n, --network <network>', 'Network to use', 'devnet')
-  .option('-k, --keypair <path>', 'Path to admin keypair', '../keys/admin.json')
+  .option('-k, --keypair <path>', 'Path to admin keypair', './keys/admin.json')
   .option('--dry-run', 'Simulate the transaction without executing')
   .action(async (options) => {
     try {

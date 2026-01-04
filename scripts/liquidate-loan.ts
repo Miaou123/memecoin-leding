@@ -34,7 +34,7 @@ program
   .description('Liquidate an expired or underwater loan')
   .option('-l, --loan <pubkey>', 'Loan account public key to liquidate')
   .option('-n, --network <network>', 'Network to use', 'devnet')
-  .option('-k, --keypair <path>', 'Path to liquidator keypair', '../keys/admin.json')
+  .option('-k, --keypair <path>', 'Path to liquidator keypair', './keys/admin.json')
   .option('--find-liquidatable', 'Find and list all liquidatable loans')
   .option('--dry-run', 'Simulate the transaction without executing')
   .action(async (options) => {

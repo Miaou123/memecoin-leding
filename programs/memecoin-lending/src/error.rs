@@ -195,4 +195,16 @@ pub enum LendingError {
 
     #[msg("E6072: Insufficient staked balance")]
     InsufficientStakedBalance = 6072,
+
+    #[msg("E6073: Epoch has not ended yet")]
+    EpochNotEnded = 6073,
+
+    #[msg("E6074: Distribution not complete - cannot advance epoch")]
+    DistributionNotComplete = 6074,
+
+    #[msg("E6075: No eligible stakers")]
+    NoEligibleStakers = 6075,
+
+    #[msg("E6076: Invalid account pairs - must provide UserStake + wallet pairs")]
+    InvalidAccountPairs = 6076,
 }

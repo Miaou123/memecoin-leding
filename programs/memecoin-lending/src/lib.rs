@@ -9,7 +9,7 @@ pub mod events;
 
 use instructions::*;
 
-declare_id!("46YbCjkHDPYWWNZZEPsvWeLweFtzmPEeCnDP87zDTZFU");
+declare_id!("DWPzC5B8wCYFJFw9khPiCwSvErNJTVaBxpUzrxbTCNJk");
 
 #[program]
 pub mod memecoin_lending {
@@ -156,14 +156,20 @@ pub mod memecoin_lending {
         instructions::staking::unstake::unstake_handler(ctx, amount)
     }
 
-    /// Claim staking rewards (SOL)
-    pub fn claim_rewards(ctx: Context<ClaimRewards>) -> Result<()> {
-        instructions::staking::claim_rewards::claim_rewards_handler(ctx)
-    }
 
     /// Deposit SOL rewards to pool (admin/fee distribution)
     pub fn deposit_rewards(ctx: Context<DepositRewards>, amount: u64) -> Result<()> {
         instructions::staking::deposit_rewards::deposit_rewards_handler(ctx, amount)
+    }
+
+    /// Advance to next epoch (permissionless - anyone can call)
+    pub fn advance_epoch(ctx: Context<AdvanceEpoch>) -> Result<()> {
+        instructions::staking::advance_epoch::advance_epoch_handler(ctx)
+    }
+
+    /// Distribute rewards to batch of users (permissionless - called by crank)
+    pub fn distribute_rewards(ctx: Context<DistributeRewards>) -> Result<()> {
+        instructions::staking::distribute_rewards::distribute_rewards_handler(ctx)
     }
 
     /// Pause staking (admin only)

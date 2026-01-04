@@ -4,6 +4,7 @@ import { liquidationJob } from './liquidation.job.js';
 import { priceMonitorJob } from './price-monitor.job.js';
 import { syncJob } from './sync.job.js';
 import { notificationJob } from './notification.job.js';
+import { distributionCrankQueue, distributionCrankWorker, scheduleDistributionCrankJob } from './distribution-crank.job.js';
 
 // BullMQ requires maxRetriesPerRequest: null for blocking operations
 const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', {
@@ -15,6 +16,8 @@ export const liquidationQueue = new Queue('liquidation', { connection: redis });
 export const priceMonitorQueue = new Queue('price-monitor', { connection: redis });
 export const syncQueue = new Queue('sync', { connection: redis });
 export const notificationQueue = new Queue('notification', { connection: redis });
+// Distribution crank queue is exported from distribution-crank.job.ts
+export { distributionCrankQueue };
 
 // Job workers
 const liquidationWorker = new Worker('liquidation', liquidationJob, { 
@@ -133,6 +136,9 @@ export async function initializeJobs() {
       },
     ]);
     
+    // Schedule distribution crank job
+    await scheduleDistributionCrankJob();
+    
     // Setup error handlers
     liquidationWorker.on('failed', (job, err) => {
       console.error(`❌ Liquidation job failed:`, job?.name, err.message);
@@ -150,16 +156,20 @@ export async function initializeJobs() {
       console.error(`❌ Notification job failed:`, job?.name, err.message);
     });
     
+    // Distribution crank worker error handling is in distribution-crank.job.ts
+    
     // Log active job counts
-    const [liquidationActive, priceActive, syncActive, notificationActive] = await Promise.all([
+    const [liquidationActive, priceActive, syncActive, notificationActive, distributionActive] = await Promise.all([
       liquidationQueue.getActiveCount(),
       priceMonitorQueue.getActiveCount(),
       syncQueue.getActiveCount(),
       notificationQueue.getActiveCount(),
+      distributionCrankQueue.getActiveCount(),
     ]);
     
-    if (liquidationActive + priceActive + syncActive + notificationActive > 0) {
-      console.log(`📋 Preserved active jobs: liquidation=${liquidationActive}, price=${priceActive}, sync=${syncActive}, notification=${notificationActive}`);
+    const totalActive = liquidationActive + priceActive + syncActive + notificationActive + distributionActive;
+    if (totalActive > 0) {
+      console.log(`📋 Active jobs: liquidation=${liquidationActive}, price=${priceActive}, sync=${syncActive}, notification=${notificationActive}, distribution=${distributionActive}`);
     }
     
     console.log('✅ Background jobs initialized successfully');
@@ -181,6 +191,7 @@ export async function closeJobs() {
     priceMonitorWorker.close(),
     syncWorker.close(),
     notificationWorker.close(),
+    distributionCrankWorker.close(),
   ]);
   
   // Close queues
@@ -189,6 +200,7 @@ export async function closeJobs() {
     priceMonitorQueue.close(),
     syncQueue.close(),
     notificationQueue.close(),
+    distributionCrankQueue.close(),
   ]);
   
   // Close Redis connection

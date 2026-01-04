@@ -14,7 +14,7 @@ program
   .name('reset-staking-pool')
   .description('Close and reinitialize the staking pool')
   .option('-n, --network <network>', 'Network: devnet, mainnet, localnet', 'devnet')
-  .option('-k, --admin-keypair <path>', 'Path to admin keypair', '../keys/admin.json')
+  .option('-k, --admin-keypair <path>', 'Path to admin keypair', './keys/admin.json')
   .option('--token-mint <address>', 'Token mint for staking', '6KHL8uUXFie8Xdy3EBvw6EgruiU3duc9fvGrWoZ9pump')
   .parse();
 

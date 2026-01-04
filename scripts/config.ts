@@ -87,7 +87,7 @@ export function getRpcUrl(network: string): string {
  * Default path: ./keys/admin.json (relative to scripts directory)
  */
 export function getAdminKeypair(keypairPath?: string): Keypair {
-  const defaultPath = path.join(__dirname, '../keys/admin.json');
+  const defaultPath = path.join(__dirname, './keys/admin.json');
   const resolvedPath = keypairPath ? path.resolve(keypairPath) : defaultPath;
 
   if (!fs.existsSync(resolvedPath)) {
@@ -107,6 +107,7 @@ export function getAdminKeypair(keypairPath?: string): Keypair {
 
 // Re-export deployment functions from deployment-store
 export { 
+  loadDeployment as loadDeploymentConfig,
   saveDeployment as saveDeploymentConfig,
   updateDeployment,
   getAddress,

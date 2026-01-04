@@ -60,7 +60,7 @@ class CreatorFeeClaimer {
     this.pumpSdk = new PumpSDK.OnlinePumpSdk(this.connection);
     
     // Load admin keypair
-    const adminPath = path.join(__dirname, '../keys/admin.json');
+    const adminPath = path.join(__dirname, './keys/admin.json');
     if (!fs.existsSync(adminPath)) {
       throw new Error(`Admin keypair not found: ${adminPath}`);
     }

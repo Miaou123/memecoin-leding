@@ -29,8 +29,6 @@ pub const MAX_SLIPPAGE_BPS: u16 = 1500;          // 15% max slippage
 pub const SLIPPAGE_INCREMENT_BPS: u16 = 200;     // 2% increment per retry
 
 // === STAKING ===
-/// Precision for reward calculations (1e12)
-pub const REWARD_PRECISION: u128 = 1_000_000_000_000;
 
 // === LTV RATIOS BY TIER (in basis points) ===
 pub const LTV_BRONZE_BPS: u16 = 2500;  // 25%
@@ -347,14 +345,17 @@ pub struct StakingPool {
     /// (users who were staked since before current epoch started)
     pub current_epoch_eligible_stake: u64,
     
-    // === Reward Accumulator (KEY CHANGE) ===
-    
-    /// Accumulated reward per token (scaled by REWARD_PRECISION)
-    /// Increases each epoch: += (epoch_rewards * PRECISION) / eligible_stake
-    pub reward_per_token_accumulated: u128,
-    
-    /// Rewards accumulated for current epoch (to be added to accumulator when epoch ends)
+    /// Rewards accumulated for current epoch
     pub current_epoch_rewards: u64,
+    
+    /// Rewards from last completed epoch (to be distributed)
+    pub last_epoch_rewards: u64,
+
+    /// Eligible stake from last epoch (for calculating shares)  
+    pub last_epoch_eligible_stake: u64,
+
+    /// How much of last_epoch_rewards has been distributed so far
+    pub last_epoch_distributed: u64,
     
     // === Historical Tracking ===
     
@@ -390,8 +391,10 @@ impl StakingPool {
         8 +     // epoch_start_time
         8 +     // total_staked
         8 +     // current_epoch_eligible_stake
-        16 +    // reward_per_token_accumulated (u128)
         8 +     // current_epoch_rewards
+        8 +     // last_epoch_rewards (NEW)
+        8 +     // last_epoch_eligible_stake (NEW)
+        8 +     // last_epoch_distributed (NEW)
         8 +     // total_rewards_distributed
         8 +     // total_rewards_deposited
         8 +     // total_epochs_completed
@@ -416,19 +419,11 @@ pub struct UserStake {
     /// User becomes eligible at epoch AFTER this one
     pub stake_start_epoch: u64,
     
-    /// Reward per token snapshot - set when user BECOMES ELIGIBLE
-    /// This is their "starting point" for reward calculations
-    pub reward_per_token_snapshot: u128,
+    /// Last epoch for which user received rewards (for tracking)
+    pub last_rewarded_epoch: u64,
     
-    /// Whether the snapshot has been initialized
-    /// (set to true at the end of stake_start_epoch)
-    pub snapshot_initialized: bool,
-    
-    /// Last epoch for which user claimed rewards (for tracking)
-    pub last_claimed_epoch: u64,
-    
-    /// Total rewards claimed all-time (for UI/tracking)
-    pub total_rewards_claimed: u64,
+    /// Total rewards received all-time (for UI/tracking)
+    pub total_rewards_received: u64,
     
     /// Timestamp of first stake
     pub first_stake_time: i64,
@@ -446,10 +441,8 @@ impl UserStake {
         32 +    // pool
         8 +     // staked_amount
         8 +     // stake_start_epoch
-        16 +    // reward_per_token_snapshot (u128)
-        1 +     // snapshot_initialized
-        8 +     // last_claimed_epoch
-        8 +     // total_rewards_claimed
+        8 +     // last_rewarded_epoch (renamed)
+        8 +     // total_rewards_received (renamed)
         8 +     // first_stake_time
         1 +     // bump
         32;     // _reserved

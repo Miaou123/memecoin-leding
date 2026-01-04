@@ -23,6 +23,7 @@ import { errorHandler } from './middleware/error.js';
 import { prisma } from './db/client.js';
 import { initializeFastPriceMonitor, fastPriceMonitor } from './services/fast-price-monitor.js';
 import { loanService } from './services/loan.service.js';
+import { distributionCrankService } from './services/distribution-crank.service.js';
 
 // Create Hono app
 const app = new Hono();
@@ -159,6 +160,13 @@ const server = serve({
     console.log('📋 Background jobs initialized');
   }).catch((error) => {
     console.error('Failed to initialize jobs:', error);
+  });
+  
+  // Initialize distribution crank service
+  distributionCrankService.initialize().then(() => {
+    console.log('🏗️ Distribution crank service initialized');
+  }).catch((error) => {
+    console.error('Failed to initialize distribution crank:', error);
   });
 });
 

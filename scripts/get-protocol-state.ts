@@ -21,7 +21,7 @@ program
   .name('get-protocol-state')
   .description('View the current protocol state and statistics')
   .option('-n, --network <network>', 'Network to use (devnet, mainnet, localnet)', 'devnet')
-  .option('-k, --keypair <path>', 'Path to keypair file', '../keys/admin.json')
+  .option('-k, --keypair <path>', 'Path to keypair file', './keys/admin.json')
   .action(async (options) => {
     try {
       printHeader('📊 Protocol State');

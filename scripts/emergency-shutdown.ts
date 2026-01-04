@@ -36,7 +36,7 @@ program
   .name('emergency-shutdown')
   .description('Emergency shutdown - withdraw all funds and close all PDAs')
   .option('-n, --network <network>', 'Network to use', 'devnet')
-  .option('-k, --keypair <path>', 'Path to admin keypair', '../keys/admin.json')
+  .option('-k, --keypair <path>', 'Path to admin keypair', './keys/admin.json')
   .option('--confirm', 'Skip confirmation prompt')
   .action(async (options) => {
     try {

@@ -1068,10 +1068,19 @@ export class MemecoinLendingClient {
   }
 
   /**
-   * Claim staking rewards (SOL)
+   * Advance to next epoch (permissionless - anyone can call)
    */
-  async claimRewards(): Promise<TransactionSignature> {
-    return instructions.claimRewards(this.program);
+  async advanceEpoch(): Promise<TransactionSignature> {
+    return instructions.advanceEpoch(this.program);
+  }
+
+  /**
+   * Distribute rewards to batch of users (permissionless - called by crank)
+   */
+  async distributeRewards(
+    userStakeAccounts: { userStake: PublicKey; userWallet: PublicKey }[]
+  ): Promise<TransactionSignature> {
+    return instructions.distributeRewards(this.program, userStakeAccounts);
   }
 
   /**
@@ -1114,6 +1123,34 @@ export class MemecoinLendingClient {
    */
   async emergencyWithdraw(): Promise<TransactionSignature> {
     return instructions.emergencyWithdraw(this.program);
+  }
+
+  /**
+   * Close protocol state PDA and return rent to admin
+   */
+  async closeProtocolState(): Promise<TransactionSignature> {
+    return instructions.closeProtocolState(this.program);
+  }
+
+  /**
+   * Close fee receiver PDA and return rent to admin
+   */
+  async closeFeeReceiver(): Promise<TransactionSignature> {
+    return instructions.closeFeeReceiver(this.program);
+  }
+
+  /**
+   * Close staking pool PDA and return rent to admin
+   */
+  async closeStakingPool(): Promise<TransactionSignature> {
+    return instructions.closeStakingPool(this.program);
+  }
+
+  /**
+   * Close all PDAs in one transaction and return rent to admin
+   */
+  async closeAllPDAs(): Promise<TransactionSignature> {
+    return instructions.closeAllPDAs(this.program);
   }
 
 }

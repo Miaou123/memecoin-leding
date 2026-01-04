@@ -44,7 +44,7 @@ program
   .alias('ps')
   .description('View protocol state and statistics')
   .option('-n, --network <network>', 'Network', 'devnet')
-  .option('-k, --keypair <path>', 'Keypair path', '../keys/admin.json')
+  .option('-k, --keypair <path>', 'Keypair path', './keys/admin.json')
   .action((opts) => {
     runScript('get-protocol-state', ['--network', opts.network, '--keypair', opts.keypair]);
   });
@@ -54,7 +54,7 @@ program
   .alias('ls')
   .description('View loans')
   .option('-n, --network <network>', 'Network', 'devnet')
-  .option('-k, --keypair <path>', 'Keypair path', '../keys/admin.json')
+  .option('-k, --keypair <path>', 'Keypair path', './keys/admin.json')
   .option('-b, --borrower <wallet>', 'Filter by borrower')
   .option('-l, --loan <pubkey>', 'Get specific loan')
   .option('-a, --active', 'Show only active loans')
@@ -73,7 +73,7 @@ program
   .alias('tk')
   .description('View whitelisted tokens')
   .option('-n, --network <network>', 'Network', 'devnet')
-  .option('-k, --keypair <path>', 'Keypair path', '../keys/admin.json')
+  .option('-k, --keypair <path>', 'Keypair path', './keys/admin.json')
   .option('-m, --mint <address>', 'Get specific token')
   .action((opts) => {
     const args = ['--network', opts.network, '--keypair', opts.keypair];
@@ -91,7 +91,7 @@ program
   .requiredOption('-a, --amount <tokens>', 'Collateral amount')
   .requiredOption('-d, --duration <time>', 'Duration (e.g., 24h, 7d)')
   .option('-n, --network <network>', 'Network', 'devnet')
-  .option('-k, --keypair <path>', 'Borrower keypair', '../keys/admin.json')
+  .option('-k, --keypair <path>', 'Borrower keypair', './keys/admin.json')
   .option('--dry-run', 'Simulate only')
   .action((opts) => {
     const args = [
@@ -111,7 +111,7 @@ program
   .description('Repay a loan')
   .requiredOption('-l, --loan <pubkey>', 'Loan pubkey')
   .option('-n, --network <network>', 'Network', 'devnet')
-  .option('-k, --keypair <path>', 'Borrower keypair', '../keys/admin.json')
+  .option('-k, --keypair <path>', 'Borrower keypair', './keys/admin.json')
   .option('--dry-run', 'Simulate only')
   .action((opts) => {
     const args = ['--loan', opts.loan, '--network', opts.network, '--keypair', opts.keypair];
@@ -125,7 +125,7 @@ program
   .description('Liquidate a loan or find liquidatable loans')
   .option('-l, --loan <pubkey>', 'Loan pubkey to liquidate')
   .option('-n, --network <network>', 'Network', 'devnet')
-  .option('-k, --keypair <path>', 'Liquidator keypair', '../keys/admin.json')
+  .option('-k, --keypair <path>', 'Liquidator keypair', './keys/admin.json')
   .option('--find-liquidatable', 'Find all liquidatable loans')
   .option('--dry-run', 'Simulate only')
   .action((opts) => {
@@ -142,7 +142,7 @@ program
   .command('pause')
   .description('Pause the protocol (admin)')
   .option('-n, --network <network>', 'Network', 'devnet')
-  .option('-k, --keypair <path>', 'Admin keypair', '../keys/admin.json')
+  .option('-k, --keypair <path>', 'Admin keypair', './keys/admin.json')
   .action((opts) => {
     runScript('pause-protocol', ['--network', opts.network, '--keypair', opts.keypair]);
   });
@@ -151,7 +151,7 @@ program
   .command('resume')
   .description('Resume the protocol (admin)')
   .option('-n, --network <network>', 'Network', 'devnet')
-  .option('-k, --keypair <path>', 'Admin keypair', '../keys/admin.json')
+  .option('-k, --keypair <path>', 'Admin keypair', './keys/admin.json')
   .action((opts) => {
     runScript('resume-protocol', ['--network', opts.network, '--keypair', opts.keypair]);
   });
@@ -160,7 +160,7 @@ program
   .command('update-fees')
   .description('Update fee configuration (admin)')
   .option('-n, --network <network>', 'Network', 'devnet')
-  .option('-k, --keypair <path>', 'Admin keypair', '../keys/admin.json')
+  .option('-k, --keypair <path>', 'Admin keypair', './keys/admin.json')
   .option('--protocol <bps>', 'Protocol fee (bps)')
   .option('--treasury <bps>', 'Treasury fee (bps)')
   .option('--buyback <bps>', 'Buyback fee (bps)')
@@ -181,7 +181,7 @@ program
   .description('Update token configuration (admin)')
   .requiredOption('-m, --mint <address>', 'Token mint')
   .option('-n, --network <network>', 'Network', 'devnet')
-  .option('-k, --keypair <path>', 'Admin keypair', '../keys/admin.json')
+  .option('-k, --keypair <path>', 'Admin keypair', './keys/admin.json')
   .option('--ltv <bps>', 'New LTV (bps)')
   .option('--interest <bps>', 'New interest rate (bps)')
   .option('--enable', 'Enable token')
@@ -202,7 +202,7 @@ program
   .description('Withdraw from treasury (admin)')
   .requiredOption('-a, --amount <sol>', 'Amount in SOL')
   .option('-n, --network <network>', 'Network', 'devnet')
-  .option('-k, --keypair <path>', 'Admin keypair', '../keys/admin.json')
+  .option('-k, --keypair <path>', 'Admin keypair', './keys/admin.json')
   .option('--dry-run', 'Simulate only')
   .action((opts) => {
     const args = ['--amount', opts.amount, '--network', opts.network, '--keypair', opts.keypair];
@@ -215,7 +215,7 @@ program
   .description('Fund the treasury')
   .requiredOption('-a, --amount <sol>', 'Amount in SOL')
   .option('-n, --network <network>', 'Network', 'devnet')
-  .option('-k, --keypair <path>', 'Funder keypair', '../keys/admin.json')
+  .option('-k, --keypair <path>', 'Funder keypair', './keys/admin.json')
   .action((opts) => {
     runScript('fund-treasury', ['--amount', opts.amount, '--network', opts.network, '--admin-keypair', opts.keypair]);
   });

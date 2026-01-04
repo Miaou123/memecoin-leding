@@ -256,9 +256,13 @@ export interface StakingPool {
   totalStaked: string;
   currentEpochEligibleStake: string;
   
-  // Reward accumulator
-  rewardPerTokenAccumulated: string;
+  // Current epoch
   currentEpochRewards: string;
+  
+  // Last epoch (for distribution)
+  lastEpochRewards: string;
+  lastEpochEligibleStake: string;
+  lastEpochDistributed: string;
   
   // Stats
   totalRewardsDistributed: string;
@@ -274,10 +278,8 @@ export interface UserStake {
   pool: string;
   stakedAmount: string;
   stakeStartEpoch: number;
-  rewardPerTokenSnapshot: string;
-  snapshotInitialized: boolean;
-  lastClaimedEpoch: number;
-  totalRewardsClaimed: string;
+  lastRewardedEpoch: number;
+  totalRewardsReceived: string;
   firstStakeTime: number;
   bump: number;
 }
@@ -299,8 +301,10 @@ export async function getStakingPool(program: Program): Promise<StakingPool | nu
       epochStartTime: account.epochStartTime.toNumber(),
       totalStaked: account.totalStaked.toString(),
       currentEpochEligibleStake: account.currentEpochEligibleStake.toString(),
-      rewardPerTokenAccumulated: account.rewardPerTokenAccumulated.toString(),
       currentEpochRewards: account.currentEpochRewards.toString(),
+      lastEpochRewards: account.lastEpochRewards.toString(),
+      lastEpochEligibleStake: account.lastEpochEligibleStake.toString(),
+      lastEpochDistributed: account.lastEpochDistributed.toString(),
       totalRewardsDistributed: account.totalRewardsDistributed.toString(),
       totalRewardsDeposited: account.totalRewardsDeposited.toString(),
       totalEpochsCompleted: account.totalEpochsCompleted.toNumber(),
@@ -323,10 +327,8 @@ export async function getUserStake(program: Program, user: PublicKey): Promise<U
       pool: account.pool.toString(),
       stakedAmount: account.stakedAmount.toString(),
       stakeStartEpoch: account.stakeStartEpoch.toNumber(),
-      rewardPerTokenSnapshot: account.rewardPerTokenSnapshot.toString(),
-      snapshotInitialized: account.snapshotInitialized,
-      lastClaimedEpoch: account.lastClaimedEpoch.toNumber(),
-      totalRewardsClaimed: account.totalRewardsClaimed.toString(),
+      lastRewardedEpoch: account.lastRewardedEpoch.toNumber(),
+      totalRewardsReceived: account.totalRewardsReceived.toString(),
       firstStakeTime: account.firstStakeTime.toNumber(),
       bump: account.bump,
     };

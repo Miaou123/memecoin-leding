@@ -686,5 +686,67 @@ export async function updateWallets(
     })
     .rpc();
 }
+export async function closeProtocolState(
+  program: Program
+): Promise<TransactionSignature> {
+  const [protocolState] = pda.getProtocolStatePDA(program.programId);
+  
+  return program.methods
+    .closeProtocolState()
+    .accounts({
+      protocolState,
+      admin: program.provider.publicKey!,
+    })
+    .rpc();
+}
+
+export async function closeFeeReceiver(
+  program: Program
+): Promise<TransactionSignature> {
+  const [protocolState] = pda.getProtocolStatePDA(program.programId);
+  const [feeReceiver] = pda.getFeeReceiverPDA(program.programId);
+  
+  return program.methods
+    .closeFeeReceiver()
+    .accounts({
+      protocolState,
+      feeReceiver,
+      admin: program.provider.publicKey!,
+    })
+    .rpc();
+}
+
+export async function closeStakingPool(
+  program: Program
+): Promise<TransactionSignature> {
+  const [stakingPool] = pda.getStakingPoolPDA(program.programId);
+  
+  return program.methods
+    .closeStakingPool()
+    .accounts({
+      stakingPool,
+      authority: program.provider.publicKey!,
+    })
+    .rpc();
+}
+
+export async function closeAllPDAs(
+  program: Program
+): Promise<TransactionSignature> {
+  const [protocolState] = pda.getProtocolStatePDA(program.programId);
+  const [feeReceiver] = pda.getFeeReceiverPDA(program.programId);
+  const [stakingPool] = pda.getStakingPoolPDA(program.programId);
+  
+  return program.methods
+    .closeAllPdas()
+    .accounts({
+      protocolState,
+      feeReceiver,
+      stakingPool,
+      admin: program.provider.publicKey!,
+    })
+    .rpc();
+}
+
 export * from './staking';
 export * from './fee-distribution';

@@ -29,7 +29,7 @@ program
       const connection = new Connection(networkConfig.rpcUrl, 'confirmed');
       
       // Load admin
-      const adminPath = path.join(__dirname, '../keys/admin.json');
+      const adminPath = path.join(__dirname, './keys/admin.json');
       const adminKeypair = Keypair.fromSecretKey(
         Uint8Array.from(JSON.parse(fs.readFileSync(adminPath, 'utf8')))
       );

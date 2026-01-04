@@ -26,7 +26,7 @@ import {
   printError,
   printTxLink
 } from './cli-utils.js';
-import { saveDeploymentConfig, loadDeploymentConfig } from './config.js';
+import { updateDeployment, getCurrentProgramId } from './config.js';
 
 config();
 
@@ -38,7 +38,7 @@ program
   .requiredOption('-t, --token-mint <address>', 'Staking token mint address')
   .option('-d, --epoch-duration <seconds>', 'Epoch duration in seconds', '300') // 5 minutes default
   .option('-n, --network <network>', 'Network to use', 'devnet')
-  .option('-k, --keypair <path>', 'Path to admin keypair', '../keys/admin.json')
+  .option('-k, --keypair <path>', 'Path to admin keypair', './keys/admin.json')
   .action(async (options) => {
     try {
       printHeader('🥩 Initialize Epoch-Based Staking Pool');
@@ -76,17 +76,28 @@ program
       console.log('\n📝 Updating deployment config...');
       const stakingPool = await client.getStakingPool();
       if (stakingPool) {
-        const existing = loadDeploymentConfig(options.network);
-        saveDeploymentConfig(options.network, {
-          ...existing,
-          staking: {
-            stakingPool: stakingPool.stakingPool || '',
-            stakingTokenMint: tokenMint.toString(),
-            stakingVault: stakingPool.stakingVault,
-            rewardVault: stakingPool.rewardVault,
-            epochDuration: epochDuration.toNumber(),
-            systemType: 'epoch-based',
-            updatedAt: new Date().toISOString(),
+        // Derive staking pool PDA manually
+        const programId = new PublicKey(getCurrentProgramId());
+        const [stakingPoolPDA] = PublicKey.findProgramAddressSync(
+          [Buffer.from('staking_pool')],
+          programId
+        );
+        
+        // Use updateDeployment which handles partial updates and merging
+        updateDeployment(options.network, {
+          pdas: {
+            stakingPool: stakingPoolPDA.toString(),
+            // Convert to string - these might be PublicKey objects
+            stakingVault: stakingPool.stakingVault?.toString?.() ?? String(stakingPool.stakingVault),
+            rewardVault: stakingPool.rewardVault?.toString?.() ?? String(stakingPool.rewardVault),
+          },
+          initialization: {
+            staking: {
+              txSignature: tx,
+              timestamp: new Date().toISOString(),
+              tokenMint: tokenMint.toString(),
+              targetPoolBalance: epochDuration.toNumber(),
+            },
           },
         });
         printSuccess('Deployment config updated!');

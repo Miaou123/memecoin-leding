@@ -39,7 +39,7 @@ program
   .requiredOption('-a, --amount <tokens>', 'Amount of tokens to use as collateral')
   .requiredOption('-d, --duration <time>', 'Loan duration (e.g., 12h, 24h, 7d)')
   .option('-n, --network <network>', 'Network to use', 'devnet')
-  .option('-k, --keypair <path>', 'Path to borrower keypair', '../keys/admin.json')
+  .option('-k, --keypair <path>', 'Path to borrower keypair', './keys/admin.json')
   .option('--dry-run', 'Simulate the transaction without executing')
   .action(async (options) => {
     try {

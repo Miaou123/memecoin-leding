@@ -27,7 +27,7 @@ program
   .name('pause-protocol')
   .description('Pause the protocol (admin only) - prevents new loans')
   .option('-n, --network <network>', 'Network to use', 'devnet')
-  .option('-k, --keypair <path>', 'Path to admin keypair', '../keys/admin.json')
+  .option('-k, --keypair <path>', 'Path to admin keypair', './keys/admin.json')
   .action(async (options) => {
     try {
       printHeader('⏸️  Pause Protocol');

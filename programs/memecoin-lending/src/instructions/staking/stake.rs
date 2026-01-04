@@ -2,7 +2,6 @@ use anchor_lang::prelude::*;
 use anchor_spl::token::{self, Token, TokenAccount, Transfer};
 use crate::state::*;
 use crate::error::LendingError;
-use super::epoch_helpers::{maybe_advance_epoch, maybe_initialize_user_snapshot};
 
 #[derive(Accounts)]
 pub struct Stake<'info> {
@@ -50,10 +49,7 @@ pub fn stake_handler(ctx: Context<Stake>, amount: u64) -> Result<()> {
     let staking_pool = &mut ctx.accounts.staking_pool;
     let user_stake = &mut ctx.accounts.user_stake;
     
-    // Auto-advance epoch if needed (this updates reward_per_token_accumulated)
-    maybe_advance_epoch(staking_pool, clock.unix_timestamp)?;
-    
-    // Check if this is a new stake or existing
+    // Check if new stake or existing
     let is_new_stake = user_stake.owner == Pubkey::default();
     let was_zero_stake = user_stake.staked_amount == 0;
     
@@ -63,35 +59,34 @@ pub fn stake_handler(ctx: Context<Stake>, amount: u64) -> Result<()> {
         user_stake.pool = staking_pool.key();
         user_stake.staked_amount = 0;
         user_stake.stake_start_epoch = staking_pool.current_epoch;
-        user_stake.reward_per_token_snapshot = 0;
-        user_stake.snapshot_initialized = false;
-        user_stake.last_claimed_epoch = staking_pool.current_epoch;
-        user_stake.total_rewards_claimed = 0;
+        user_stake.last_rewarded_epoch = staking_pool.current_epoch;
+        user_stake.total_rewards_received = 0;
         user_stake.first_stake_time = clock.unix_timestamp;
         user_stake.bump = ctx.bumps.user_stake;
+        
+        msg!("New staker. Will be eligible starting epoch {}", staking_pool.current_epoch + 1);
     } else if was_zero_stake {
         // Re-staking after full unstake - reset (anti-gaming)
         user_stake.stake_start_epoch = staking_pool.current_epoch;
-        user_stake.reward_per_token_snapshot = 0;
-        user_stake.snapshot_initialized = false;
-        user_stake.last_claimed_epoch = staking_pool.current_epoch;
-    } else {
-        // Adding to existing stake - check if snapshot needs initialization
-        maybe_initialize_user_snapshot(user_stake, staking_pool)?;
+        user_stake.last_rewarded_epoch = staking_pool.current_epoch;
+        
+        msg!("Re-staking. Will be eligible starting epoch {}", staking_pool.current_epoch + 1);
     }
     
-    // Update user stake amount
+    // Check if user is already eligible (staked before current epoch)
+    let is_eligible = user_stake.stake_start_epoch < staking_pool.current_epoch;
+    
+    // Update amounts
     user_stake.staked_amount = user_stake.staked_amount
         .checked_add(amount)
         .ok_or(LendingError::MathOverflow)?;
     
-    // Update pool totals
     staking_pool.total_staked = staking_pool.total_staked
         .checked_add(amount)
         .ok_or(LendingError::MathOverflow)?;
     
-    // If user was already eligible (snapshot initialized), add to eligible stake
-    if user_stake.snapshot_initialized {
+    // If already eligible, add to current epoch eligible stake
+    if is_eligible {
         staking_pool.current_epoch_eligible_stake = staking_pool.current_epoch_eligible_stake
             .checked_add(amount)
             .ok_or(LendingError::MathOverflow)?;
@@ -111,12 +106,11 @@ pub fn stake_handler(ctx: Context<Stake>, amount: u64) -> Result<()> {
     )?;
     
     msg!(
-        "Staked {} tokens. User total: {}. Pool total: {}. Start epoch: {}. Eligible: {}",
+        "Staked {} tokens. User total: {}. Pool total: {}. Eligible: {}",
         amount,
         user_stake.staked_amount,
         staking_pool.total_staked,
-        user_stake.stake_start_epoch,
-        user_stake.snapshot_initialized
+        is_eligible
     );
     
     Ok(())

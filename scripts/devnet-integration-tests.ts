@@ -13,7 +13,7 @@
  * 
  * Prerequisites:
  *   - Protocol deployed and initialized on devnet
- *   - Admin keypair with SOL at keys/admin.json
+ *   - Admin keypair with SOL at ./keys/admin.json
  *   - At least one whitelisted token
  */
 
@@ -154,7 +154,7 @@ async function loadAllAccounts(network: string): Promise<TestAccounts> {
   
   // Admin account - for protocol management
   console.log(chalk.gray('  Loading admin account...'));
-  const admin = await loadSDK(network, '../keys/admin.json');
+  const admin = await loadSDK(network, './keys/admin.json');
   console.log(chalk.green(`  ✓ Admin: ${admin.keypair.publicKey.toString().slice(0, 8)}...`));
   
   // Borrower account - for loan operations

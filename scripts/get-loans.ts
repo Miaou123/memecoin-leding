@@ -33,7 +33,7 @@ program
   .name('get-loans')
   .description('View loans - all, by borrower, or specific loan')
   .option('-n, --network <network>', 'Network to use', 'devnet')
-  .option('-k, --keypair <path>', 'Path to keypair', '../keys/admin.json')
+  .option('-k, --keypair <path>', 'Path to keypair', './keys/admin.json')
   .option('-b, --borrower <wallet>', 'Filter by borrower wallet address')
   .option('-l, --loan <pubkey>', 'Get specific loan by pubkey')
   .option('-a, --active', 'Show only active loans')
