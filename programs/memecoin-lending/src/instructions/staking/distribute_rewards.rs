@@ -1,4 +1,5 @@
 use anchor_lang::prelude::*;
+use anchor_lang::system_program::{transfer, Transfer};
 use crate::state::*;
 use crate::error::LendingError;
 
@@ -28,7 +29,7 @@ pub struct DistributeRewards<'info> {
 /// Distribute rewards to a batch of users
 /// Called by backend crank after epoch ends
 /// remaining_accounts should contain pairs: [user_stake_1, wallet_1, user_stake_2, wallet_2, ...]
-pub fn distribute_rewards_handler(ctx: Context<DistributeRewards>) -> Result<()> {
+pub fn distribute_rewards_handler<'info>(ctx: Context<'_, '_, '_, 'info, DistributeRewards<'info>>) -> Result<()> {
     let pool = &mut ctx.accounts.staking_pool;
     
     // Must have rewards to distribute
@@ -51,8 +52,24 @@ pub fn distribute_rewards_handler(ctx: Context<DistributeRewards>) -> Result<()>
     );
     
     let distributable_epoch = pool.current_epoch.saturating_sub(1);
-    let rewards_pool = pool.last_epoch_rewards;
+    
+    // Use the MINIMUM of tracked rewards and actual vault balance
+    let vault_balance = ctx.accounts.reward_vault.lamports();
+    let rewards_pool = std::cmp::min(pool.last_epoch_rewards, vault_balance);
     let eligible_stake = pool.last_epoch_eligible_stake;
+    
+    // If vault is empty or nearly empty, skip distribution
+    if rewards_pool < 1000 { // Less than 0.000001 SOL
+        msg!("Vault balance too low for distribution: {} lamports", vault_balance);
+        return Ok(());
+    }
+    
+    msg!(
+        "Distribution: vault has {} lamports, tracked rewards {}, will distribute {}",
+        vault_balance,
+        pool.last_epoch_rewards,
+        rewards_pool
+    );
     
     let mut total_distributed_this_call: u64 = 0;
     
@@ -136,11 +153,12 @@ pub fn distribute_rewards_handler(ctx: Context<DistributeRewards>) -> Result<()>
             continue;
         }
         
-        // Check vault has enough
-        let vault_balance = ctx.accounts.reward_vault.lamports();
-        if vault_balance < share {
-            msg!("Insufficient vault balance. Needed: {}, Have: {}", share, vault_balance);
-            continue;
+        // Check vault has enough (re-check in case of concurrent distributions)
+        let current_vault_balance = ctx.accounts.reward_vault.lamports();
+        if current_vault_balance < share {
+            msg!("Insufficient vault balance. Needed: {}, Have: {}", share, current_vault_balance);
+            // Stop distributing if vault runs out
+            break;
         }
         
         // Update UserStake in place: last_rewarded_epoch and total_rewards_received
@@ -153,9 +171,23 @@ pub fn distribute_rewards_handler(ctx: Context<DistributeRewards>) -> Result<()>
         user_stake_data[total_received_offset..total_received_offset+8]
             .copy_from_slice(&new_total.to_le_bytes());
         
-        // Transfer SOL from reward vault to user wallet
-        **ctx.accounts.reward_vault.to_account_info().try_borrow_mut_lamports()? -= share;
-        **user_wallet_info.try_borrow_mut_lamports()? += share;
+        // Transfer SOL from reward vault to user wallet using invoke_signed
+        let reward_vault_bump = ctx.bumps.reward_vault;
+        let reward_vault_seeds = &[
+            REWARD_VAULT_SEED,
+            &[reward_vault_bump],
+        ];
+        let signer_seeds = &[&reward_vault_seeds[..]];
+        
+        let cpi_ctx = CpiContext::new_with_signer(
+            ctx.accounts.system_program.to_account_info(),
+            Transfer {
+                from: ctx.accounts.reward_vault.to_account_info(),
+                to: user_wallet_info.clone(),
+            },
+            signer_seeds,
+        );
+        transfer(cpi_ctx, share)?;
         
         total_distributed_this_call += share;
         

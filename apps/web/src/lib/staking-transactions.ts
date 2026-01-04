@@ -46,7 +46,6 @@ function deriveUserStakePDALocal(stakingPool: PublicKey, user: PublicKey): [Publ
 // Instruction discriminators (from IDL)
 const STAKE_DISCRIMINATOR = Buffer.from([206, 176, 202, 18, 200, 209, 179, 108]); // stake
 const UNSTAKE_DISCRIMINATOR = Buffer.from([90, 95, 107, 42, 205, 124, 50, 225]); // unstake
-const CLAIM_REWARDS_DISCRIMINATOR = Buffer.from([4, 144, 132, 71, 116, 23, 151, 80]); // claim_rewards
 
 export async function buildStakeTransaction(
   user: PublicKey,
@@ -72,7 +71,6 @@ export async function buildStakeTransaction(
       { pubkey: userStake, isSigner: false, isWritable: true },
       { pubkey: stakingVault, isSigner: false, isWritable: true },
       { pubkey: userTokenAccount, isSigner: false, isWritable: true },
-      { pubkey: rewardVault, isSigner: false, isWritable: true },
       { pubkey: user, isSigner: true, isWritable: true },
       { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
@@ -138,39 +136,3 @@ export async function buildUnstakeTransaction(
   return transaction;
 }
 
-export async function buildClaimRewardsTransaction(
-  user: PublicKey,
-  connection: Connection
-): Promise<Transaction> {
-  const programId = new PublicKey(PROGRAM_ID);
-  const { stakingPool, rewardVault } = getStakingAddresses();
-  
-  const [userStake] = deriveUserStakePDALocal(stakingPool, user);
-  
-  // Build instruction data (just discriminator)
-  const data = CLAIM_REWARDS_DISCRIMINATOR;
-  
-  const instruction = new TransactionInstruction({
-    programId,
-    keys: [
-      { pubkey: stakingPool, isSigner: false, isWritable: true },
-      { pubkey: userStake, isSigner: false, isWritable: true },
-      { pubkey: rewardVault, isSigner: false, isWritable: true },
-      { pubkey: user, isSigner: true, isWritable: true },
-      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
-    ],
-    data
-  });
-  
-  const transaction = new Transaction();
-  transaction.add(instruction);
-  
-  const { blockhash } = await connection.getLatestBlockhash();
-  transaction.recentBlockhash = blockhash;
-  transaction.feePayer = user;
-  
-  // Explicitly set signers
-  transaction.setSigners(user);
-  
-  return transaction;
-}

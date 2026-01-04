@@ -185,27 +185,31 @@ class DistributionCrankService {
       
       console.log(`📊 Epoch ${poolState.currentEpoch} ended. Processing...`);
       
-      // 3. Check if last epoch was distributed
-      const pendingDistribution = poolState.lastEpochRewards - poolState.lastEpochDistributed;
+      // 3. Log vault status for debugging
+      if (this.rewardVaultPDA) {
+        const vaultBalance = await this.connection.getBalance(this.rewardVaultPDA);
+        console.log(`💰 Reward vault balance: ${vaultBalance / LAMPORTS_PER_SOL} SOL`);
+        console.log(`📊 Tracked last_epoch_rewards: ${Number(poolState.lastEpochRewards) / LAMPORTS_PER_SOL} SOL`);
+        console.log(`📊 Will distribute: ${Math.min(vaultBalance, Number(poolState.lastEpochRewards)) / LAMPORTS_PER_SOL} SOL`);
+      }
       
-      if (pendingDistribution > BigInt(0) && poolState.lastEpochEligibleStake > BigInt(0)) {
-        // Still have pending distribution from last epoch
-        console.log(`💰 Continuing distribution: ${pendingDistribution} lamports remaining`);
-        await this.distributeRewards(poolState.currentEpoch - 1, result);
-      } else {
-        // 4. Advance epoch first
-        console.log('🔄 Advancing epoch...');
-        const advanceSuccess = await this.advanceEpoch();
+      // 4. ALWAYS advance epoch first
+      console.log('🔄 Advancing epoch...');
+      const advanceSuccess = await this.advanceEpoch();
+      
+      if (advanceSuccess) {
+        result.epochAdvanced = true;
+        console.log(`✅ Advanced to epoch ${poolState.currentEpoch + 1}`);
         
-        if (advanceSuccess) {
-          result.epochAdvanced = true;
-          console.log(`✅ Advanced to epoch ${poolState.currentEpoch + 1}`);
-          
-          // 5. Distribute rewards for the completed epoch
+        // 5. Then try distribution (may fail if vault empty, that's OK)
+        try {
           await this.distributeRewards(poolState.currentEpoch, result);
-        } else {
-          result.errors.push('Failed to advance epoch');
+        } catch (e: any) {
+          console.log('⚠️ Distribution failed (will retry next tick):', e.message);
+          // Don't add to errors - distribution failure is acceptable
         }
+      } else {
+        result.errors.push('Failed to advance epoch');
       }
       
       result.success = result.errors.length === 0;

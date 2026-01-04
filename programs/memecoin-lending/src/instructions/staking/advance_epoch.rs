@@ -28,13 +28,18 @@ pub fn advance_epoch_handler(ctx: Context<AdvanceEpoch>) -> Result<()> {
         LendingError::EpochNotEnded
     );
     
-    // Check if last epoch was fully distributed before advancing again
-    // Allow advancing if: no rewards to distribute OR all distributed
-    let pending_distribution = pool.last_epoch_rewards.saturating_sub(pool.last_epoch_distributed);
-    require!(
-        pending_distribution == 0 || pool.last_epoch_eligible_stake == 0,
-        LendingError::DistributionNotComplete
-    );
+    // Note: We no longer block epoch advancement based on distribution status
+    // This allows epochs to continue even if the vault is empty
+    // Any undistributed rewards are effectively forfeited when we advance
+    
+    // Log any undistributed rewards being forfeited
+    let forfeited = pool.last_epoch_rewards.saturating_sub(pool.last_epoch_distributed);
+    if forfeited > 0 {
+        msg!(
+            "⚠️ Advancing epoch with {} lamports undistributed (forfeited)",
+            forfeited
+        );
+    }
     
     // Move current epoch data to last_epoch for distribution
     pool.last_epoch_rewards = pool.current_epoch_rewards;

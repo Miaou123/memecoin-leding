@@ -19,9 +19,14 @@ export interface UserStake {
   owner: string;
   pool: string;
   stakedAmount: string;
-  rewardPerTokenPaid: string;
-  pendingRewards: string;
-  stakeTimestamp: number;
+  rewardPerTokenPaid?: string;
+  pendingRewards?: string;
+  stakeTimestamp?: number;
+  stakeStartEpoch?: number;
+  lastRewardedEpoch?: number;
+  totalRewardsReceived?: string;
+  firstStakeTime?: number;
+  bump?: number;
 }
 
 export interface FeeReceiver {
@@ -44,6 +49,16 @@ export interface StakingStats {
   emissionRate: string;
   userStake?: UserStake;
   userPendingRewards?: string;
+  currentEpoch?: number;
+  epochDuration?: number;
+  timeUntilNextEpoch?: number;
+  currentEpochRewards?: string;
+  currentEpochEligibleStake?: string;
+  lastEpochRewards?: string;
+  lastEpochEligibleStake?: string;
+  lastEpochDistributed?: string;
+  totalRewardsDistributed?: string;
+  totalRewardsDeposited?: string;
 }
 
 export interface StakeParams {

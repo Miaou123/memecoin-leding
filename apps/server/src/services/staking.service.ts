@@ -288,10 +288,6 @@ class StakingService {
   
   async getPendingRewards(address: string): Promise<{ pending: string; pendingSol: number; isEligibleCurrentEpoch: boolean }> {
     try {
-      // In direct distribution system, there are no "pending" rewards to claim
-      // Rewards are automatically distributed to user wallets by the crank
-      // Users are eligible if they staked before the current epoch
-      
       const userStake = await this.getUserStake(address);
       
       if (!userStake || userStake.stakedAmount === '0') {
@@ -306,15 +302,38 @@ class StakingService {
       // User is eligible for current epoch if they staked before it started
       const isEligibleCurrentEpoch = userStake.stakeStartEpoch < stats.currentEpoch;
       
-      // No pending rewards - they are distributed automatically
+      // Calculate pending rewards from last epoch if not yet distributed
+      let pendingLamports = 0;
+      
+      if (stats.lastEpochRewards && stats.lastEpochEligibleStake && 
+          parseFloat(stats.lastEpochRewards) > parseFloat(stats.lastEpochDistributed || '0')) {
+        
+        const lastEpochNumber = stats.currentEpoch - 1;
+        
+        // Check if user was eligible for last epoch
+        if (userStake.stakeStartEpoch <= lastEpochNumber && 
+            userStake.lastRewardedEpoch < lastEpochNumber) {
+          
+          const undistributedRewards = parseFloat(stats.lastEpochRewards) - parseFloat(stats.lastEpochDistributed || '0');
+          const userStakeAmount = parseFloat(userStake.stakedAmount);
+          const totalEligibleStake = parseFloat(stats.lastEpochEligibleStake);
+          
+          if (totalEligibleStake > 0) {
+            // Calculate user's share of undistributed rewards
+            const userShare = userStakeAmount / totalEligibleStake;
+            pendingLamports = Math.floor(undistributedRewards * userShare);
+          }
+        }
+      }
+      
       return { 
-        pending: '0', 
-        pendingSol: 0, 
+        pending: pendingLamports.toString(), 
+        pendingSol: pendingLamports / 1e9, // Convert lamports to SOL
         isEligibleCurrentEpoch 
       };
       
     } catch (error: any) {
-      console.error('❌ Failed to get eligibility status:', error.message);
+      console.error('❌ Failed to calculate pending rewards:', error.message);
       return { pending: '0', pendingSol: 0, isEligibleCurrentEpoch: false };
     }
   }

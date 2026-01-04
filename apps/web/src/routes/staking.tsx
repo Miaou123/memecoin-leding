@@ -4,12 +4,28 @@ import { Connection, PublicKey } from '@solana/web3.js';
 import { getAssociatedTokenAddress } from '@solana/spl-token';
 import BN from 'bn.js';
 import { Button } from '@/components/ui/Button';
-import { formatSOL, formatNumber, formatPercentage } from '@/lib/utils';
+import { formatNumber, formatPercentage } from '@/lib/utils';
 import { api } from '@/lib/api';
 import { useWallet } from '@/components/wallet/WalletProvider';
-import { buildStakeTransaction, buildUnstakeTransaction, buildClaimRewardsTransaction } from '@/lib/staking-transactions';
+import { buildStakeTransaction, buildUnstakeTransaction } from '@/lib/staking-transactions';
 import { getStakingConfig, type Network } from '@memecoin-lending/config';
 import { EpochCountdown } from '@/components/EpochCountdown';
+
+// Helper functions for formatting
+const formatSol = (lamports: string | number) => {
+  const sol = Number(lamports) / 1e9;
+  return sol.toLocaleString(undefined, { 
+    minimumFractionDigits: 2, 
+    maximumFractionDigits: 4 
+  });
+};
+
+const formatUsd = (usdValue: number) => {
+  return usdValue.toLocaleString(undefined, { 
+    minimumFractionDigits: 2, 
+    maximumFractionDigits: 2 
+  });
+};
 
 export default function Staking() {
   // Get network from env
@@ -20,6 +36,7 @@ export default function Staking() {
   const [stakeAmount, setStakeAmount] = createSignal('');
   const [unstakeAmount, setUnstakeAmount] = createSignal('');
   const [activeTab, setActiveTab] = createSignal<'STAKE' | 'UNSTAKE'>('STAKE');
+  const [solPrice] = createSignal(134); // Default SOL price, could be fetched from API
   
   // Get wallet context
   const wallet = useWallet();
@@ -82,7 +99,6 @@ export default function Staking() {
         throw new Error('Invalid stake amount');
       }
       const rawAmount = new BN(Math.floor(amount * 1e6)); // 6 decimals for pumpfun
-      const mint = new PublicKey(STAKING_TOKEN_MINT);
       
       const connection = new Connection(import.meta.env.VITE_SOLANA_RPC_URL);
       
@@ -131,7 +147,6 @@ export default function Staking() {
         throw new Error('Invalid unstake amount');
       }
       const rawAmount = new BN(Math.floor(amount * 1e6)); // 6 decimals for pumpfun
-      const mint = new PublicKey(STAKING_TOKEN_MINT);
       
       const connection = new Connection(import.meta.env.VITE_SOLANA_RPC_URL);
       
@@ -168,44 +183,6 @@ export default function Staking() {
     unstakeMutation.mutate();
   };
 
-  // Claim rewards mutation
-  const claimRewardsMutation = createMutation(() => ({
-    mutationFn: async () => {
-      if (!wallet.publicKey()) {
-        throw new Error('Wallet not connected');
-      }
-      
-      const connection = new Connection(import.meta.env.VITE_SOLANA_RPC_URL);
-      
-      // Build transaction
-      const transaction = await buildClaimRewardsTransaction(
-        wallet.publicKey()!,
-        connection
-      );
-      
-      // Sign and send
-      const signed = await wallet.signTransaction(transaction);
-      const signature = await connection.sendRawTransaction(signed.serialize());
-      await connection.confirmTransaction(signature, 'confirmed');
-      
-      console.log('Claim rewards transaction:', signature);
-      return { signature };
-    },
-    onSuccess: (data) => {
-      console.log('Successfully claimed rewards!');
-      // Refetch user data
-      userStake.refetch();
-      stakingStats.refetch();
-    },
-    onError: (error) => {
-      console.error('Claim failed:', error);
-      alert(`Claim failed: ${error.message}`);
-    }
-  }));
-  
-  const handleClaimRewards = () => {
-    claimRewardsMutation.mutate();
-  };
 
   return (
     <div class="space-y-6 font-mono">
@@ -240,14 +217,15 @@ export default function Staking() {
         
         <div class="text-center">
           <div class="text-2xl font-bold text-accent-yellow">
-            {stakingStats.isLoading ? '---' : formatSOL(stakingStats.data?.epochRewards || '0')} SOL
+            {stakingStats.isLoading ? '---' : formatSol(stakingStats.data?.totalRewardsDistributed || '0')} SOL
           </div>
-          <div class="text-text-dim text-xs">THIS_EPOCH_REWARDS</div>
+          <div class="text-text-dim text-xs">TOTAL_DISTRIBUTED</div>
+          <div class="text-text-dim text-xs">≈ ${formatUsd((parseFloat(stakingStats.data?.totalRewardsDistributed || '0') / 1e9) * solPrice())}</div>
         </div>
         <div class="w-px bg-border"></div>
         
-        <Show when={stakingStats.data?.timeUntilNextEpoch}>
-          <EpochCountdown timeUntilNextEpoch={stakingStats.data!.timeUntilNextEpoch} />
+        <Show when={stakingStats.data?.timeUntilNextEpoch !== undefined}>
+          <EpochCountdown timeUntilNextEpoch={stakingStats.data?.timeUntilNextEpoch ?? 0} />
         </Show>
         <Show when={!stakingStats.data?.timeUntilNextEpoch}>
           <div class="text-center">
@@ -287,30 +265,25 @@ export default function Staking() {
                 <div class="text-xs text-text-dim uppercase tracking-wider">TOKENS STAKED</div>
               </div>
               
-              {/* pending rewards box */}
+              {/* total rewards box */}
               <div class="bg-bg-tertiary border border-border p-4 mb-6">
-                <div class="text-xs text-text-dim uppercase tracking-wider mb-2">PENDING_REWARDS</div>
+                <div class="text-xs text-text-dim uppercase tracking-wider mb-2">YOUR_TOTAL_REWARDS</div>
                 <div class="text-xl font-bold text-accent-yellow">
-                  {userStake.isLoading ? '---' : formatNumber(userStake.data?.pendingRewardsSol || 0, { minimumFractionDigits: 0, maximumFractionDigits: 4 })} SOL
+                  {userStake.isLoading ? '---' : formatSol(userStake.data?.stake?.totalRewardsReceived || '0')} SOL
                 </div>
-                <Show when={userStake.data?.isEligibleCurrentEpoch === false}>
+                <div class="text-sm text-text-dim">
+                  ≈ ${formatUsd((parseFloat(userStake.data?.stake?.totalRewardsReceived || '0') / 1e9) * solPrice())}
+                </div>
+                <Show when={userStake.data?.stake && userStake.data.stake.stakeStartEpoch && stakingStats.data?.currentEpoch && userStake.data.stake.stakeStartEpoch >= stakingStats.data.currentEpoch}>
                   <div class="text-xs text-accent-yellow mt-2">
                     ⚠️ NOT ELIGIBLE FOR CURRENT EPOCH (STAKE FULL EPOCH TO EARN)
                   </div>
                 </Show>
+                <div class="text-xs text-accent-green mt-2">
+                  🤖 AUTOMATIC DISTRIBUTION - Rewards sent directly to your wallet at epoch end
+                </div>
               </div>
               
-              {/* claim button */}
-              <Show when={userStake.data?.pendingRewardsSol && userStake.data.pendingRewardsSol > 0}>
-                <Button 
-                  onClick={handleClaimRewards}
-                  loading={claimRewardsMutation.isPending}
-                  variant="outline"
-                  class="w-full border-accent-yellow text-accent-yellow hover:bg-accent-yellow hover:text-bg-primary"
-                >
-                  {claimRewardsMutation.isPending ? 'CLAIMING...' : '[CLAIM_REWARDS]'}
-                </Button>
-              </Show>
             </div>
           </div>
         </div>

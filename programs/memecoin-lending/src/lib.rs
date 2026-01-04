@@ -168,7 +168,7 @@ pub mod memecoin_lending {
     }
 
     /// Distribute rewards to batch of users (permissionless - called by crank)
-    pub fn distribute_rewards(ctx: Context<DistributeRewards>) -> Result<()> {
+    pub fn distribute_rewards<'info>(ctx: Context<'_, '_, '_, 'info, DistributeRewards<'info>>) -> Result<()> {
         instructions::staking::distribute_rewards::distribute_rewards_handler(ctx)
     }
 
