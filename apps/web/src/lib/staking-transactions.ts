@@ -3,10 +3,6 @@ import { TOKEN_PROGRAM_ID, getAssociatedTokenAddress } from '@solana/spl-token';
 import BN from 'bn.js';
 import { 
   PROGRAM_ID, 
-  getStakingPoolPDA, 
-  getRewardVaultPDA, 
-  deriveUserStakePDA, 
-  getStakingVaultPDA,
   getDeploymentConfig,
   type Network
 } from '@memecoin-lending/config';
@@ -53,7 +49,7 @@ export async function buildStakeTransaction(
   connection: Connection
 ): Promise<Transaction> {
   const programId = new PublicKey(PROGRAM_ID);
-  const { stakingPool, stakingVault, rewardVault, stakingTokenMint } = getStakingAddresses();
+  const { stakingPool, stakingVault, stakingTokenMint } = getStakingAddresses();
   
   const [userStake] = deriveUserStakePDALocal(stakingPool, user);
   const userTokenAccount = await getAssociatedTokenAddress(stakingTokenMint, user);
@@ -97,7 +93,7 @@ export async function buildUnstakeTransaction(
   connection: Connection
 ): Promise<Transaction> {
   const programId = new PublicKey(PROGRAM_ID);
-  const { stakingPool, stakingVault, stakingVaultAuthority, rewardVault, stakingTokenMint } = getStakingAddresses();
+  const { stakingPool, stakingVault, stakingVaultAuthority, stakingTokenMint } = getStakingAddresses();
   
   const [userStake] = deriveUserStakePDALocal(stakingPool, user);
   const userTokenAccount = await getAssociatedTokenAddress(stakingTokenMint, user);
@@ -116,7 +112,6 @@ export async function buildUnstakeTransaction(
       { pubkey: stakingVault, isSigner: false, isWritable: true },
       { pubkey: stakingVaultAuthority, isSigner: false, isWritable: false },
       { pubkey: userTokenAccount, isSigner: false, isWritable: true },
-      { pubkey: rewardVault, isSigner: false, isWritable: true },
       { pubkey: user, isSigner: true, isWritable: true },
       { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
     ],
