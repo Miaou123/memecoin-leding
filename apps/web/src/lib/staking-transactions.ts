@@ -1,39 +1,25 @@
 import { Connection, PublicKey, TransactionInstruction, Transaction, SystemProgram } from '@solana/web3.js';
 import { TOKEN_PROGRAM_ID, getAssociatedTokenAddress } from '@solana/spl-token';
 import BN from 'bn.js';
-import { PROGRAM_ID } from '@memecoin-lending/config';
+import { getStakingPoolPDA, getRewardVaultPDA, deriveUserStakePDA, getStakingVaultPDA } from '@memecoin-lending/config';
 
-// PDA derivation functions (matching SDK)
-function getStakingPoolPDA(): [PublicKey, number] {
-  const programId = typeof PROGRAM_ID === 'string' ? new PublicKey(PROGRAM_ID) : PROGRAM_ID;
-  return PublicKey.findProgramAddressSync(
-    [Buffer.from('staking_pool')],
-    programId
-  );
+// Helper functions to get deployment PDAs
+function getStakingPoolFromDeployment(): PublicKey {
+  const pda = getStakingPoolPDA();
+  if (!pda) throw new Error('Staking pool PDA not found in deployment');
+  return pda;
 }
 
-function getUserStakePDA(stakingPool: PublicKey, user: PublicKey): [PublicKey, number] {
-  const programId = typeof PROGRAM_ID === 'string' ? new PublicKey(PROGRAM_ID) : PROGRAM_ID;
-  return PublicKey.findProgramAddressSync(
-    [Buffer.from('user_stake'), stakingPool.toBuffer(), user.toBuffer()],
-    programId
-  );
+function getRewardVaultFromDeployment(): PublicKey {
+  const pda = getRewardVaultPDA();
+  if (!pda) throw new Error('Reward vault PDA not found in deployment');
+  return pda;
 }
 
-function getRewardVaultPDA(): [PublicKey, number] {
-  const programId = typeof PROGRAM_ID === 'string' ? new PublicKey(PROGRAM_ID) : PROGRAM_ID;
-  return PublicKey.findProgramAddressSync(
-    [Buffer.from('reward_vault')],
-    programId
-  );
-}
-
-function getStakingVaultAuthorityPDA(): [PublicKey, number] {
-  const programId = typeof PROGRAM_ID === 'string' ? new PublicKey(PROGRAM_ID) : PROGRAM_ID;
-  return PublicKey.findProgramAddressSync(
-    [Buffer.from('staking_vault')],
-    programId
-  );
+function getStakingVaultFromDeployment(): PublicKey {
+  const pda = getStakingVaultPDA();
+  if (!pda) throw new Error('Staking vault PDA not found in deployment');
+  return pda;
 }
 
 // Instruction discriminators (from IDL)
@@ -49,10 +35,10 @@ export async function buildStakeTransaction(
 ): Promise<Transaction> {
   const programId = typeof PROGRAM_ID === 'string' ? new PublicKey(PROGRAM_ID) : PROGRAM_ID;
   
-  const [stakingPool] = getStakingPoolPDA();
-  const [userStake] = getUserStakePDA(stakingPool, user);
-  const [rewardVault] = getRewardVaultPDA();
-  const [stakingVaultAuthority] = getStakingVaultAuthorityPDA();
+  const stakingPool = getStakingPoolFromDeployment();
+  const [userStake] = deriveUserStakePDA(stakingPool, user);
+  const rewardVault = getRewardVaultFromDeployment();
+  const stakingVaultAuthority = getStakingVaultFromDeployment();
   
   const stakingVault = await getAssociatedTokenAddress(tokenMint, stakingVaultAuthority, true);
   const userTokenAccount = await getAssociatedTokenAddress(tokenMint, user);
@@ -96,10 +82,10 @@ export async function buildUnstakeTransaction(
 ): Promise<Transaction> {
   const programId = typeof PROGRAM_ID === 'string' ? new PublicKey(PROGRAM_ID) : PROGRAM_ID;
   
-  const [stakingPool] = getStakingPoolPDA();
-  const [userStake] = getUserStakePDA(stakingPool, user);
-  const [stakingVaultAuthority] = getStakingVaultAuthorityPDA();
-  const [rewardVault] = getRewardVaultPDA();
+  const stakingPool = getStakingPoolFromDeployment();
+  const [userStake] = deriveUserStakePDA(stakingPool, user);
+  const stakingVaultAuthority = getStakingVaultFromDeployment();
+  const rewardVault = getRewardVaultFromDeployment();
   
   const stakingVault = await getAssociatedTokenAddress(tokenMint, stakingVaultAuthority, true);
   const userTokenAccount = await getAssociatedTokenAddress(tokenMint, user);
@@ -141,9 +127,9 @@ export async function buildClaimRewardsTransaction(
 ): Promise<Transaction> {
   const programId = typeof PROGRAM_ID === 'string' ? new PublicKey(PROGRAM_ID) : PROGRAM_ID;
   
-  const [stakingPool] = getStakingPoolPDA();
-  const [userStake] = getUserStakePDA(stakingPool, user);
-  const [rewardVault] = getRewardVaultPDA();
+  const stakingPool = getStakingPoolFromDeployment();
+  const [userStake] = deriveUserStakePDA(stakingPool, user);
+  const rewardVault = getRewardVaultFromDeployment();
   
   // Build instruction data (just discriminator)
   const data = CLAIM_REWARDS_DISCRIMINATOR;

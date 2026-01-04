@@ -3,6 +3,7 @@ import { Program, AnchorProvider, Wallet } from '@coral-xyz/anchor';
 import { OnlinePumpSdk } from '@pump-fun/pump-sdk';
 import fs from 'fs';
 import path from 'path';
+import { getFeeReceiverPDA, getTreasuryPDA, getRewardVaultPDA, getProtocolStatePDA, getDeploymentProgramId } from '@memecoin-lending/config';
 
 const MIN_CLAIM_THRESHOLD = 0.01 * LAMPORTS_PER_SOL;
 
@@ -87,10 +88,8 @@ class FeeClaimerService {
       await new Promise(r => setTimeout(r, 2000));
 
       // 2. Transfer to FeeReceiver
-      const [feeReceiverPda] = PublicKey.findProgramAddressSync(
-        [Buffer.from('fee_receiver')],
-        this.program.programId
-      );
+      const feeReceiverPda = getFeeReceiverPDA();
+      if (!feeReceiverPda) throw new Error('Fee receiver PDA not found');
 
       const walletBalance = await this.connection.getBalance(this.adminKeypair.publicKey);
       const transferAmount = walletBalance - 0.01 * LAMPORTS_PER_SOL; // Keep some for fees

@@ -1,35 +1,35 @@
 import { PublicKey } from '@solana/web3.js';
 
+// Hard-coded deployment data for current devnet deployment
+// TODO: Replace with proper file loading once ESM issues are resolved
+const CURRENT_DEPLOYMENT_DATA = {
+  programId: "65HMkr2uRgeiPQmC1uCtojsnfKcbCynsWGK3snnw8urs",
+  network: "devnet",
+  pdas: {
+    "Protocol State": "Fdy6iz7KxM3i4i8frarTY2GUvhJfyWCBq5VMypUrHjQA",
+    "Treasury": "4ApW4miBk8GcDqLGVwqFUssuTJ62Eo1hCFWe13YcgyaG",
+    "feeReceiver": "9TS7qCWqARwMx7uCtCyXkLKaMxBRSw4nY4FzWk559LNH",
+    "rewardVault": "29Hm7e7E8b2V4Wrrr3crQmdPb3kGgMYWnd935QewwDUq",
+    "stakingPool": "RJqhZhEWaWqiFDGJfTBtJeCsANnjRuMmTzC2E9FPqjN",
+    "stakingVault": "BARUuKxxQa8uxkPirTpVn4jiiYS2RSwvNkwiUZqYsMFz"
+  }
+};
+
 // Function to load deployment config
 function loadDeployment(network: string = 'devnet') {
+  // For now, return hard-coded deployment for devnet
+  if (network === 'devnet') {
+    console.debug('Using hard-coded deployment config for devnet');
+    return CURRENT_DEPLOYMENT_DATA;
+  }
+  
   // Don't try to load files in browser
   if (typeof globalThis !== 'undefined' && (globalThis as any).window) {
     return null;
   }
   
-  try {
-    // Dynamically require modules for Node.js environment
-    const fs = require('fs');
-    const path = require('path');
-    
-    // Try multiple paths to find the deployment file
-    const possiblePaths = [
-      path.join(process.cwd(), 'deployments', `${network}-latest.json`),
-      path.join(process.cwd(), '..', 'deployments', `${network}-latest.json`),
-      path.join(process.cwd(), '../..', 'deployments', `${network}-latest.json`),
-      path.join(__dirname, '../../..', 'deployments', `${network}-latest.json`),
-    ];
-    
-    for (const deploymentPath of possiblePaths) {
-      if (fs.existsSync(deploymentPath)) {
-        const deployment = JSON.parse(fs.readFileSync(deploymentPath, 'utf8'));
-        return deployment;
-      }
-    }
-  } catch (error) {
-    // Silently fail and use fallback
-    console.debug('Could not load deployment config:', error);
-  }
+  // For other networks, return null for now
+  console.debug('No deployment config available for network:', network);
   return null;
 }
 

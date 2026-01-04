@@ -4,8 +4,27 @@ import fs from 'fs';
 import path from 'path';
 import { ProtocolStats } from '@memecoin-lending/types';
 import { MemecoinLendingClient } from '@memecoin-lending/sdk';
-import { PROGRAM_ID, getNetworkConfig, getCurrentNetwork, getProtocolAddresses, NetworkType } from '@memecoin-lending/config';
+import { PROGRAM_ID, getNetworkConfig, getCurrentNetwork, NetworkType } from '@memecoin-lending/config';
 import { prisma } from '../db/client.js';
+
+// Add a helper function to load deployment directly
+function loadDeploymentFile(network: string = 'devnet') {
+  const possiblePaths = [
+    path.join(process.cwd(), 'deployments', `${network}-latest.json`),
+    path.join(process.cwd(), '..', 'deployments', `${network}-latest.json`),
+    path.join(process.cwd(), '../..', 'deployments', `${network}-latest.json`),
+  ];
+  
+  for (const deploymentPath of possiblePaths) {
+    if (fs.existsSync(deploymentPath)) {
+      console.log(`Loading deployment from: ${deploymentPath}`);
+      return JSON.parse(fs.readFileSync(deploymentPath, 'utf8'));
+    }
+  }
+  
+  console.warn('Could not find deployment file');
+  return null;
+}
 
 class ProtocolService {
   private client: MemecoinLendingClient | null = null;
@@ -175,19 +194,23 @@ class ProtocolService {
   async getTreasuryBalance(): Promise<string> {
     const client = await this.getClient();
     
-    // Get treasury address from deployment file
-    const protocolAddresses = getProtocolAddresses();
-    const treasuryAddress = protocolAddresses.Treasury || protocolAddresses.treasury;
+    // Load deployment directly from file (works in Node.js)
+    const network = getCurrentNetwork();
+    const deployment = loadDeploymentFile(network);
+    const treasuryAddress = deployment?.pdas?.Treasury || deployment?.pdas?.treasury;
     
     if (!treasuryAddress) {
       console.warn('Treasury address not found in deployment, falling back to derived PDA');
       const [treasury] = client.getTreasuryPDA();
+      console.log('Using derived treasury PDA:', treasury.toBase58());
       const balance = await client.connection.getBalance(treasury);
       return balance.toString();
     }
     
+    console.log(`Using treasury from deployment file: ${treasuryAddress}`);
     const treasury = new PublicKey(treasuryAddress);
     const balance = await client.connection.getBalance(treasury);
+    console.log('Treasury balance:', balance);
     return balance.toString();
   }
   
