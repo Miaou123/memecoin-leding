@@ -34,7 +34,7 @@ program
   .description('Repay a loan and reclaim your collateral')
   .requiredOption('-l, --loan <pubkey>', 'Loan account public key')
   .option('-n, --network <network>', 'Network to use', 'devnet')
-  .option('-k, --keypair <path>', 'Path to borrower keypair', './keys/admin.json')
+  .option('-k, --keypair <path>', 'Path to borrower keypair', '../keys/admin.json')
   .option('--dry-run', 'Simulate the transaction without executing')
   .action(async (options) => {
     try {

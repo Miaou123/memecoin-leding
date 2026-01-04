@@ -6,7 +6,7 @@ After running the main deployment script, you need to initialize the new staking
 
 - Protocol must be deployed with `pnpm --filter scripts deploy-full --network devnet`
 - You need a governance token mint address for staking
-- Admin keypair must be available at `./keys/admin.json`
+- Admin keypair must be available at `../keys/admin.json`
 
 ## Required Initialization Steps
 

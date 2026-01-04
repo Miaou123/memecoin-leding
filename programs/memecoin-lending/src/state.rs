@@ -28,6 +28,10 @@ pub const DEFAULT_SLIPPAGE_BPS: u16 = 300;       // 3% default slippage
 pub const MAX_SLIPPAGE_BPS: u16 = 1500;          // 15% max slippage
 pub const SLIPPAGE_INCREMENT_BPS: u16 = 200;     // 2% increment per retry
 
+// === STAKING ===
+/// Precision for reward calculations (1e12)
+pub const REWARD_PRECISION: u128 = 1_000_000_000_000;
+
 // === LTV RATIOS BY TIER (in basis points) ===
 pub const LTV_BRONZE_BPS: u16 = 2500;  // 25%
 pub const LTV_SILVER_BPS: u16 = 3500;  // 35%
@@ -308,10 +312,7 @@ impl Default for LoanStatus {
 
 // Note: SEEDS are already defined above at lines 4-14, removing duplicates
 
-/// Precision for reward calculations (1e12)
-pub const REWARD_PRECISION: u128 = 1_000_000_000_000;
-
-/// Staking pool configuration and state
+/// Staking pool with epoch-based rewards
 #[account]
 pub struct StakingPool {
     /// Authority (admin) who can update config
@@ -326,36 +327,47 @@ pub struct StakingPool {
     /// PDA that holds SOL rewards
     pub reward_vault: Pubkey,
     
-    /// Total tokens currently staked
+    // === Epoch Configuration ===
+    
+    /// Current epoch number
+    pub current_epoch: u64,
+    
+    /// Duration of each epoch in seconds (e.g., 300 for 5 minutes)
+    pub epoch_duration: i64,
+    
+    /// Timestamp when current epoch started
+    pub epoch_start_time: i64,
+    
+    // === Staking State ===
+    
+    /// Total tokens staked currently
     pub total_staked: u64,
     
+    /// Total staked that is eligible for current epoch rewards
+    /// (users who were staked since before current epoch started)
+    pub current_epoch_eligible_stake: u64,
+    
+    // === Reward Accumulator (KEY CHANGE) ===
+    
     /// Accumulated reward per token (scaled by REWARD_PRECISION)
-    pub reward_per_token_stored: u128,
+    /// Increases each epoch: += (epoch_rewards * PRECISION) / eligible_stake
+    pub reward_per_token_accumulated: u128,
     
-    /// Last time rewards were updated
-    pub last_update_time: i64,
+    /// Rewards accumulated for current epoch (to be added to accumulator when epoch ends)
+    pub current_epoch_rewards: u64,
     
-    // === Dynamic Emission Config ===
-    
-    /// Target SOL balance for 1x emission rate (e.g., 50 SOL = 50_000_000_000 lamports)
-    pub target_pool_balance: u64,
-    
-    /// Base emission rate in lamports per second at target balance
-    pub base_emission_rate: u64,
-    
-    /// Maximum emission rate cap (prevents drain)
-    pub max_emission_rate: u64,
-    
-    /// Minimum emission rate floor
-    pub min_emission_rate: u64,
-    
-    // === Stats ===
+    // === Historical Tracking ===
     
     /// Total SOL rewards distributed all-time
     pub total_rewards_distributed: u64,
     
     /// Total SOL rewards deposited all-time
     pub total_rewards_deposited: u64,
+    
+    /// Total number of completed epochs
+    pub total_epochs_completed: u64,
+    
+    // === State Flags ===
     
     /// Whether staking is paused
     pub paused: bool,
@@ -373,15 +385,16 @@ impl StakingPool {
         32 +    // staking_token_mint
         32 +    // staking_vault
         32 +    // reward_vault
+        8 +     // current_epoch
+        8 +     // epoch_duration
+        8 +     // epoch_start_time
         8 +     // total_staked
-        16 +    // reward_per_token_stored (u128)
-        8 +     // last_update_time
-        8 +     // target_pool_balance
-        8 +     // base_emission_rate
-        8 +     // max_emission_rate
-        8 +     // min_emission_rate
+        8 +     // current_epoch_eligible_stake
+        16 +    // reward_per_token_accumulated (u128)
+        8 +     // current_epoch_rewards
         8 +     // total_rewards_distributed
         8 +     // total_rewards_deposited
+        8 +     // total_epochs_completed
         1 +     // paused
         1 +     // bump
         64;     // _reserved
@@ -396,22 +409,34 @@ pub struct UserStake {
     /// The staking pool this belongs to
     pub pool: Pubkey,
     
-    /// Amount of tokens staked
+    /// Amount of tokens currently staked
     pub staked_amount: u64,
     
-    /// Reward per token value when user last claimed/staked
-    pub reward_per_token_paid: u128,
+    /// Epoch when user staked (or last re-staked)
+    /// User becomes eligible at epoch AFTER this one
+    pub stake_start_epoch: u64,
     
-    /// Pending rewards not yet claimed (in lamports)
-    pub pending_rewards: u64,
+    /// Reward per token snapshot - set when user BECOMES ELIGIBLE
+    /// This is their "starting point" for reward calculations
+    pub reward_per_token_snapshot: u128,
     
-    /// When user first staked
-    pub stake_timestamp: i64,
+    /// Whether the snapshot has been initialized
+    /// (set to true at the end of stake_start_epoch)
+    pub snapshot_initialized: bool,
+    
+    /// Last epoch for which user claimed rewards (for tracking)
+    pub last_claimed_epoch: u64,
+    
+    /// Total rewards claimed all-time (for UI/tracking)
+    pub total_rewards_claimed: u64,
+    
+    /// Timestamp of first stake
+    pub first_stake_time: i64,
     
     /// Bump seed for PDA
     pub bump: u8,
     
-    /// Reserved
+    /// Reserved for future upgrades
     pub _reserved: [u8; 32],
 }
 
@@ -420,11 +445,43 @@ impl UserStake {
         32 +    // owner
         32 +    // pool
         8 +     // staked_amount
-        16 +    // reward_per_token_paid (u128)
-        8 +     // pending_rewards
-        8 +     // stake_timestamp
+        8 +     // stake_start_epoch
+        16 +    // reward_per_token_snapshot (u128)
+        1 +     // snapshot_initialized
+        8 +     // last_claimed_epoch
+        8 +     // total_rewards_claimed
+        8 +     // first_stake_time
         1 +     // bump
         32;     // _reserved
+}
+
+/// Historical record of each epoch's rewards
+/// Stored separately to allow claiming old epochs
+#[account]
+pub struct EpochRewardRecord {
+    /// The epoch this record is for
+    pub epoch: u64,
+    
+    /// Total rewards distributed this epoch
+    pub total_rewards: u64,
+    
+    /// Total eligible stake during this epoch
+    pub total_eligible_stake: u64,
+    
+    /// Timestamp when epoch ended
+    pub ended_at: i64,
+    
+    /// Bump seed
+    pub bump: u8,
+}
+
+impl EpochRewardRecord {
+    pub const LEN: usize = 8 +  // discriminator
+        8 +     // epoch
+        8 +     // total_rewards
+        8 +     // total_eligible_stake
+        8 +     // ended_at
+        1;      // bump
 }
 
 /// Fee receiver account for collecting pumpfun creator fees

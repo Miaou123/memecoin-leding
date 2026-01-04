@@ -101,7 +101,8 @@ export function createTokenVerification(mint: () => string): UseTokenVerificatio
 
     try {
       // Get API endpoint from environment or default
-      const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001';
+      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
+      const apiBase = apiUrl.replace('/api', '');
       
       const response = await fetch(`${apiBase}/api/tokens/verify`, {
         method: 'POST',
@@ -243,7 +244,8 @@ export function createCanCreateLoan(mint: () => string) {
     setError(null);
 
     try {
-      const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001';
+      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
+      const apiBase = apiUrl.replace('/api', '');
       
       const response = await fetch(`${apiBase}/api/tokens/${currentMint}/can-loan`);
 

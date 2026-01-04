@@ -1,7 +1,7 @@
 #!/usr/bin/env tsx
 
 import { createClient, printHeader, printSuccess, printError, printInfo, printTxLink } from './cli-utils.js';
-import { validateNetwork, getNetworkConfig, updateDeployment } from './config.js';
+import { validateNetwork, getNetworkConfig, updateDeployment, updateStakingConfigNew } from './config.js';
 import { PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import BN from 'bn.js';
 import chalk from 'chalk';
@@ -15,7 +15,7 @@ program
   .description('Initialize the staking pool for governance token staking')
   .requiredOption('-m, --token-mint <address>', 'Governance token mint address')
   .option('-n, --network <network>', 'Network to use', 'devnet')
-  .option('-k, --admin-keypair <path>', 'Path to admin keypair', './keys/admin.json')
+  .option('-k, --admin-keypair <path>', 'Path to admin keypair', '../keys/admin.json')
   .option('--target-balance <sol>', 'Target pool balance in SOL for optimal APR', '50')
   .option('--base-rate <lamports>', 'Base emission rate (lamports/second)', '1000000')
   .option('--max-rate <lamports>', 'Max emission rate (lamports/second)', '10000000')
@@ -113,6 +113,22 @@ program
             tokenMint: stakingTokenMint.toString(),
           }
         }
+      });
+      
+      // Also update new deployment config format
+      // Note: The correct stakingVaultAuthority is derived, not the ATA authority
+      const [correctStakingVaultAuthority] = PublicKey.findProgramAddressSync(
+        [Buffer.from('staking_vault')],
+        new PublicKey(config.programId)
+      );
+      
+      updateStakingConfigNew(options.network, {
+        stakingPool: stakingPool.toString(),
+        stakingTokenMint: stakingTokenMint.toString(),
+        stakingVault: stakingVault.toString(),
+        stakingVaultAuthority: correctStakingVaultAuthority.toString(),
+        rewardVault: rewardVault.toString(),
+        updatedAt: new Date().toISOString(),
       });
       
       printSuccess('Deployment config updated with staking addresses');

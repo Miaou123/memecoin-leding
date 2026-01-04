@@ -3,7 +3,7 @@ import { PublicKey } from '@solana/web3.js';
 // Hard-coded deployment data for current devnet deployment
 // TODO: Replace with proper file loading once ESM issues are resolved
 const CURRENT_DEPLOYMENT_DATA = {
-  programId: "65HMkr2uRgeiPQmC1uCtojsnfKcbCynsWGK3snnw8urs",
+  programId: "46YbCjkHDPYWWNZZEPsvWeLweFtzmPEeCnDP87zDTZFU",
   network: "devnet",
   pdas: {
     "Protocol State": "Fdy6iz7KxM3i4i8frarTY2GUvhJfyWCBq5VMypUrHjQA",

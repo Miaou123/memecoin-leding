@@ -87,7 +87,7 @@ export function getRpcUrl(network: string): string {
  * Default path: ./keys/admin.json (relative to scripts directory)
  */
 export function getAdminKeypair(keypairPath?: string): Keypair {
-  const defaultPath = path.join(__dirname, 'keys', 'admin.json');
+  const defaultPath = path.join(__dirname, '../keys/admin.json');
   const resolvedPath = keypairPath ? path.resolve(keypairPath) : defaultPath;
 
   if (!fs.existsSync(resolvedPath)) {
@@ -180,4 +180,79 @@ export function getCurrentProgramId(): string {
   }
 
   return match[1];
+}
+
+// Deployment config types and functions
+const DEPLOYMENTS_DIR = path.resolve(__dirname, '../deployments');
+
+export interface DeploymentConfigNew {
+  network: string;
+  programId: string;
+  deployedAt: string;
+  protocol?: {
+    protocolState: string;
+    treasury: string;
+  };
+  staking?: {
+    stakingPool: string;
+    stakingTokenMint: string;
+    stakingVault: string;
+    stakingVaultAuthority: string;
+    rewardVault: string;
+    updatedAt: string;
+  };
+  feeReceiver?: {
+    address: string;
+    initializedAt: string;
+  };
+}
+
+export function loadDeploymentConfigNew(network: string): DeploymentConfigNew | null {
+  const filePath = path.join(DEPLOYMENTS_DIR, `${network}.json`);
+  try {
+    if (fs.existsSync(filePath)) {
+      return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    }
+  } catch (e) {
+    console.warn(`Could not load deployment config for ${network}`);
+  }
+  return null;
+}
+
+export function saveDeploymentConfigNew(network: string, config: Partial<DeploymentConfigNew>): void {
+  const filePath = path.join(DEPLOYMENTS_DIR, `${network}.json`);
+  
+  // Ensure directory exists
+  if (!fs.existsSync(DEPLOYMENTS_DIR)) {
+    fs.mkdirSync(DEPLOYMENTS_DIR, { recursive: true });
+  }
+  
+  // Load existing or create new
+  let existing: DeploymentConfigNew = loadDeploymentConfigNew(network) || {
+    network,
+    programId: getCurrentProgramId(),
+    deployedAt: new Date().toISOString(),
+  };
+  
+  // Deep merge
+  const merged = deepMerge(existing, config);
+  
+  fs.writeFileSync(filePath, JSON.stringify(merged, null, 2));
+  console.log(`✅ Deployment config saved to ${filePath}`);
+}
+
+export function updateStakingConfigNew(network: string, staking: DeploymentConfigNew['staking']): void {
+  saveDeploymentConfigNew(network, { staking });
+}
+
+function deepMerge(target: any, source: any): any {
+  const result = { ...target };
+  for (const key of Object.keys(source)) {
+    if (source[key] && typeof source[key] === 'object' && !Array.isArray(source[key])) {
+      result[key] = deepMerge(result[key] || {}, source[key]);
+    } else if (source[key] !== undefined) {
+      result[key] = source[key];
+    }
+  }
+  return result;
 }

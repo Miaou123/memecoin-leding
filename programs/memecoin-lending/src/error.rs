@@ -176,4 +176,23 @@ pub enum LendingError {
 
     #[msg("E6057: Feature temporarily disabled")]
     FeatureTemporarilyDisabled = 6057,
+
+    #[msg("E6058: Cannot change staking token while users have active stakes")]
+    CannotChangeTokenWithActiveStakes = 6058,
+
+    #[msg("E6059: Invalid token mint")]
+    InvalidTokenMint = 6059,
+
+    #[msg("E6060: Invalid token account")]
+    InvalidTokenAccount = 6060,
+
+    // Epoch-based staking errors
+    #[msg("E6070: Invalid epoch duration")]
+    InvalidEpochDuration = 6070,
+
+    #[msg("E6071: Invalid amount")]
+    InvalidAmount = 6071,
+
+    #[msg("E6072: Insufficient staked balance")]
+    InsufficientStakedBalance = 6072,
 }

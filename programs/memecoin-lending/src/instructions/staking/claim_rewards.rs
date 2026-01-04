@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 use crate::state::*;
 use crate::error::LendingError;
-use crate::utils::SafeMath;
+use super::epoch_helpers::{maybe_advance_epoch, maybe_initialize_user_snapshot, calculate_pending_rewards};
 
 #[derive(Accounts)]
 pub struct ClaimRewards<'info> {
@@ -37,102 +37,49 @@ pub fn claim_rewards_handler(ctx: Context<ClaimRewards>) -> Result<()> {
     let clock = Clock::get()?;
     let staking_pool = &mut ctx.accounts.staking_pool;
     let user_stake = &mut ctx.accounts.user_stake;
-    let reward_vault_balance = ctx.accounts.reward_vault.lamports();
     
-    // Update global state
-    let current_reward_per_token = calculate_reward_per_token(
-        staking_pool,
-        reward_vault_balance,
-        clock.unix_timestamp,
-    )?;
-    staking_pool.reward_per_token_stored = current_reward_per_token;
-    staking_pool.last_update_time = clock.unix_timestamp;
+    // Auto-advance epoch if needed (distributes pending rewards)
+    maybe_advance_epoch(staking_pool, clock.unix_timestamp)?;
     
-    // Calculate total rewards
-    let new_rewards = calculate_pending_rewards(user_stake, current_reward_per_token)?;
-    let total_rewards = SafeMath::add(user_stake.pending_rewards, new_rewards)?;
+    // Initialize snapshot if user just became eligible
+    maybe_initialize_user_snapshot(user_stake, staking_pool)?;
     
-    require!(total_rewards > 0, LendingError::NoRewardsToClaim);
-    require!(
-        ctx.accounts.reward_vault.lamports() >= total_rewards,
-        LendingError::InsufficientRewardBalance
-    );
+    // Calculate pending rewards using the accumulator
+    let pending_rewards = calculate_pending_rewards(user_stake, staking_pool)?;
     
-    // Reset user rewards
-    user_stake.pending_rewards = 0;
-    user_stake.reward_per_token_paid = current_reward_per_token;
+    if pending_rewards == 0 {
+        msg!("No rewards to claim. Eligible: {}", user_stake.snapshot_initialized);
+        return Ok(());
+    }
+    
+    // Verify vault has enough balance
+    let vault_balance = ctx.accounts.reward_vault.lamports();
+    let claimable = pending_rewards.min(vault_balance);
+    
+    require!(claimable > 0, LendingError::InsufficientRewardBalance);
+    
+    // Update user's snapshot to current (they've now "claimed up to" current RPT)
+    user_stake.reward_per_token_snapshot = staking_pool.reward_per_token_accumulated;
+    user_stake.last_claimed_epoch = staking_pool.current_epoch;
+    user_stake.total_rewards_claimed = user_stake.total_rewards_claimed
+        .checked_add(claimable)
+        .ok_or(LendingError::MathOverflow)?;
     
     // Update pool stats
-    staking_pool.total_rewards_distributed = SafeMath::add(
-        staking_pool.total_rewards_distributed,
-        total_rewards,
-    )?;
+    staking_pool.total_rewards_distributed = staking_pool.total_rewards_distributed
+        .checked_add(claimable)
+        .ok_or(LendingError::MathOverflow)?;
     
     // Transfer SOL rewards to user
-    **ctx.accounts.reward_vault.to_account_info().try_borrow_mut_lamports()? -= total_rewards;
-    **ctx.accounts.user.to_account_info().try_borrow_mut_lamports()? += total_rewards;
+    **ctx.accounts.reward_vault.to_account_info().try_borrow_mut_lamports()? -= claimable;
+    **ctx.accounts.user.to_account_info().try_borrow_mut_lamports()? += claimable;
     
-    msg!("Claimed {} lamports in rewards", total_rewards);
+    msg!(
+        "Claimed {} lamports. User snapshot updated to RPT: {}. Total claimed: {}",
+        claimable,
+        user_stake.reward_per_token_snapshot,
+        user_stake.total_rewards_claimed
+    );
     
     Ok(())
-}
-
-// Include helper functions (same as stake.rs)
-fn calculate_reward_per_token(
-    pool: &StakingPool,
-    reward_vault_balance: u64,
-    current_time: i64,
-) -> Result<u128> {
-    if pool.total_staked == 0 {
-        return Ok(pool.reward_per_token_stored);
-    }
-    
-    let time_elapsed = (current_time - pool.last_update_time) as u64;
-    if time_elapsed == 0 {
-        return Ok(pool.reward_per_token_stored);
-    }
-    
-    // Calculate dynamic emission rate based on pool balance
-    let emission_rate = calculate_emission_rate(pool, reward_vault_balance);
-    
-    // rewards_to_distribute = emission_rate * time_elapsed
-    let rewards_to_distribute = SafeMath::mul(emission_rate, time_elapsed)?;
-    
-    // reward_per_token_increment = (rewards * PRECISION) / total_staked
-    let reward_increment = SafeMath::mul_div_u128(
-        rewards_to_distribute as u128,
-        REWARD_PRECISION,
-        pool.total_staked as u128,
-    )?;
-    
-    Ok(SafeMath::add_u128(pool.reward_per_token_stored, reward_increment)?)
-}
-
-fn calculate_emission_rate(pool: &StakingPool, reward_vault_balance: u64) -> u64 {
-    if pool.target_pool_balance == 0 {
-        return pool.base_emission_rate;
-    }
-    
-    // ratio = vault_balance / target_balance
-    // emission = base_rate * ratio
-    let emission = (pool.base_emission_rate as u128)
-        .saturating_mul(reward_vault_balance as u128)
-        .saturating_div(pool.target_pool_balance as u128) as u64;
-    
-    // Clamp to min/max
-    emission.clamp(pool.min_emission_rate, pool.max_emission_rate)
-}
-
-fn calculate_pending_rewards(user_stake: &UserStake, current_reward_per_token: u128) -> Result<u64> {
-    let reward_diff = current_reward_per_token
-        .checked_sub(user_stake.reward_per_token_paid)
-        .ok_or(LendingError::MathUnderflow)?;
-    
-    let rewards = (user_stake.staked_amount as u128)
-        .checked_mul(reward_diff)
-        .ok_or(LendingError::MathOverflow)?
-        .checked_div(REWARD_PRECISION)
-        .ok_or(LendingError::DivisionByZero)? as u64;
-    
-    Ok(rewards)
 }

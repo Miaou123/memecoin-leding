@@ -21,7 +21,7 @@ interface Deployment {
 // Hard-coded deployment data for current devnet deployment
 // TODO: Replace with proper file loading once ESM issues are resolved
 const CURRENT_DEPLOYMENT: Deployment = {
-  programId: "65HMkr2uRgeiPQmC1uCtojsnfKcbCynsWGK3snnw8urs",
+  programId: "CEBgDniCL6eAGjom3gFxT9CSJv7RzJvcXGWqyCkEFksk",
   network: "devnet",
   pdas: {
     "Protocol State": "Fdy6iz7KxM3i4i8frarTY2GUvhJfyWCBq5VMypUrHjQA",

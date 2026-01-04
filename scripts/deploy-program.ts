@@ -17,8 +17,8 @@ program
   .name('deploy-program')
   .description('Deploy the memecoin lending program to Solana')
   .option('-n, --network <network>', 'Network to deploy to (mainnet-beta, devnet, localnet)', 'devnet')
-  .option('-k, --keypair <path>', 'Path to deployer keypair', './keys/deployer.json')
-  .option('-p, --program-keypair <path>', 'Path to program keypair', './keys/program.json')
+  .option('-k, --keypair <path>', 'Path to deployer keypair', '../keys/deployer.json')
+  .option('-p, --program-keypair <path>', 'Path to program keypair', '../keys/program.json')
   .action(async (options) => {
     try {
       console.log(chalk.blue('🚀 Starting program deployment...'));

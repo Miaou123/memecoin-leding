@@ -28,7 +28,7 @@ program
   .name('update-fees')
   .description('Update protocol fee configuration (admin only)')
   .option('-n, --network <network>', 'Network to use', 'devnet')
-  .option('-k, --keypair <path>', 'Path to admin keypair', './keys/admin.json')
+  .option('-k, --keypair <path>', 'Path to admin keypair', '../keys/admin.json')
   .option('--protocol <bps>', 'Protocol fee in basis points (e.g., 100 = 1%)')
   .option('--treasury <bps>', 'Treasury fee share for liquidations in bps (e.g., 9000 = 90%)')
   .option('--buyback <bps>', 'Buyback fee share for liquidations in bps (e.g., 500 = 5%)')

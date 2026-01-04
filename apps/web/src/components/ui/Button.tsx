@@ -31,7 +31,7 @@ const buttonVariants = cva(
 export interface ButtonProps extends VariantProps<typeof buttonVariants> {
   loading?: boolean;
   disabled?: boolean;
-  onClick?: () => void;
+  onClick?: (event: MouseEvent) => void;
   type?: "button" | "submit" | "reset";
   class?: string;
 }

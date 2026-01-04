@@ -88,7 +88,7 @@ export async function getLoan(
   }
 }
 
-export async function getActiveLoans(program: Program): Promise<Loan[]> {
+export async function getAllLoans(program: Program): Promise<Loan[]> {
   try {
     const accounts = await (program.account as any).loan.all();
     return accounts
@@ -104,11 +104,15 @@ export async function getActiveLoans(program: Program): Promise<Loan[]> {
         dueAt: acc.account.dueAt.toNumber(),
         status: parseLoanStatus(acc.account.status),
         index: acc.account.index.toNumber(),
-      }))
-      .filter((loan: Loan) => loan.status === LoanStatus.Active);
+      }));
   } catch (error) {
     return [];
   }
+}
+
+export async function getActiveLoans(program: Program): Promise<Loan[]> {
+  const allLoans = await getAllLoans(program);
+  return allLoans.filter((loan: Loan) => loan.status === LoanStatus.Active);
 }
 
 export async function getLoansByBorrower(
@@ -167,7 +171,7 @@ export async function getLoansByStatus(
   program: Program,
   status: LoanStatus
 ): Promise<Loan[]> {
-  const allLoans = await getActiveLoans(program);
+  const allLoans = await getAllLoans(program);
   return allLoans.filter(loan => loan.status === status);
 }
 
@@ -232,5 +236,101 @@ export function poolTypeToNumber(poolType: PoolType): number {
     case PoolType.Pumpfun: return 2;
     case PoolType.PumpSwap: return 3;
     default: return 0;
+  }
+}
+
+// ============= STAKING ACCOUNT TYPES =============
+
+export interface StakingPool {
+  authority: string;
+  stakingTokenMint: string;
+  stakingVault: string;
+  rewardVault: string;
+  
+  // Epoch info
+  currentEpoch: number;
+  epochDuration: number;
+  epochStartTime: number;
+  
+  // Staking state
+  totalStaked: string;
+  currentEpochEligibleStake: string;
+  
+  // Reward accumulator
+  rewardPerTokenAccumulated: string;
+  currentEpochRewards: string;
+  
+  // Stats
+  totalRewardsDistributed: string;
+  totalRewardsDeposited: string;
+  totalEpochsCompleted: number;
+  
+  paused: boolean;
+  bump: number;
+}
+
+export interface UserStake {
+  owner: string;
+  pool: string;
+  stakedAmount: string;
+  stakeStartEpoch: number;
+  rewardPerTokenSnapshot: string;
+  snapshotInitialized: boolean;
+  lastClaimedEpoch: number;
+  totalRewardsClaimed: string;
+  firstStakeTime: number;
+  bump: number;
+}
+
+// ============= STAKING ACCOUNT FUNCTIONS =============
+
+export async function getStakingPool(program: Program): Promise<StakingPool | null> {
+  try {
+    const [stakingPoolPda] = pda.getStakingPoolPDA(program.programId);
+    const account = await (program.account as any).stakingPool.fetch(stakingPoolPda);
+    
+    return {
+      authority: account.authority.toString(),
+      stakingTokenMint: account.stakingTokenMint.toString(),
+      stakingVault: account.stakingVault.toString(),
+      rewardVault: account.rewardVault.toString(),
+      currentEpoch: account.currentEpoch.toNumber(),
+      epochDuration: account.epochDuration.toNumber(),
+      epochStartTime: account.epochStartTime.toNumber(),
+      totalStaked: account.totalStaked.toString(),
+      currentEpochEligibleStake: account.currentEpochEligibleStake.toString(),
+      rewardPerTokenAccumulated: account.rewardPerTokenAccumulated.toString(),
+      currentEpochRewards: account.currentEpochRewards.toString(),
+      totalRewardsDistributed: account.totalRewardsDistributed.toString(),
+      totalRewardsDeposited: account.totalRewardsDeposited.toString(),
+      totalEpochsCompleted: account.totalEpochsCompleted.toNumber(),
+      paused: account.paused,
+      bump: account.bump,
+    };
+  } catch (error) {
+    return null;
+  }
+}
+
+export async function getUserStake(program: Program, user: PublicKey): Promise<UserStake | null> {
+  try {
+    const [stakingPoolPda] = pda.getStakingPoolPDA(program.programId);
+    const [userStakePda] = pda.getUserStakePDA(stakingPoolPda, user, program.programId);
+    const account = await (program.account as any).userStake.fetch(userStakePda);
+    
+    return {
+      owner: account.owner.toString(),
+      pool: account.pool.toString(),
+      stakedAmount: account.stakedAmount.toString(),
+      stakeStartEpoch: account.stakeStartEpoch.toNumber(),
+      rewardPerTokenSnapshot: account.rewardPerTokenSnapshot.toString(),
+      snapshotInitialized: account.snapshotInitialized,
+      lastClaimedEpoch: account.lastClaimedEpoch.toNumber(),
+      totalRewardsClaimed: account.totalRewardsClaimed.toString(),
+      firstStakeTime: account.firstStakeTime.toNumber(),
+      bump: account.bump,
+    };
+  } catch (error) {
+    return null;
   }
 }

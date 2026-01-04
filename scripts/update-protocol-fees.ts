@@ -13,7 +13,7 @@ program
   .name('update-protocol-fees')
   .description('Update protocol fee configuration')
   .option('-n, --network <network>', 'Network to use', 'devnet')
-  .option('-k, --admin-keypair <path>', 'Path to admin keypair', './keys/admin.json')
+  .option('-k, --admin-keypair <path>', 'Path to admin keypair')
   .option('--protocol-fee <bps>', 'Protocol fee in basis points (200 = 2%)', '200')
   .action(async (options) => {
     try {

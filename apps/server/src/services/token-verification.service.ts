@@ -1,4 +1,4 @@
-import { Connection, PublicKey, Keypair, Transaction, VersionedTransaction } from '@solana/web3.js';
+import { Connection, PublicKey, Keypair, Transaction, VersionedTransaction, SYSVAR_RENT_PUBKEY, SystemProgram } from '@solana/web3.js';
 import { Program, AnchorProvider } from '@coral-xyz/anchor';
 import { TokenTier } from '@memecoin-lending/types';
 import {
@@ -379,18 +379,25 @@ export class TokenVerificationService {
       throw new Error('Auto-whitelist not initialized');
     }
 
-    const programId = new PublicKey(PROGRAM_ID);
+    // PROGRAM_ID is already a PublicKey, don't create a new one
+    const programId = PROGRAM_ID;
     const mintPubkey = new PublicKey(mint);
+
+    console.log(`[TokenVerification] Creating PDAs for auto-whitelist:`);
+    console.log(`  - Program ID: ${programId.toString()}`);
+    console.log(`  - Mint: ${mintPubkey.toString()}`);
 
     const [protocolState] = PublicKey.findProgramAddressSync(
       [Buffer.from('protocol_state')],
       programId
     );
+    console.log(`  - Protocol State PDA: ${protocolState.toString()}`);
 
     const [tokenConfig] = PublicKey.findProgramAddressSync(
       [Buffer.from('token_config'), mintPubkey.toBuffer()],
       programId
     );
+    console.log(`  - Token Config PDA: ${tokenConfig.toString()}`);
 
     // Tier: 0=bronze, 1=silver, 2=gold
     const tierMap: Record<string, number> = { bronze: 0, silver: 1, gold: 2 };
@@ -401,8 +408,13 @@ export class TokenVerificationService {
 
     // Derive the correct bonding curve PDA for PumpFun
     const bondingCurve = getPumpFunBondingCurve(mintPubkey);
+    console.log(`  - Bonding Curve PDA: ${bondingCurve.toString()}`);
+    console.log(`  - Admin: ${this.adminKeypair.publicKey.toString()}`);
 
     try {
+      console.log(`[TokenVerification] Program instance:`, !!this.program);
+      console.log(`[TokenVerification] Program methods:`, !!this.program.methods);
+      
       const tx = await (this.program.methods as any)
         .whitelistToken(
           tier,
@@ -410,14 +422,15 @@ export class TokenVerificationService {
           poolType,
           new BN(1000000),       // min loan: 0.001 SOL
           new BN(100000000000),  // max loan: 100 SOL
+          false,                 // is_protocol_token: false for regular tokens
         )
         .accounts({
           protocolState,
           tokenConfig,
           tokenMint: mintPubkey,
           admin: this.adminKeypair.publicKey,
-          systemProgram: new PublicKey('11111111111111111111111111111111'),
-          rent: new PublicKey('SysvarRent111111111111111111111111111111111'),
+          systemProgram: SystemProgram.programId,
+          rent: SYSVAR_RENT_PUBKEY,
         })
         .rpc();
 
@@ -450,6 +463,8 @@ export class TokenVerificationService {
       
       return true;
     } catch (error: any) {
+      console.error(`[TokenVerification] Auto-whitelist error:`, error);
+      console.error(`[TokenVerification] Error stack:`, error.stack);
       if (error.message?.includes('already in use')) {
         return true;
       }

@@ -2,7 +2,7 @@ import { Connection, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { Program, AnchorProvider } from '@coral-xyz/anchor';
 import BN from 'bn.js';
 import { StakingStats, UserStake, DEFAULT_FEE_CONFIG, FeeDistributionConfig } from '@memecoin-lending/types';
-import { getStakingPoolPDA, getRewardVaultPDA, deriveUserStakePDA } from '@memecoin-lending/config';
+import { getStakingPoolPDA, getRewardVaultPDA, deriveUserStakePDA, PROGRAM_ID } from '@memecoin-lending/config';
 
 // Helper functions for reading account data
 function readU64(buffer: Buffer, offset: number): BN {
@@ -58,21 +58,22 @@ class StakingService {
       }
       
       // Deserialize staking pool account (skip 8-byte discriminator)
-      // Correct Rust struct layout:
+      // New Rust struct layout with accumulator:
       // pub struct StakingPool {
       //     pub authority: Pubkey,              // 32 bytes
       //     pub staking_token_mint: Pubkey,     // 32 bytes
       //     pub staking_vault: Pubkey,          // 32 bytes
       //     pub reward_vault: Pubkey,           // 32 bytes
+      //     pub current_epoch: u64,             // 8 bytes
+      //     pub epoch_duration: i64,            // 8 bytes
+      //     pub epoch_start_time: i64,          // 8 bytes
       //     pub total_staked: u64,              // 8 bytes
-      //     pub reward_per_token_stored: u128,  // 16 bytes
-      //     pub last_update_time: i64,          // 8 bytes
-      //     pub target_pool_balance: u64,       // 8 bytes
-      //     pub base_emission_rate: u64,        // 8 bytes
-      //     pub max_emission_rate: u64,         // 8 bytes
-      //     pub min_emission_rate: u64,         // 8 bytes
+      //     pub current_epoch_eligible_stake: u64, // 8 bytes
+      //     pub reward_per_token_accumulated: u128, // 16 bytes
+      //     pub current_epoch_rewards: u64,     // 8 bytes
       //     pub total_rewards_distributed: u64, // 8 bytes
       //     pub total_rewards_deposited: u64,   // 8 bytes
+      //     pub total_epochs_completed: u64,    // 8 bytes
       //     pub paused: bool,                   // 1 byte
       //     pub bump: u8,                       // 1 byte
       //     pub _reserved: [u8; 64],            // 64 bytes
@@ -85,15 +86,16 @@ class StakingService {
       const stakingTokenMint = readPubkey(data, offset); offset += 32;
       const stakingVault = readPubkey(data, offset); offset += 32;
       const rewardVault = readPubkey(data, offset); offset += 32;
+      const currentEpoch = readU64(data, offset); offset += 8;
+      const epochDuration = readI64(data, offset); offset += 8;
+      const epochStartTime = readI64(data, offset); offset += 8;
       const totalStaked = readU64(data, offset); offset += 8;
-      const rewardPerTokenStored = readU128(data, offset); offset += 16;  // u128, not totalStakers!
-      const lastUpdateTime = readI64(data, offset); offset += 8;
-      const targetPoolBalance = readU64(data, offset); offset += 8;
-      const baseEmissionRate = readU64(data, offset); offset += 8;
-      const maxEmissionRate = readU64(data, offset); offset += 8;
-      const minEmissionRate = readU64(data, offset); offset += 8;
+      const currentEpochEligibleStake = readU64(data, offset); offset += 8;
+      const rewardPerTokenAccumulated = readU128(data, offset); offset += 16;
+      const currentEpochRewards = readU64(data, offset); offset += 8;
       const totalRewardsDistributed = readU64(data, offset); offset += 8;
       const totalRewardsDeposited = readU64(data, offset); offset += 8;
+      const totalEpochsCompleted = readU64(data, offset); offset += 8;
       const paused = data[offset] !== 0; offset += 1;
       const bump = data[offset]; offset += 1;
       
@@ -101,8 +103,9 @@ class StakingService {
       let totalStakers = new BN(0);
       try {
         // Get all UserStake accounts for this staking pool
+        const programId = typeof PROGRAM_ID === 'string' ? new PublicKey(PROGRAM_ID) : PROGRAM_ID;
         const userStakeAccounts = await this.connection.getProgramAccounts(
-          new PublicKey(PROGRAM_ID),
+          programId,
           {
             filters: [
               {
@@ -143,28 +146,23 @@ class StakingService {
         totalStakers = new BN(0);
       }
       
-      // Calculate dynamic emission rate based on reward pool balance
-      let currentEmissionRate = baseEmissionRate;
-      if (targetPoolBalance.gt(new BN(0)) && rewardVaultBalance > 0) {
-        // Dynamic emission: rate = base * (poolBalance / targetBalance)
-        // Clamped between min and max
-        const ratio = new BN(rewardVaultBalance).mul(new BN(10000)).div(targetPoolBalance);
-        currentEmissionRate = baseEmissionRate.mul(ratio).div(new BN(10000));
-        
-        // Clamp to min/max bounds
-        if (currentEmissionRate.lt(minEmissionRate)) currentEmissionRate = minEmissionRate;
-        if (currentEmissionRate.gt(maxEmissionRate)) currentEmissionRate = maxEmissionRate;
-      }
+      // Calculate time until next epoch
+      const currentTime = Math.floor(Date.now() / 1000);
+      const epochEndTime = epochStartTime.toNumber() + epochDuration.toNumber();
+      const timeUntilNextEpoch = Math.max(0, epochEndTime - currentTime);
       
-      // Calculate APR: (currentEmissionRate * 365 * 24 * 3600) / totalStaked * 100
+      // For epoch-based system, APR is calculated differently
+      // Based on historical rewards distributed
       let currentApr = 0;
-      if (totalStaked.gt(new BN(0)) && currentEmissionRate.gt(new BN(0))) {
-        const secondsPerYear = new BN(365 * 24 * 3600);
-        const annualEmissionLamports = currentEmissionRate.mul(secondsPerYear);
-        
-        // APR as percentage: (annual SOL emission / total staked tokens) * 100
-        // Note: This assumes 1:1 value between SOL and staking token for simplicity
-        const aprBasisPoints = annualEmissionLamports.mul(new BN(10000)).div(totalStaked);
+      if (totalStaked.gt(new BN(0)) && totalRewardsDistributed.gt(new BN(0)) && totalEpochsCompleted.gt(new BN(0))) {
+        // Average rewards per epoch
+        const avgRewardsPerEpoch = totalRewardsDistributed.div(totalEpochsCompleted);
+        // Epochs per year
+        const epochsPerYear = new BN(365 * 24 * 3600).div(epochDuration);
+        // Annual rewards
+        const annualRewards = avgRewardsPerEpoch.mul(epochsPerYear);
+        // APR = (annual rewards / total staked) * 100
+        const aprBasisPoints = annualRewards.mul(new BN(10000)).div(totalStaked);
         currentApr = aprBasisPoints.toNumber() / 100;
       }
       
@@ -172,8 +170,10 @@ class StakingService {
         totalStaked: totalStaked.toString(),
         totalStakers: totalStakers.toNumber(),
         rewardPoolBalance: rewardVaultBalance,
-        currentApr: currentApr.toFixed(2) + '%',
-        currentEmissionRate: currentEmissionRate.toString(),
+        currentEpoch: currentEpoch.toString(),
+        timeUntilNextEpoch,
+        currentEpochRewards: currentEpochRewards.toString(),
+        rewardPerTokenAccumulated: rewardPerTokenAccumulated.toString(),
         paused
       });
       
@@ -182,7 +182,15 @@ class StakingService {
         totalStakers: totalStakers.toNumber(),
         rewardPoolBalance: rewardVaultBalance.toString(),
         currentApr,
-        emissionRate: currentEmissionRate.toString(),
+        emissionRate: '0', // No longer used in epoch-based system
+        currentEpoch: currentEpoch.toNumber(),
+        epochDuration: epochDuration.toNumber(),
+        timeUntilNextEpoch,
+        currentEpochRewards: currentEpochRewards.toString(),
+        currentEpochEligibleStake: currentEpochEligibleStake.toString(),
+        rewardPerTokenAccumulated: rewardPerTokenAccumulated.toString(),
+        totalRewardsDistributed: totalRewardsDistributed.toString(),
+        totalRewardsDeposited: totalRewardsDeposited.toString(),
       };
       
     } catch (error: any) {
@@ -194,6 +202,10 @@ class StakingService {
         rewardPoolBalance: '0',
         currentApr: 0,
         emissionRate: '0',
+        currentEpoch: 0,
+        timeUntilNextEpoch: 0,
+        epochRewards: '0',
+        eligibleStake: '0',
       };
     }
   }
@@ -207,6 +219,9 @@ class StakingService {
       
       // Derive PDAs
       const stakingPoolPDA = getStakingPoolPDA();
+      if (!stakingPoolPDA) {
+        throw new Error('Staking pool PDA not found in deployment');
+      }
       const [userStakePDA] = deriveUserStakePDA(stakingPoolPDA, userPubkey);
       
       // Fetch account info
@@ -218,24 +233,45 @@ class StakingService {
       }
       
       // Deserialize user stake account (skip 8-byte discriminator)
+      // New struct with accumulator fields:
+      // pub struct UserStake {
+      //     pub owner: Pubkey,                     // 32 bytes
+      //     pub pool: Pubkey,                      // 32 bytes  
+      //     pub staked_amount: u64,                // 8 bytes
+      //     pub stake_start_epoch: u64,            // 8 bytes
+      //     pub reward_per_token_snapshot: u128,   // 16 bytes
+      //     pub snapshot_initialized: bool,        // 1 byte
+      //     pub last_claimed_epoch: u64,           // 8 bytes
+      //     pub total_rewards_claimed: u64,        // 8 bytes
+      //     pub first_stake_time: i64,             // 8 bytes
+      //     pub bump: u8,                          // 1 byte
+      //     pub _reserved: [u8; 32],               // 32 bytes
+      // }
       const data = accountInfo.data;
       let offset = 8; // Skip discriminator
       
       const owner = readPubkey(data, offset); offset += 32;
       const pool = readPubkey(data, offset); offset += 32;
       const stakedAmount = readU64(data, offset); offset += 8;
-      const rewardPerTokenPaid = readU128(data, offset); offset += 16;
-      const pendingRewards = readU64(data, offset); offset += 8;
-      const stakeTimestamp = readI64(data, offset); offset += 8;
+      const stakeStartEpoch = readU64(data, offset); offset += 8;
+      const rewardPerTokenSnapshot = readU128(data, offset); offset += 16;
+      const snapshotInitialized = data[offset] !== 0; offset += 1;
+      const lastClaimedEpoch = readU64(data, offset); offset += 8;
+      const totalRewardsClaimed = readU64(data, offset); offset += 8;
+      const firstStakeTime = readI64(data, offset); offset += 8;
       const bump = data[offset];
       
       return {
         owner: owner.toString(),
         pool: pool.toString(),
         stakedAmount: stakedAmount.toString(),
-        rewardPerTokenPaid: rewardPerTokenPaid.toString(),
-        pendingRewards: pendingRewards.toString(),
-        stakeTimestamp: stakeTimestamp.toNumber(),
+        stakeStartEpoch: stakeStartEpoch.toNumber(),
+        rewardPerTokenSnapshot: rewardPerTokenSnapshot.toString(),
+        snapshotInitialized,
+        lastClaimedEpoch: lastClaimedEpoch.toNumber(),
+        totalRewardsClaimed: totalRewardsClaimed.toString(),
+        firstStakeTime: firstStakeTime.toNumber(),
+        bump,
       };
       
     } catch (error: any) {
@@ -244,59 +280,50 @@ class StakingService {
     }
   }
   
-  async getPendingRewards(address: string): Promise<{ pending: string; pendingSol: number }> {
+  async getPendingRewards(address: string): Promise<{ pending: string; pendingSol: number; isEligibleCurrentEpoch: boolean }> {
     try {
       // Get user stake
       const userStake = await this.getUserStake(address);
       
-      if (!userStake) {
-        return {
-          pending: '0',
-          pendingSol: 0,
-        };
+      if (!userStake || userStake.stakedAmount === '0') {
+        return { pending: '0', pendingSol: 0, isEligibleCurrentEpoch: false };
       }
       
-      // Fetch current staking pool state to get latest rewardPerTokenStored
-      const stakingPoolPDA = getStakingPoolPDA();
-      const stakingPoolAccount = await this.connection.getAccountInfo(stakingPoolPDA);
-      
-      if (!stakingPoolAccount || !stakingPoolAccount.data) {
-        return {
-          pending: '0',
-          pendingSol: 0,
-        };
+      // Not eligible yet
+      if (!userStake.snapshotInitialized) {
+        return { pending: '0', pendingSol: 0, isEligibleCurrentEpoch: false };
       }
       
-      // Parse current reward per token from pool state
-      const data = stakingPoolAccount.data;
-      let offset = 8 + 32 + 32 + 32 + 32 + 8 + 8; // Skip to rewardPerTokenStored
-      const currentRewardPerToken = readU128(data, offset);
+      const stats = await this.getStakingStats();
+      if (!stats) {
+        return { pending: '0', pendingSol: 0, isEligibleCurrentEpoch: false };
+      }
       
-      // Calculate pending rewards
-      const stakedAmount = new BN(userStake.stakedAmount);
-      const userRewardPerTokenPaid = new BN(userStake.rewardPerTokenPaid);
-      const pendingRewardsStored = new BN(userStake.pendingRewards);
+      // Calculate using accumulator: rewards = stake * (current_rpt - user_snapshot) / PRECISION
+      const PRECISION = BigInt('1000000000000'); // 1e12
+      const stakedAmount = BigInt(userStake.stakedAmount);
+      const currentRpt = BigInt(stats.rewardPerTokenAccumulated);
+      const userSnapshot = BigInt(userStake.rewardPerTokenSnapshot);
       
-      // earned = (stakedAmount * (rewardPerToken - userRewardPerTokenPaid)) / 1e18 + pendingRewards
-      const rewardPerTokenDiff = currentRewardPerToken.sub(userRewardPerTokenPaid);
-      const earnedFromStaking = stakedAmount.mul(rewardPerTokenDiff).div(new BN('1000000000000000000')); // div by 1e18
-      const totalEarned = earnedFromStaking.add(pendingRewardsStored);
+      if (currentRpt <= userSnapshot) {
+        return { pending: '0', pendingSol: 0, isEligibleCurrentEpoch: true };
+      }
       
-      const pendingSol = totalEarned.toNumber() / LAMPORTS_PER_SOL;
+      const rptDiff = currentRpt - userSnapshot;
+      const rewards = (stakedAmount * rptDiff) / PRECISION;
       
       return {
-        pending: totalEarned.toString(),
-        pendingSol,
+        pending: rewards.toString(),
+        pendingSol: Number(rewards) / LAMPORTS_PER_SOL,
+        isEligibleCurrentEpoch: true,
       };
       
     } catch (error: any) {
       console.error('❌ Failed to calculate pending rewards:', error.message);
-      return {
-        pending: '0',
-        pendingSol: 0,
-      };
+      return { pending: '0', pendingSol: 0, isEligibleCurrentEpoch: false };
     }
   }
+
 
   // Fee configuration methods
   getFeeConfig(): FeeDistributionConfig {

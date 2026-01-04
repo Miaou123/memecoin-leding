@@ -33,7 +33,7 @@ program
   .description('Update token configuration (admin only)')
   .requiredOption('-m, --mint <address>', 'Token mint address')
   .option('-n, --network <network>', 'Network to use', 'devnet')
-  .option('-k, --keypair <path>', 'Path to admin keypair', './keys/admin.json')
+  .option('-k, --keypair <path>', 'Path to admin keypair', '../keys/admin.json')
   .option('--ltv <bps>', 'New LTV ratio in basis points (e.g., 7000 = 70%)')
   .option('--enable', 'Enable the token for lending')
   .option('--disable', 'Disable the token for lending')

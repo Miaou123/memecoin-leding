@@ -6,7 +6,7 @@ const BN = require('bn.js');
 const connection = new Connection('https://devnet.helius-rpc.com/?api-key=49d8149f-416a-4155-8386-142c0c4a9590');
 
 // Load your wallet keypair
-const secretKey = JSON.parse(fs.readFileSync('./keys/admin.json', 'utf8'));
+const secretKey = JSON.parse(fs.readFileSync('../keys/admin.json', 'utf8'));
 const wallet = new Wallet(Keypair.fromSecretKey(new Uint8Array(secretKey)));
 
 // Load IDL

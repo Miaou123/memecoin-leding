@@ -1,16 +1,12 @@
-import { Program } from '@coral-xyz/anchor';
-import { PublicKey, TransactionSignature, SystemProgram } from '@solana/web3.js';
-import { TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID, getAssociatedTokenAddress } from '@solana/spl-token';
-import BN from 'bn.js';
+import { Program, BN } from '@coral-xyz/anchor';
+import { PublicKey, SystemProgram, TransactionSignature } from '@solana/web3.js';
+import { TOKEN_PROGRAM_ID, getAssociatedTokenAddress, ASSOCIATED_TOKEN_PROGRAM_ID } from '@solana/spl-token';
 import * as pda from '../pda';
 
 export async function initializeStaking(
   program: Program,
   stakingTokenMint: PublicKey,
-  targetPoolBalance: BN,
-  baseEmissionRate: BN,
-  maxEmissionRate: BN,
-  minEmissionRate: BN
+  epochDuration: BN, // in seconds
 ): Promise<TransactionSignature> {
   const [stakingPool] = pda.getStakingPoolPDA(program.programId);
   const [stakingVaultAuthority] = pda.getStakingVaultAuthorityPDA(program.programId);
@@ -21,14 +17,14 @@ export async function initializeStaking(
     stakingVaultAuthority,
     true
   );
-  
+
   return program.methods
-    .initializeStaking(targetPoolBalance, baseEmissionRate, maxEmissionRate, minEmissionRate)
+    .initializeStaking(epochDuration)
     .accounts({
       stakingPool,
       stakingTokenMint,
-      stakingVault,
       stakingVaultAuthority,
+      stakingVault,
       rewardVault,
       authority: program.provider.publicKey!,
       tokenProgram: TOKEN_PROGRAM_ID,
@@ -41,33 +37,26 @@ export async function initializeStaking(
 export async function stake(
   program: Program,
   amount: BN,
-  stakingTokenMint: PublicKey
 ): Promise<TransactionSignature> {
-  const user = program.provider.publicKey!;
   const [stakingPool] = pda.getStakingPoolPDA(program.programId);
-  const [userStake] = pda.getUserStakePDA(stakingPool, user, program.programId);
-  const [rewardVault] = pda.getRewardVaultPDA(program.programId);
+  const stakingPoolAccount = await (program.account as any).stakingPool.fetch(stakingPool);
+  const stakingTokenMint = stakingPoolAccount.stakingTokenMint as PublicKey;
   
-  const stakingVault = await getAssociatedTokenAddress(
-    stakingTokenMint,
-    pda.getStakingVaultAuthorityPDA(program.programId)[0],
-    true
-  );
+  const [userStake] = pda.getUserStakePDA(stakingPool, program.provider.publicKey!, program.programId);
   
   const userTokenAccount = await getAssociatedTokenAddress(
     stakingTokenMint,
-    user
+    program.provider.publicKey!
   );
-  
+
   return program.methods
     .stake(amount)
     .accounts({
       stakingPool,
       userStake,
-      stakingVault,
+      stakingVault: stakingPoolAccount.stakingVault,
       userTokenAccount,
-      rewardVault,
-      user,
+      user: program.provider.publicKey!,
       tokenProgram: TOKEN_PROGRAM_ID,
       systemProgram: SystemProgram.programId,
     })
@@ -77,55 +66,47 @@ export async function stake(
 export async function unstake(
   program: Program,
   amount: BN,
-  stakingTokenMint: PublicKey
 ): Promise<TransactionSignature> {
-  const user = program.provider.publicKey!;
   const [stakingPool] = pda.getStakingPoolPDA(program.programId);
-  const [userStake] = pda.getUserStakePDA(stakingPool, user, program.programId);
-  const [stakingVaultAuthority] = pda.getStakingVaultAuthorityPDA(program.programId);
-  const [rewardVault] = pda.getRewardVaultPDA(program.programId);
+  const stakingPoolAccount = await (program.account as any).stakingPool.fetch(stakingPool);
+  const stakingTokenMint = stakingPoolAccount.stakingTokenMint as PublicKey;
   
-  const stakingVault = await getAssociatedTokenAddress(
-    stakingTokenMint,
-    stakingVaultAuthority,
-    true
-  );
+  const [userStake] = pda.getUserStakePDA(stakingPool, program.provider.publicKey!, program.programId);
+  const [stakingVaultAuthority] = pda.getStakingVaultAuthorityPDA(program.programId);
   
   const userTokenAccount = await getAssociatedTokenAddress(
     stakingTokenMint,
-    user
+    program.provider.publicKey!
   );
-  
+
   return program.methods
     .unstake(amount)
     .accounts({
       stakingPool,
       userStake,
-      stakingVault,
+      stakingVault: stakingPoolAccount.stakingVault,
       stakingVaultAuthority,
       userTokenAccount,
-      rewardVault,
-      user,
+      user: program.provider.publicKey!,
       tokenProgram: TOKEN_PROGRAM_ID,
     })
     .rpc();
 }
 
 export async function claimRewards(
-  program: Program
+  program: Program,
 ): Promise<TransactionSignature> {
-  const user = program.provider.publicKey!;
   const [stakingPool] = pda.getStakingPoolPDA(program.programId);
-  const [userStake] = pda.getUserStakePDA(stakingPool, user, program.programId);
+  const [userStake] = pda.getUserStakePDA(stakingPool, program.provider.publicKey!, program.programId);
   const [rewardVault] = pda.getRewardVaultPDA(program.programId);
-  
+
   return program.methods
     .claimRewards()
     .accounts({
       stakingPool,
       userStake,
       rewardVault,
-      user,
+      user: program.provider.publicKey!,
       systemProgram: SystemProgram.programId,
     })
     .rpc();
@@ -133,11 +114,11 @@ export async function claimRewards(
 
 export async function depositRewards(
   program: Program,
-  amount: BN
+  amount: BN,
 ): Promise<TransactionSignature> {
   const [stakingPool] = pda.getStakingPoolPDA(program.programId);
   const [rewardVault] = pda.getRewardVaultPDA(program.programId);
-  
+
   return program.methods
     .depositRewards(amount)
     .accounts({
@@ -149,26 +130,12 @@ export async function depositRewards(
     .rpc();
 }
 
-export async function updateStakingConfig(
-  program: Program,
-  params: {
-    targetPoolBalance?: BN;
-    baseEmissionRate?: BN;
-    maxEmissionRate?: BN;
-    minEmissionRate?: BN;
-    paused?: boolean;
-  }
-): Promise<TransactionSignature> {
+// Admin functions
+export async function pauseStaking(program: Program): Promise<TransactionSignature> {
   const [stakingPool] = pda.getStakingPoolPDA(program.programId);
-  
+
   return program.methods
-    .updateStakingConfig(
-      params.targetPoolBalance || null,
-      params.baseEmissionRate || null,
-      params.maxEmissionRate || null,
-      params.minEmissionRate || null,
-      params.paused !== undefined ? params.paused : null
-    )
+    .pauseStaking()
     .accounts({
       stakingPool,
       authority: program.provider.publicKey!,
@@ -176,47 +143,70 @@ export async function updateStakingConfig(
     .rpc();
 }
 
-export async function initializeFeeReceiver(
-  program: Program,
-  treasuryWallet: PublicKey,
-  operationsWallet: PublicKey,  // RENAMED from devWallet
-  treasurySplitBps: number,
-  stakingSplitBps: number,
-  operationsSplitBps: number    // RENAMED from devSplitBps
-): Promise<TransactionSignature> {
-  const [feeReceiver] = pda.getFeeReceiverPDA(program.programId);
-  const [stakingRewardVault] = pda.getRewardVaultPDA(program.programId);
-  
+export async function resumeStaking(program: Program): Promise<TransactionSignature> {
+  const [stakingPool] = pda.getStakingPoolPDA(program.programId);
+
   return program.methods
-    .initializeFeeReceiver(treasurySplitBps, stakingSplitBps, operationsSplitBps)
+    .resumeStaking()
     .accounts({
-      feeReceiver,
-      treasuryWallet,
-      operationsWallet,  // RENAMED
-      stakingRewardVault,
+      stakingPool,
+      authority: program.provider.publicKey!,
+    })
+    .rpc();
+}
+
+export async function updateEpochDuration(
+  program: Program,
+  newDuration: BN,
+): Promise<TransactionSignature> {
+  const [stakingPool] = pda.getStakingPoolPDA(program.programId);
+
+  return program.methods
+    .updateEpochDuration(newDuration)
+    .accounts({
+      stakingPool,
+      authority: program.provider.publicKey!,
+    })
+    .rpc();
+}
+
+export async function forceAdvanceEpoch(program: Program): Promise<TransactionSignature> {
+  const [stakingPool] = pda.getStakingPoolPDA(program.programId);
+
+  return program.methods
+    .forceAdvanceEpoch()
+    .accounts({
+      stakingPool,
+      authority: program.provider.publicKey!,
+    })
+    .rpc();
+}
+
+export async function emergencyWithdraw(program: Program): Promise<TransactionSignature> {
+  const [stakingPool] = pda.getStakingPoolPDA(program.programId);
+  const [rewardVault] = pda.getRewardVaultPDA(program.programId);
+
+  return program.methods
+    .emergencyWithdraw()
+    .accounts({
+      stakingPool,
+      rewardVault,
       authority: program.provider.publicKey!,
       systemProgram: SystemProgram.programId,
     })
     .rpc();
 }
 
-export async function distributeCreatorFees(
-  program: Program
-): Promise<TransactionSignature> {
-  const [feeReceiver] = pda.getFeeReceiverPDA(program.programId);
+export async function emergencyDrainRewards(program: Program): Promise<TransactionSignature> {
+  const [stakingPool] = pda.getStakingPoolPDA(program.programId);
   const [rewardVault] = pda.getRewardVaultPDA(program.programId);
-  
-  // Fetch fee receiver to get wallet addresses
-  const feeReceiverAccount = await (program.account as any).feeReceiver.fetch(feeReceiver);
-  
+
   return program.methods
-    .distributeCreatorFees()
+    .emergencyDrainRewards()
     .accounts({
-      feeReceiver,
-      treasuryWallet: feeReceiverAccount.treasuryWallet,
-      operationsWallet: feeReceiverAccount.operationsWallet,  // RENAMED
-      stakingRewardVault: rewardVault,
-      caller: program.provider.publicKey!,
+      stakingPool,
+      rewardVault,
+      authority: program.provider.publicKey!,
       systemProgram: SystemProgram.programId,
     })
     .rpc();

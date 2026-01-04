@@ -8,9 +8,14 @@ import { formatSOL, formatNumber, formatPercentage } from '@/lib/utils';
 import { api } from '@/lib/api';
 import { useWallet } from '@/components/wallet/WalletProvider';
 import { buildStakeTransaction, buildUnstakeTransaction, buildClaimRewardsTransaction } from '@/lib/staking-transactions';
+import { getStakingConfig, type Network } from '@memecoin-lending/config';
+import { EpochCountdown } from '@/components/EpochCountdown';
 
 export default function Staking() {
-  const STAKING_TOKEN_MINT = import.meta.env.VITE_STAKING_TOKEN_MINT;
+  // Get network from env
+  const NETWORK = (import.meta.env.VITE_SOLANA_NETWORK || 'devnet') as Network;
+  const stakingConfig = getStakingConfig(NETWORK);
+  const STAKING_TOKEN_MINT = stakingConfig?.stakingTokenMint;
   
   const [stakeAmount, setStakeAmount] = createSignal('');
   const [unstakeAmount, setUnstakeAmount] = createSignal('');
@@ -29,6 +34,7 @@ export default function Staking() {
     queryKey: ['user-stake', wallet.publicKey()?.toString()],
     queryFn: () => api.getUserStake(wallet.publicKey()?.toString() || ''),
     enabled: !!wallet.publicKey(),
+    refetchInterval: 5000, // Refresh every 5 seconds to show live pending rewards
   }));
   
   // User token balance query
@@ -84,7 +90,6 @@ export default function Staking() {
       const transaction = await buildStakeTransaction(
         wallet.publicKey()!,
         rawAmount,
-        mint,
         connection
       );
       
@@ -134,7 +139,6 @@ export default function Staking() {
       const transaction = await buildUnstakeTransaction(
         wallet.publicKey()!,
         rawAmount,
-        mint,
         connection
       );
       
@@ -228,18 +232,29 @@ export default function Staking() {
         
         <div class="text-center">
           <div class="text-2xl font-bold text-accent-blue">
-            {stakingStats.isLoading ? '---' : formatNumber(stakingStats.data?.totalStakers || 0)}
+            {stakingStats.isLoading ? '---' : `#${stakingStats.data?.currentEpoch || 0}`}
           </div>
-          <div class="text-text-dim text-xs">TOTAL_STAKERS</div>
+          <div class="text-text-dim text-xs">CURRENT_EPOCH</div>
         </div>
         <div class="w-px bg-border"></div>
         
         <div class="text-center">
           <div class="text-2xl font-bold text-accent-yellow">
-            {stakingStats.isLoading ? '---' : formatSOL(stakingStats.data?.rewardPoolBalance || '0')} SOL
+            {stakingStats.isLoading ? '---' : formatSOL(stakingStats.data?.epochRewards || '0')} SOL
           </div>
-          <div class="text-text-dim text-xs">REWARD_POOL</div>
+          <div class="text-text-dim text-xs">THIS_EPOCH_REWARDS</div>
         </div>
+        <div class="w-px bg-border"></div>
+        
+        <Show when={stakingStats.data?.timeUntilNextEpoch}>
+          <EpochCountdown timeUntilNextEpoch={stakingStats.data!.timeUntilNextEpoch} />
+        </Show>
+        <Show when={!stakingStats.data?.timeUntilNextEpoch}>
+          <div class="text-center">
+            <div class="text-2xl font-bold text-accent-blue">---</div>
+            <div class="text-text-dim text-xs">NEXT_EPOCH_IN</div>
+          </div>
+        </Show>
         <div class="w-px bg-border"></div>
         
         <div class="text-center">
@@ -276,8 +291,13 @@ export default function Staking() {
               <div class="bg-bg-tertiary border border-border p-4 mb-6">
                 <div class="text-xs text-text-dim uppercase tracking-wider mb-2">PENDING_REWARDS</div>
                 <div class="text-xl font-bold text-accent-yellow">
-                  {userStake.isLoading ? '---' : formatSOL(userStake.data?.pendingRewards || '0')} SOL
+                  {userStake.isLoading ? '---' : formatNumber(userStake.data?.pendingRewardsSol || 0, { minimumFractionDigits: 0, maximumFractionDigits: 4 })} SOL
                 </div>
+                <Show when={userStake.data?.isEligibleCurrentEpoch === false}>
+                  <div class="text-xs text-accent-yellow mt-2">
+                    ⚠️ NOT ELIGIBLE FOR CURRENT EPOCH (STAKE FULL EPOCH TO EARN)
+                  </div>
+                </Show>
               </div>
               
               {/* claim button */}
@@ -352,6 +372,11 @@ export default function Staking() {
                     >
                       [MAX]
                     </button>
+                  </div>
+                  
+                  <div class="bg-bg-tertiary border border-border p-3 mb-4 text-xs text-text-secondary">
+                    📋 <span class="text-accent-green">EPOCH RULES</span>: You must stake for a FULL epoch to earn rewards.
+                    New stakes will be eligible starting from epoch #{(stakingStats.data?.currentEpoch || 0) + 1}.
                   </div>
                   
                   <Button

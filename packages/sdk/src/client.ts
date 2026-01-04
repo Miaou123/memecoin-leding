@@ -172,18 +172,12 @@ export class MemecoinLendingClient {
 
   async initializeStaking(
     stakingTokenMint: PublicKey,
-    targetPoolBalance: BN,
-    baseEmissionRate: BN,
-    maxEmissionRate: BN,
-    minEmissionRate: BN
+    epochDuration: BN
   ): Promise<TransactionSignature> {
     return instructions.initializeStaking(
       this.program,
       stakingTokenMint,
-      targetPoolBalance,
-      baseEmissionRate,
-      maxEmissionRate,
-      minEmissionRate
+      epochDuration
     );
   }
 
@@ -204,15 +198,6 @@ export class MemecoinLendingClient {
     );
   }
 
-  async updateStakingConfig(params: {
-    targetPoolBalance?: BN;
-    baseEmissionRate?: BN;
-    maxEmissionRate?: BN;
-    minEmissionRate?: BN;
-    paused?: boolean;
-  }): Promise<TransactionSignature> {
-    return instructions.updateStakingConfig(this.program, params);
-  }
 
   // Account fetchers
   async getProtocolState(): Promise<ProtocolState> {
@@ -225,6 +210,10 @@ export class MemecoinLendingClient {
 
   async getLoan(loanPubkey: PublicKey): Promise<Loan | null> {
     return accounts.getLoan(this.program, loanPubkey);
+  }
+
+  async getAllLoans(): Promise<Loan[]> {
+    return accounts.getAllLoans(this.program);
   }
 
   async getActiveLoans(): Promise<Loan[]> {
@@ -241,6 +230,10 @@ export class MemecoinLendingClient {
 
   async getLoansByStatus(status: LoanStatus): Promise<Loan[]> {
     return accounts.getLoansByStatus(this.program, status);
+  }
+
+  async getAllTokenConfigs(): Promise<TokenConfig[]> {
+    return accounts.getAllTokenConfigs(this.program);
   }
 
   async getWhitelistedTokens(): Promise<TokenConfig[]> {
@@ -1036,4 +1029,91 @@ export class MemecoinLendingClient {
       'x-timestamp': Date.now().toString(),
     };
   }
+
+  // ============= STAKING METHODS =============
+
+  /**
+   * Get staking pool state
+   */
+  async getStakingPool(): Promise<accounts.StakingPool | null> {
+    return accounts.getStakingPool(this.program);
+  }
+
+  /**
+   * Get user stake for a specific user
+   */
+  async getUserStake(user: PublicKey): Promise<accounts.UserStake | null> {
+    return accounts.getUserStake(this.program, user);
+  }
+
+  /**
+   * Deposit SOL rewards to the staking pool
+   */
+  async depositRewards(amount: BN): Promise<TransactionSignature> {
+    return instructions.depositRewards(this.program, amount);
+  }
+
+  /**
+   * Stake governance tokens
+   */
+  async stake(amount: BN): Promise<TransactionSignature> {
+    return instructions.stake(this.program, amount);
+  }
+
+  /**
+   * Unstake governance tokens
+   */
+  async unstake(amount: BN): Promise<TransactionSignature> {
+    return instructions.unstake(this.program, amount);
+  }
+
+  /**
+   * Claim staking rewards (SOL)
+   */
+  async claimRewards(): Promise<TransactionSignature> {
+    return instructions.claimRewards(this.program);
+  }
+
+  /**
+   * Emergency drain all SOL from staking reward vault (admin only)
+   */
+  async emergencyDrainRewards(): Promise<TransactionSignature> {
+    return instructions.emergencyDrainRewards(this.program);
+  }
+
+  /**
+   * Pause staking (admin only)
+   */
+  async pauseStaking(): Promise<TransactionSignature> {
+    return instructions.pauseStaking(this.program);
+  }
+
+  /**
+   * Resume staking (admin only)
+   */
+  async resumeStaking(): Promise<TransactionSignature> {
+    return instructions.resumeStaking(this.program);
+  }
+
+  /**
+   * Update epoch duration (admin only)
+   */
+  async updateEpochDuration(newDuration: BN): Promise<TransactionSignature> {
+    return instructions.updateEpochDuration(this.program, newDuration);
+  }
+
+  /**
+   * Force advance to next epoch (admin only)
+   */
+  async forceAdvanceEpoch(): Promise<TransactionSignature> {
+    return instructions.forceAdvanceEpoch(this.program);
+  }
+
+  /**
+   * Emergency withdraw all staking rewards (admin only)
+   */
+  async emergencyWithdraw(): Promise<TransactionSignature> {
+    return instructions.emergencyWithdraw(this.program);
+  }
+
 }

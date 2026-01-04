@@ -1,4 +1,4 @@
-import { Show, createSignal, createMemo } from 'solid-js';
+import { Show, createSignal, createMemo, createEffect } from 'solid-js';
 import { useSearchParams, useNavigate } from '@solidjs/router';
 import { createQuery, createMutation } from '@tanstack/solid-query';
 import { useWallet } from '@/components/wallet/WalletProvider';
@@ -12,6 +12,14 @@ import { TokenSelectionUnified } from '@/components/tokens/TokenSelectionUnified
 import { Connection, Transaction, PublicKey } from '@solana/web3.js';
 import BN from 'bn.js';
 import { SuccessModal } from '@/components/ui/SuccessModal';
+// Simple debounce utility
+function debounce<T extends (...args: any[]) => void>(func: T, delay: number): T {
+  let timeoutId: number;
+  return ((...args: any[]) => {
+    clearTimeout(timeoutId);
+    timeoutId = setTimeout(() => func(...args), delay);
+  }) as T;
+}
 
 export default function Borrow() {
   const [searchParams] = useSearchParams();
@@ -26,6 +34,9 @@ export default function Borrow() {
   // Success modal state
   const [showSuccessModal, setShowSuccessModal] = createSignal(false);
   const [loanResult, setLoanResult] = createSignal<any>(null);
+  
+  // Cached loan estimate signal
+  const [cachedLoanEstimate, setCachedLoanEstimate] = createSignal<typeof loanEstimate.data>(null);
   
   // Token verification hooks
   const tokenVerification = createTokenVerification(() => selectedToken());
@@ -67,6 +78,16 @@ export default function Borrow() {
       tokenVerification.data()?.isValid
     ),
   }));
+  
+  // Effect to cache valid data whenever it arrives
+  createEffect(() => {
+    if (loanEstimate.data) {
+      setCachedLoanEstimate(loanEstimate.data);
+    }
+  });
+  
+  // Create a derived signal that prefers fresh data but falls back to cached
+  const displayedLoanEstimate = createMemo(() => loanEstimate.data ?? cachedLoanEstimate());
   
   const createLoanMutation = createMutation(() => ({
     mutationFn: async () => {
@@ -146,6 +167,9 @@ export default function Borrow() {
     }
     return `${hours}h`;
   };
+  
+  // Add debounced duration setter for smoother UX
+  const debouncedSetDuration = debounce((value: number) => setDuration(value), 100);
 
   // Format duration for display in bubble
   const formatDurationDisplay = (seconds: number) => {
@@ -257,8 +281,11 @@ export default function Borrow() {
           <label class="block text-sm font-medium mb-4">Loan Duration</label>
           
           <div class="flex items-center gap-3">
-            {/* Left label */}
-            <span class="text-xs font-medium text-green-500 whitespace-nowrap">+25%</span>
+            {/* Left label - FIXED: Added "LTV" to make it clear */}
+            <div class="text-xs font-medium text-green-500 whitespace-nowrap text-center">
+              <div>+25%</div>
+              <div class="text-[10px] text-green-400/70">LTV</div>
+            </div>
             
             {/* Main bar container */}
             <div class="flex-1 relative">
@@ -269,7 +296,7 @@ export default function Borrow() {
                   style="width: 23.1%;" 
                   class="bg-gradient-to-r from-green-600/40 to-green-500/20 flex items-center justify-center border-r border-green-500/30"
                 >
-                  <span class="text-[10px] text-green-400 font-medium">BONUS</span>
+                  <span class="text-[10px] text-green-400 font-medium">BONUS LTV</span>
                 </div>
                 {/* Reduced zone: 48h to 168h = 76.9% */}
                 <div 
@@ -285,7 +312,7 @@ export default function Borrow() {
                 max={7 * 24 * 60 * 60}
                 step={60 * 60}
                 value={duration()}
-                onInput={(e) => setDuration(parseInt(e.currentTarget.value))}
+                onInput={(e) => debouncedSetDuration(parseInt(e.currentTarget.value))}
                 class="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
               />
               
@@ -326,56 +353,101 @@ export default function Borrow() {
               </div>
             </div>
             
-            {/* Right label */}
-            <span class="text-xs font-medium text-red-500 whitespace-nowrap">-25%</span>
+            {/* Right label - FIXED: Added "LTV" to make it clear */}
+            <div class="text-xs font-medium text-red-500 whitespace-nowrap text-center">
+              <div>-25%</div>
+              <div class="text-[10px] text-red-400/70">LTV</div>
+            </div>
           </div>
         </div>
         
-        {/* Loan Estimate */}
-        <Show when={loanEstimate.data}>
+        {/* Loan Estimate - FIXED: Always show container when inputs are valid */}
+        <Show when={selectedToken() && collateralAmount() && tokenVerification.data()?.isValid}>
           <div class="bg-muted p-4 rounded-lg space-y-3">
-            <h3 class="font-medium">Loan Terms</h3>
-            <div class="space-y-2 text-sm">
-              <div class="flex justify-between">
-                <span>SOL Amount</span>
-                <span class="font-medium">{formatSOL(loanEstimate.data!.solAmount)} SOL</span>
-              </div>
-              <div class="flex justify-between">
-                <span>Protocol Fee</span>
-                <span>2.0%</span>
-              </div>
-              <div class="flex justify-between">
-                <span>Total to Repay</span>
-                <span class="font-medium">{formatSOL(loanEstimate.data!.totalOwed)} SOL</span>
-              </div>
-              <div class="flex justify-between">
-                <span>Liquidation Price</span>
-                <span class="text-red-600">${formatNumber(loanEstimate.data!.liquidationPrice)}</span>
-              </div>
-              <div class="flex justify-between">
-                <span>LTV Ratio</span>
-                <span class="flex items-center gap-2">
-                  <span class="font-medium">{formatPercentage(loanEstimate.data!.ltv)}</span>
-                  <Show when={loanEstimate.data!.ltvModifier && loanEstimate.data!.ltvModifier !== '0%'}>
-                    <span class={`text-xs ${
-                      loanEstimate.data!.ltvModifier?.startsWith('+') 
-                        ? 'text-green-600' 
-                        : 'text-red-600'
-                    }`}>
-                      ({loanEstimate.data!.ltvModifier})
-                    </span>
-                  </Show>
-                </span>
-              </div>
-              <div class="flex justify-between">
-                <span>Duration</span>
-                <span>{formatDuration(duration())}</span>
-              </div>
+            <div class="flex justify-between items-center">
+              <h3 class="font-medium">Loan Terms</h3>
+              {/* Show loading indicator without hiding the content */}
+              <Show when={loanEstimate.isFetching}>
+                <span class="text-xs text-muted-foreground animate-pulse">Updating...</span>
+              </Show>
+            </div>
+            
+            <div class={`space-y-2 text-sm transition-opacity duration-150 ${loanEstimate.isFetching ? 'opacity-60' : 'opacity-100'}`}>
+              {/* Use displayedLoanEstimate which falls back to cached data */}
+              <Show 
+                when={displayedLoanEstimate()} 
+                fallback={
+                  // Skeleton loader for initial load only
+                  <div class="space-y-2 animate-pulse">
+                    <div class="flex justify-between">
+                      <span>SOL Amount</span>
+                      <span class="bg-muted-foreground/20 rounded w-20 h-4" />
+                    </div>
+                    <div class="flex justify-between">
+                      <span>Protocol Fee</span>
+                      <span>2.0%</span>
+                    </div>
+                    <div class="flex justify-between">
+                      <span>Total to Repay</span>
+                      <span class="bg-muted-foreground/20 rounded w-20 h-4" />
+                    </div>
+                    <div class="flex justify-between">
+                      <span>Liquidation Price</span>
+                      <span class="bg-muted-foreground/20 rounded w-16 h-4" />
+                    </div>
+                    <div class="flex justify-between">
+                      <span>LTV Ratio</span>
+                      <span class="bg-muted-foreground/20 rounded w-16 h-4" />
+                    </div>
+                    <div class="flex justify-between">
+                      <span>Duration</span>
+                      <span>{formatDuration(duration())}</span>
+                    </div>
+                  </div>
+                }
+              >
+                <div class="flex justify-between">
+                  <span>SOL Amount</span>
+                  <span class="font-medium">{formatSOL(displayedLoanEstimate()!.solAmount)} SOL</span>
+                </div>
+                <div class="flex justify-between">
+                  <span>Protocol Fee</span>
+                  <span>2.0%</span>
+                </div>
+                <div class="flex justify-between">
+                  <span>Total to Repay</span>
+                  <span class="font-medium">{formatSOL(displayedLoanEstimate()!.totalOwed)} SOL</span>
+                </div>
+                <div class="flex justify-between">
+                  <span>Liquidation Price</span>
+                  <span class="text-red-600">${formatNumber(displayedLoanEstimate()!.liquidationPrice)}</span>
+                </div>
+                <div class="flex justify-between">
+                  <span>LTV Ratio</span>
+                  <span class="flex items-center gap-2">
+                    <span class="font-medium">{formatPercentage(displayedLoanEstimate()!.ltv)}</span>
+                    <Show when={displayedLoanEstimate()!.ltvModifier && displayedLoanEstimate()!.ltvModifier !== '0%'}>
+                      <span class={`text-xs ${
+                        displayedLoanEstimate()!.ltvModifier?.startsWith('+') 
+                          ? 'text-green-600' 
+                          : 'text-red-600'
+                      }`}>
+                        ({displayedLoanEstimate()!.ltvModifier})
+                      </span>
+                    </Show>
+                  </span>
+                </div>
+                <div class="flex justify-between">
+                  <span>Duration</span>
+                  <span>{formatDuration(duration())}</span>
+                </div>
+              </Show>
             </div>
 
-            {/* Add duration impact hint */}
-            <div class="text-xs text-muted-foreground mt-2">
-              💡 Drag the timeline or click markers to adjust duration. Green zone = bonus LTV, red zone = reduced LTV.
+            {/* Duration impact hint - IMPROVED */}
+            <div class="text-xs text-muted-foreground mt-2 border-t border-border/50 pt-2">
+              💡 <span class="text-green-500">Green zone</span> = shorter loan = bonus LTV (up to +25%). 
+              <span class="text-red-500">Red zone</span> = longer loan = reduced LTV (up to -25%).
             </div>
           </div>
         </Show>

@@ -457,7 +457,7 @@ program
   .option('--skip-init', 'Skip protocol initialization', false)
   .option('--fund <amount>', 'Amount of SOL to fund treasury', '0.5')
   .option('--no-fund', 'Skip treasury funding')
-  .option('-k, --admin-keypair <path>', 'Path to admin keypair', './keys/admin.json')
+  .option('-k, --admin-keypair <path>', 'Path to admin keypair', '../keys/admin.json')
   .option('--staking-token <mint>', 'Governance token mint for staking (optional)')
   .action(async (options) => {
     // Safety check for mainnet

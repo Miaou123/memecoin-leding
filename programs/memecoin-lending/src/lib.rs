@@ -9,7 +9,7 @@ pub mod events;
 
 use instructions::*;
 
-declare_id!("65HMkr2uRgeiPQmC1uCtojsnfKcbCynsWGK3snnw8urs");
+declare_id!("46YbCjkHDPYWWNZZEPsvWeLweFtzmPEeCnDP87zDTZFU");
 
 #[program]
 pub mod memecoin_lending {
@@ -138,21 +138,12 @@ pub mod memecoin_lending {
     ) -> Result<()> {
         instructions::admin::update_wallets_handler(ctx, new_admin, new_buyback_wallet, new_operations_wallet)
     }
-    /// Initialize staking pool
+    /// Initialize epoch-based staking pool
     pub fn initialize_staking(
         ctx: Context<InitializeStaking>,
-        target_pool_balance: u64,
-        base_emission_rate: u64,
-        max_emission_rate: u64,
-        min_emission_rate: u64,
+        epoch_duration: i64,
     ) -> Result<()> {
-        instructions::staking::initialize_staking::initialize_staking_handler(
-            ctx,
-            target_pool_balance,
-            base_emission_rate,
-            max_emission_rate,
-            min_emission_rate,
-        )
+        instructions::staking::initialize_staking::initialize_staking_handler(ctx, epoch_duration)
     }
 
     /// Stake governance tokens
@@ -175,23 +166,29 @@ pub mod memecoin_lending {
         instructions::staking::deposit_rewards::deposit_rewards_handler(ctx, amount)
     }
 
-    /// Update staking pool configuration (admin only)
-    pub fn update_staking_config(
-        ctx: Context<UpdateStakingConfig>,
-        target_pool_balance: Option<u64>,
-        base_emission_rate: Option<u64>,
-        max_emission_rate: Option<u64>,
-        min_emission_rate: Option<u64>,
-        paused: Option<bool>,
-    ) -> Result<()> {
-        instructions::staking::update_staking_config::update_staking_config_handler(
-            ctx,
-            target_pool_balance,
-            base_emission_rate,
-            max_emission_rate,
-            min_emission_rate,
-            paused,
-        )
+    /// Pause staking (admin only)
+    pub fn pause_staking(ctx: Context<PauseStaking>) -> Result<()> {
+        instructions::staking::admin_staking::pause_staking_handler(ctx)
+    }
+
+    /// Resume staking (admin only)
+    pub fn resume_staking(ctx: Context<PauseStaking>) -> Result<()> {
+        instructions::staking::admin_staking::resume_staking_handler(ctx)
+    }
+
+    /// Update epoch duration (admin only)
+    pub fn update_epoch_duration(ctx: Context<UpdateEpochDuration>, new_duration: i64) -> Result<()> {
+        instructions::staking::admin_staking::update_epoch_duration_handler(ctx, new_duration)
+    }
+
+    /// Force advance to next epoch (admin only)
+    pub fn force_advance_epoch(ctx: Context<ForceAdvanceEpoch>) -> Result<()> {
+        instructions::staking::admin_staking::force_advance_epoch_handler(ctx)
+    }
+
+    /// Emergency withdraw all rewards (admin only)
+    pub fn emergency_withdraw(ctx: Context<EmergencyWithdraw>) -> Result<()> {
+        instructions::staking::admin_staking::emergency_withdraw_handler(ctx)
     }
 
     /// Initialize fee receiver for creator fees (40/40/20 staker-focused split)
@@ -212,5 +209,10 @@ pub mod memecoin_lending {
     /// Distribute accumulated creator fees
     pub fn distribute_creator_fees(ctx: Context<DistributeCreatorFees>) -> Result<()> {
         instructions::fee_distribution::distribute_creator_fees_handler(ctx)
+    }
+
+    /// Emergency drain staking reward vault (admin only)
+    pub fn emergency_drain_rewards(ctx: Context<EmergencyDrainRewards>) -> Result<()> {
+        instructions::staking::emergency_drain_rewards::emergency_drain_rewards_handler(ctx)
     }
 }

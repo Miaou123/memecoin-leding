@@ -30,7 +30,7 @@ program
   .name('get-token-configs')
   .description('View whitelisted tokens and their configurations')
   .option('-n, --network <network>', 'Network to use', 'devnet')
-  .option('-k, --keypair <path>', 'Path to keypair', './keys/admin.json')
+  .option('-k, --keypair <path>', 'Path to keypair', '../keys/admin.json')
   .option('-m, --mint <address>', 'Get specific token config by mint address')
   .action(async (options) => {
     try {

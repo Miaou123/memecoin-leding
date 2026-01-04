@@ -31,7 +31,7 @@ program
   .description('Withdraw SOL from the protocol treasury (admin only)')
   .requiredOption('-a, --amount <sol>', 'Amount of SOL to withdraw')
   .option('-n, --network <network>', 'Network to use', 'devnet')
-  .option('-k, --keypair <path>', 'Path to admin keypair', './keys/admin.json')
+  .option('-k, --keypair <path>', 'Path to admin keypair', '../keys/admin.json')
   .option('--dry-run', 'Simulate the transaction without executing')
   .action(async (options) => {
     try {

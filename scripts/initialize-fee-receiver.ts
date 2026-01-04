@@ -12,7 +12,7 @@ program
   .name('initialize-fee-receiver')
   .description('Initialize the fee receiver for creator fee distribution (40/40/20 split)')
   .option('-n, --network <network>', 'Network to use', 'devnet')
-  .option('-k, --admin-keypair <path>', 'Path to admin keypair', './keys/admin.json')
+  .option('-k, --admin-keypair <path>', 'Path to admin keypair')
   .option('--treasury <address>', 'Treasury wallet address (defaults to protocol treasury)')
   .option('--operations <address>', 'Operations wallet address (defaults to protocol operations wallet)')
   .option('--treasury-split <bps>', 'Treasury split in basis points', '4000')

@@ -687,3 +687,4 @@ export async function updateWallets(
     .rpc();
 }
 export * from './staking';
+export * from './fee-distribution';

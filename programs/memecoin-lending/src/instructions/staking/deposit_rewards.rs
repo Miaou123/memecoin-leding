@@ -2,7 +2,7 @@ use anchor_lang::prelude::*;
 use anchor_lang::system_program;
 use crate::state::*;
 use crate::error::LendingError;
-use crate::utils::SafeMath;
+use super::epoch_helpers::maybe_advance_epoch;
 
 #[derive(Accounts)]
 pub struct DepositRewards<'info> {
@@ -27,9 +27,13 @@ pub struct DepositRewards<'info> {
 }
 
 pub fn deposit_rewards_handler(ctx: Context<DepositRewards>, amount: u64) -> Result<()> {
-    require!(amount > 0, LendingError::InvalidLoanAmount);
+    require!(amount > 0, LendingError::InvalidAmount);
     
+    let clock = Clock::get()?;
     let staking_pool = &mut ctx.accounts.staking_pool;
+    
+    // Auto-advance epoch if needed (this processes previous epoch's rewards)
+    maybe_advance_epoch(staking_pool, clock.unix_timestamp)?;
     
     // Transfer SOL to reward vault
     system_program::transfer(
@@ -43,12 +47,22 @@ pub fn deposit_rewards_handler(ctx: Context<DepositRewards>, amount: u64) -> Res
         amount,
     )?;
     
-    staking_pool.total_rewards_deposited = SafeMath::add(
-        staking_pool.total_rewards_deposited,
-        amount,
-    )?;
+    // Add to current epoch's rewards
+    staking_pool.current_epoch_rewards = staking_pool.current_epoch_rewards
+        .checked_add(amount)
+        .ok_or(LendingError::MathOverflow)?;
     
-    msg!("Deposited {} lamports to reward vault", amount);
+    staking_pool.total_rewards_deposited = staking_pool.total_rewards_deposited
+        .checked_add(amount)
+        .ok_or(LendingError::MathOverflow)?;
+    
+    msg!(
+        "Deposited {} lamports to epoch {}. Epoch rewards: {}. Total deposited: {}",
+        amount,
+        staking_pool.current_epoch,
+        staking_pool.current_epoch_rewards,
+        staking_pool.total_rewards_deposited
+    );
     
     Ok(())
 }

@@ -14,7 +14,7 @@ program
   .name('whitelist-token')
   .description('Whitelist a token for lending')
   .option('-n, --network <network>', 'Network to use', 'devnet')
-  .option('-k, --admin-keypair <path>', 'Path to admin keypair', './keys/admin.json')
+  .option('-k, --admin-keypair <path>', 'Path to admin keypair', '../keys/admin.json')
   .option('-m, --mint <address>', 'Token mint address')
   .option('-t, --tier <tier>', 'Token tier (bronze, silver, gold)')
   .option('-p, --pool <address>', 'Pool address for price feeds')
