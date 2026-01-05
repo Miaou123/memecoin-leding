@@ -86,13 +86,17 @@ export class MemecoinLendingClient {
   async initializeProtocol(
     admin?: PublicKey,
     buybackWallet?: PublicKey,
-    operationsWallet?: PublicKey
+    operationsWallet?: PublicKey,
+    authorizedLiquidator?: PublicKey,
+    priceAuthority?: PublicKey
   ): Promise<TransactionSignature> {
     return instructions.initializeProtocol(
       this.program,
       admin || this.wallet.publicKey,
       buybackWallet || this.wallet.publicKey,
-      operationsWallet || this.wallet.publicKey
+      operationsWallet || this.wallet.publicKey,
+      authorizedLiquidator,
+      priceAuthority
     );
   }
 

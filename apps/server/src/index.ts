@@ -40,6 +40,7 @@ import { PROGRAM_ID } from '@memecoin-lending/config';
 import fs from 'fs';
 import path from 'path';
 import { getAdminKeypair } from './config/keys.js';
+import { getTreasuryPda, getRewardVaultPda } from './config/deployment.js';
 
 // Validate configuration on startup
 const networkConfig = getNetworkConfig();
@@ -287,10 +288,15 @@ const server = serve({
   });
   
   // Initialize treasury monitor
-  if (process.env.TREASURY_PDA && process.env.ENABLE_TREASURY_MONITORING !== 'false') {
+  const deploymentTreasuryPda = getTreasuryPda()?.toBase58();
+  const deploymentRewardVaultPda = getRewardVaultPda()?.toBase58();
+  const treasuryPdaToUse = deploymentTreasuryPda || process.env.TREASURY_PDA;
+  const rewardVaultPdaToUse = deploymentRewardVaultPda || process.env.REWARD_VAULT_PDA;
+  
+  if (treasuryPdaToUse && process.env.ENABLE_TREASURY_MONITORING !== 'false') {
     treasuryMonitor.initialize(
-      process.env.TREASURY_PDA,
-      process.env.REWARD_VAULT_PDA // Optional
+      treasuryPdaToUse,
+      rewardVaultPdaToUse // Optional
     ).then(() => {
       console.log('🏦 Treasury monitor initialized and running');
     }).catch((error) => {
@@ -301,9 +307,8 @@ const server = serve({
   }
   
   // Initialize treasury health monitoring
-  const treasuryPda = process.env.TREASURY_PDA;
-  if (treasuryPda) {
-    treasuryHealthService.initialize(treasuryPda).then(() => {
+  if (treasuryPdaToUse) {
+    treasuryHealthService.initialize(treasuryPdaToUse).then(() => {
       console.log('🏦 Treasury health monitoring started');
     }).catch((error) => {
       console.error('Failed to initialize treasury health monitoring:', error.message);

@@ -8,7 +8,7 @@ skip-lint = false
 memecoin_lending = "CD2sN1enC22Nyw6U6s2dYcxfbtsLVq2PhbomLBkyh1z5"
 
 [programs.localnet]
-memecoin_lending = "DWPzC5B8wCYFJFw9khPiCwSvErNJTVaBxpUzrxbTCNJk"
+memecoin_lending = "Ex1UJrdAUqosatT1moQSPTMepfKtnKWKfsKMTjZBeKva"
 
 [programs.mainnet]
 memecoin_lending = "CD2sN1enC22Nyw6U6s2dYcxfbtsLVq2PhbomLBkyh1z5"

@@ -29,13 +29,19 @@ export async function initializeProtocol(
   program: Program,
   admin: PublicKey,
   buybackWallet: PublicKey,
-  operationsWallet: PublicKey
+  operationsWallet: PublicKey,
+  authorizedLiquidator?: PublicKey,  // NEW - defaults to admin
+  priceAuthority?: PublicKey          // NEW - defaults to admin
 ): Promise<TransactionSignature> {
   const [protocolState] = pda.getProtocolStatePDA(program.programId);
   const [treasury] = pda.getTreasuryPDA(program.programId);
 
+  // Default to admin if not provided
+  const liquidator = authorizedLiquidator || admin;
+  const priceAuth = priceAuthority || admin;
+
   return program.methods
-    .initialize(admin, buybackWallet, operationsWallet)
+    .initialize(admin, buybackWallet, operationsWallet, liquidator, priceAuth)
     .accounts({
       protocolState,
       treasury,

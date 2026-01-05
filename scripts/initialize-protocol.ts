@@ -15,6 +15,8 @@ program
   .option('--admin <address>', 'Admin wallet address (defaults to keypair public key)')
   .option('--buyback-wallet <address>', 'Buyback wallet address (defaults to admin)')
   .option('--operations-wallet <address>', 'Operations wallet address (defaults to admin)')
+  .option('--liquidator <address>', 'Authorized liquidator address (defaults to admin)')
+  .option('--price-authority <address>', 'Price authority address (defaults to admin)')
   .option('--admin-keypair <path>', 'Path to admin keypair (defaults to./keys/admin.json)')
   .action(async (options) => {
     try {
@@ -34,10 +36,14 @@ program
       const adminPubkey = options.admin ? new PublicKey(options.admin) : keypair.publicKey;
       const buybackWallet = options.buybackWallet ? new PublicKey(options.buybackWallet) : adminPubkey;
       const operationsWallet = options.operationsWallet ? new PublicKey(options.operationsWallet) : adminPubkey;
+      const authorizedLiquidator = options.liquidator ? new PublicKey(options.liquidator) : adminPubkey;
+      const priceAuthority = options.priceAuthority ? new PublicKey(options.priceAuthority) : adminPubkey;
       
       printInfo('Admin', adminPubkey.toString());
       printInfo('Buyback Wallet', buybackWallet.toString());
       printInfo('Operations Wallet', operationsWallet.toString());
+      printInfo('Authorized Liquidator', authorizedLiquidator.toString());
+      printInfo('Price Authority', priceAuthority.toString());
       
       console.log(chalk.yellow('\\n🔄 Sending transaction...'));
       
@@ -45,7 +51,9 @@ program
       const signature = await client.initializeProtocol(
         adminPubkey,
         buybackWallet,
-        operationsWallet
+        operationsWallet,
+        authorizedLiquidator,
+        priceAuthority
       );
       
       printSuccess(`Protocol initialized!`);

@@ -51,7 +51,7 @@ export function getDeploymentConfig(network: Network): DeploymentConfig {
       return mainnetConfig as DeploymentConfig;
     case 'devnet':
     default:
-      return devnetConfig as DeploymentConfig;
+      return devnetConfig as unknown as DeploymentConfig;
   }
 }
 

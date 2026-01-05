@@ -82,7 +82,7 @@ function getProgramIdForNetwork(network: string = 'devnet'): string {
   
   // Fallback (should not reach here in production)
   console.warn('No program ID found! Using fallback.');
-  return 'DWPzC5B8wCYFJFw9khPiCwSvErNJTVaBxpUzrxbTCNJk';
+  return 'Ex1UJrdAUqosatT1moQSPTMepfKtnKWKfsKMTjZBeKva';
 }
 
 // Current network

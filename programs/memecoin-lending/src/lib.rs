@@ -9,7 +9,7 @@ pub mod swap;
 use instructions::*;
 use instructions::admin::{UpdateLiquidator, BlacklistToken, UpdatePriceAuthority};
 
-declare_id!("DWPzC5B8wCYFJFw9khPiCwSvErNJTVaBxpUzrxbTCNJk");
+declare_id!("Ex1UJrdAUqosatT1moQSPTMepfKtnKWKfsKMTjZBeKva");
 
 #[program]
 pub mod memecoin_lending {
