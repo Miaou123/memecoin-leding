@@ -15,15 +15,16 @@ pub struct CreateLoan<'info> {
         bump = protocol_state.bump,
         constraint = !protocol_state.paused @ LendingError::ProtocolPaused
     )]
-    pub protocol_state: Account<'info, ProtocolState>,
+    pub protocol_state: Box<Account<'info, ProtocolState>>,
 
     #[account(
         mut,
         seeds = [TOKEN_CONFIG_SEED, token_mint.key().as_ref()],
         bump = token_config.bump,
-        constraint = token_config.enabled @ LendingError::TokenDisabled
+        constraint = token_config.enabled @ LendingError::TokenDisabled,
+        constraint = !token_config.blacklisted @ LendingError::TokenBlacklisted
     )]
-    pub token_config: Account<'info, TokenConfig>,
+    pub token_config: Box<Account<'info, TokenConfig>>,
 
     #[account(
         init,
@@ -37,15 +38,16 @@ pub struct CreateLoan<'info> {
         ],
         bump
     )]
-    pub loan: Account<'info, Loan>,
+    pub loan: Box<Account<'info, Loan>>,
 
     /// Protocol treasury account
+    /// CHECK: Validated by seeds
     #[account(
         mut,
         seeds = [TREASURY_SEED],
         bump
     )]
-    pub treasury: SystemAccount<'info>,
+    pub treasury: UncheckedAccount<'info>,
 
     #[account(mut)]
     pub borrower: Signer<'info>,
@@ -79,6 +81,12 @@ pub struct CreateLoan<'info> {
 
     pub token_mint: Account<'info, anchor_spl::token::Mint>,
 
+    /// Price authority must co-sign to approve this loan
+    /// This proves the backend approved the price - SIMPLE AND SECURE
+    #[account(
+        constraint = price_authority.key() == protocol_state.price_authority @ LendingError::InvalidPriceAuthority
+    )]
+    pub price_authority: Signer<'info>,
 
     pub token_program: Program<'info, Token>,
     pub system_program: Program<'info, System>,
@@ -88,6 +96,8 @@ pub fn create_loan_handler(
     ctx: Context<CreateLoan>,
     collateral_amount: u64,
     duration_seconds: u64,
+    approved_price: u64,      // NEW: Backend-approved price
+    price_timestamp: i64,      // NEW: When price was approved
 ) -> Result<()> {
     let protocol_state = &mut ctx.accounts.protocol_state;
     let token_config = &ctx.accounts.token_config;
@@ -97,17 +107,49 @@ pub fn create_loan_handler(
     // FIX 1: Reentrancy guard
     ReentrancyGuard::enter(protocol_state)?;
 
+    // Validate collateral amount
+    require!(collateral_amount > 0, LendingError::InvalidAmount);
+
     // Validate loan duration
     ValidationUtils::validate_loan_duration(duration_seconds)?;
 
-    // Get current token price from pool
-    let current_price = PriceFeedUtils::read_price_from_pool(
+    // ============================================================
+    // SECURITY: Verify backend-approved price
+    // ============================================================
+    // The price_authority account is a Signer, which means the backend
+    // MUST have signed this transaction. This proves the backend approved
+    // the price. No complex Ed25519 introspection needed!
+    
+    // Check price timestamp is recent (within 30 seconds)
+    let price_age = clock.unix_timestamp - price_timestamp;
+    require!(
+        price_age >= 0 && price_age <= MAX_PRICE_SIGNATURE_AGE_SECONDS,
+        LendingError::PriceSignatureExpired
+    );
+    
+    // Use the backend-approved price
+    let current_price = approved_price;
+    
+    require!(current_price > 0, LendingError::ZeroPrice);
+    
+    // Sanity check: compare against pool price (catches bugs/misconfigs)
+    let pool_price = PriceFeedUtils::read_price_from_pool(
         &ctx.accounts.pool_account,
         token_config.pool_type,
         &token_config.mint,
     )?;
     
-    require!(current_price > 0, LendingError::ZeroPrice);
+    // 20% = 2000 bps - if larger, something is wrong
+    let deviation = if approved_price > pool_price {
+        SafeMath::mul_div(approved_price - pool_price, BPS_DIVISOR, pool_price)?
+    } else {
+        SafeMath::mul_div(pool_price - approved_price, BPS_DIVISOR, approved_price)?
+    };
+    
+    require!(
+        deviation <= 2000,
+        LendingError::PriceDeviationTooHigh
+    );
     
     // FIX 6: Validate minimum collateral value
     let collateral_value = SafeMath::mul_div(
@@ -143,7 +185,7 @@ pub fn create_loan_handler(
     }
 
     // Check treasury has sufficient SOL
-    let treasury_balance = ctx.accounts.treasury.lamports();
+    let treasury_balance = ctx.accounts.treasury.to_account_info().lamports();
     if treasury_balance < sol_loan_amount {
         return Err(LendingError::InsufficientTreasuryBalance.into());
     }
@@ -242,6 +284,12 @@ pub fn create_loan_handler(
     loan.status = LoanStatus::Active;
     loan.index = protocol_state.total_loans_created;
     loan.bump = ctx.bumps.loan;
+
+    // Check for loan index overflow (theoretical but safe)
+    require!(
+        protocol_state.total_loans_created < u64::MAX,
+        LendingError::MaxLoansReached
+    );
 
     // Update protocol state and token config
     protocol_state.total_loans_created = SafeMath::add(protocol_state.total_loans_created, 1)?;

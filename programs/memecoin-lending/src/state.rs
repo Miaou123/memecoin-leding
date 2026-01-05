@@ -99,6 +99,10 @@ pub struct ProtocolState {
     pub pending_admin: Pubkey,
     /// Timestamp when admin transfer was initiated
     pub admin_transfer_timestamp: i64,
+    /// Authorized liquidator address (only this address can call liquidate)
+    pub authorized_liquidator: Pubkey,
+    /// Backend public key authorized to sign price approvals
+    pub price_authority: Pubkey,
     /// Bump seed for PDA
     pub bump: u8,
     /// Reserved for future upgrades
@@ -124,6 +128,8 @@ impl ProtocolState {
         1 + // reentrancy_guard
         32 + // pending_admin
         8 + // admin_transfer_timestamp
+        32 + // authorized_liquidator
+        32 + // price_authority
         1 + // bump
         32; // _reserved
 }
@@ -158,6 +164,8 @@ pub struct TokenConfig {
     pub total_active_borrowed: u64,
     /// Whether this is the protocol's own token (always gets 50% LTV)
     pub is_protocol_token: bool,
+    /// Whether this token is blacklisted (emergency suspension)
+    pub blacklisted: bool,
     /// Bump seed for PDA
     pub bump: u8,
     /// Reserved for future use
@@ -179,6 +187,7 @@ impl TokenConfig {
         8 + // total_volume
         8 + // total_active_borrowed
         1 + // is_protocol_token
+        1 + // blacklisted
         1 + // bump
         32; // _reserved
 }
@@ -263,6 +272,10 @@ impl UserExposure {
         1 +  // bump
         32;  // _reserved
 }
+
+/// UserStake account discriminator (first 8 bytes)
+/// This is SHA256("account:UserStake")[..8]
+pub const USER_STAKE_DISCRIMINATOR: [u8; 8] = [102, 53, 163, 107, 9, 138, 87, 153];
 
 /// Pool type enum for different AMM protocols
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, Debug)]

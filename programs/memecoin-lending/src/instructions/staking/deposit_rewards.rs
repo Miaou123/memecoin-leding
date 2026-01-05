@@ -51,13 +51,6 @@ pub fn deposit_rewards_handler(ctx: Context<DepositRewards>, amount: u64) -> Res
         .checked_add(amount)
         .ok_or(LendingError::MathOverflow)?;
     
-    msg!(
-        "Deposited {} lamports to epoch {}. Epoch rewards: {}. Total deposited: {}",
-        amount,
-        staking_pool.current_epoch,
-        staking_pool.current_epoch_rewards,
-        staking_pool.total_rewards_deposited
-    );
     
     Ok(())
 }

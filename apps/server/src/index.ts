@@ -12,6 +12,7 @@ import { loansRouter } from './api/loans.js';
 import { tokensRouter } from './api/tokens.js';
 import { protocolRouter } from './api/protocol.js';
 import { userRouter } from './api/user.js';
+import { loanPrepareRouter } from './api/loan-prepare.js';
 import pricesRouter from './routes/prices.js';
 import adminWhitelistRouter from './routes/admin/whitelist.js';
 import adminFeesRouter, { setFeeClaimerService } from './routes/admin/fees.js';
@@ -33,6 +34,7 @@ import { Program, AnchorProvider, Wallet, Idl } from '@coral-xyz/anchor';
 import { PROGRAM_ID } from '@memecoin-lending/config';
 import fs from 'fs';
 import path from 'path';
+import { getAdminKeypair } from './config/keys.js';
 
 // Create Hono app
 const app = new Hono();
@@ -66,6 +68,7 @@ app.get('/health', async (c) => {
 
 // API routes
 app.route('/api/loans', loansRouter);
+app.route('/api/loan', loanPrepareRouter);
 app.route('/api/tokens', tokensRouter);
 app.route('/api/protocol', protocolRouter);
 app.route('/api/user', userRouter);
@@ -110,12 +113,7 @@ const validateEnvironment = () => {
     warnings.push('⚠️  ADMIN_API_KEY not set - admin endpoints will not work');
   }
   
-  const enableFeeClaimer = process.env.ENABLE_FEE_CLAIMER !== 'false';
-  if (enableFeeClaimer) {
-    if (!process.env.ADMIN_KEYPAIR_PATH && !process.env.ADMIN_PRIVATE_KEY) {
-      warnings.push('⚠️  Neither ADMIN_KEYPAIR_PATH nor ADMIN_PRIVATE_KEY set - fee claimer disabled');
-    }
-  }
+  // Fee claimer now uses hardcoded keypair path - no environment variables needed
 
   if (warnings.length > 0) {
     console.log('\n🔶 Environment Warnings:');
@@ -145,29 +143,8 @@ async function initializeFeeClaimerService() {
   }
   
   try {
-    // Load admin keypair
-    let adminKeypair: Keypair;
-    
-    if (process.env.ADMIN_PRIVATE_KEY) {
-      // Production: use base58 encoded private key
-      const privateKeyBytes = Buffer.from(process.env.ADMIN_PRIVATE_KEY, 'base64');
-      adminKeypair = Keypair.fromSecretKey(new Uint8Array(privateKeyBytes));
-    } else if (process.env.ADMIN_KEYPAIR_PATH) {
-      // Development: use keypair file
-      const keypairPath = path.resolve(process.env.ADMIN_KEYPAIR_PATH);
-      
-      if (!fs.existsSync(keypairPath)) {
-        console.warn(`⚠️ Admin keypair not found at ${keypairPath}`);
-        return;
-      }
-      
-      const keypairData = JSON.parse(fs.readFileSync(keypairPath, 'utf-8'));
-      adminKeypair = Keypair.fromSecretKey(Uint8Array.from(keypairData));
-    } else {
-      console.warn('⚠️ No admin keypair configured - fee claimer disabled');
-      return;
-    }
-    
+    // Load admin keypair from centralized loader
+    const adminKeypair = getAdminKeypair();
     console.log(`🔑 Fee claimer admin wallet: ${adminKeypair.publicKey.toString()}`);
     
     // Initialize connection and provider

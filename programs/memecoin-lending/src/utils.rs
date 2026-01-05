@@ -59,6 +59,18 @@ pub const MAX_LIQUIDATION_SLIPPAGE_BPS: u64 = 500;
 /// Minimum collateral value in lamports (0.01 SOL = 10_000_000 lamports)
 pub const MIN_COLLATERAL_VALUE_LAMPORTS: u64 = 10_000_000;
 
+/// Minimum stake amount (1 token with 6 decimals for PumpFun tokens)
+pub const MIN_STAKE_AMOUNT: u64 = 1_000_000;
+
+/// Maximum effective LTV + buffer to ensure liquidation profit (90% = 9000 bps)
+pub const MAX_EFFECTIVE_LIQUIDATION_LTV_BPS: u64 = 9000;
+
+/// Maximum age for price signatures (30 seconds)
+pub const MAX_PRICE_SIGNATURE_AGE_SECONDS: i64 = 30;
+
+/// Price signature message prefix for domain separation
+pub const PRICE_SIGNATURE_PREFIX: &[u8] = b"MCLEND_PRICE_V1";
+
 // === POOL DATA OFFSETS (Raydium AMM V4) ===
 pub const RAYDIUM_TOKEN_A_AMOUNT_OFFSET: usize = 224;
 pub const RAYDIUM_TOKEN_B_AMOUNT_OFFSET: usize = 232;
@@ -193,15 +205,24 @@ impl LoanCalculator {
         SafeMath::add(principal, protocol_fee)
     }
 
-    /// Calculate liquidation price
+    /// Calculate liquidation price with safety cap
+    /// Ensures effective LTV never exceeds 90% for protocol safety
     pub fn calculate_liquidation_price(
         sol_borrowed: u64,
         collateral_amount: u64,
         ltv_bps: u16,
         liquidation_buffer_bps: u16,
     ) -> Result<u64> {
-        let effective_ltv = SafeMath::add(ltv_bps as u64, liquidation_buffer_bps as u64)?;
-        SafeMath::mul_div(sol_borrowed, BPS_DIVISOR, SafeMath::mul_div(collateral_amount, effective_ltv, BPS_DIVISOR)?)
+        let raw_effective_ltv = SafeMath::add(ltv_bps as u64, liquidation_buffer_bps as u64)?;
+        
+        // Cap at 90% to ensure protocol always profits at liquidation (before slippage)
+        let effective_ltv = std::cmp::min(raw_effective_ltv, MAX_EFFECTIVE_LIQUIDATION_LTV_BPS);
+        
+        SafeMath::mul_div(
+            sol_borrowed, 
+            BPS_DIVISOR, 
+            SafeMath::mul_div(collateral_amount, effective_ltv, BPS_DIVISOR)?
+        )
     }
 
 
@@ -533,6 +554,7 @@ impl ValidationUtils {
         Ok(())
     }
 }
+
 
 /// PDA derivation utilities
 pub struct PdaUtils;

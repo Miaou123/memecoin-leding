@@ -33,6 +33,8 @@ pub fn initialize_handler(
     admin: Pubkey,
     buyback_wallet: Pubkey,
     operations_wallet: Pubkey,
+    authorized_liquidator: Pubkey,
+    price_authority: Pubkey,
 ) -> Result<()> {
     let protocol_state = &mut ctx.accounts.protocol_state;
     
@@ -44,6 +46,16 @@ pub fn initialize_handler(
     // Validate wallet addresses
     if buyback_wallet == Pubkey::default() || operations_wallet == Pubkey::default() {
         return Err(LendingError::InvalidAdminAddress.into());
+    }
+    
+    // Validate authorized liquidator
+    if authorized_liquidator == Pubkey::default() {
+        return Err(LendingError::InvalidLiquidatorAddress.into());
+    }
+    
+    // Validate price authority
+    if price_authority == Pubkey::default() {
+        return Err(LendingError::InvalidPriceAuthority.into());
     }
 
     // Initialize protocol state
@@ -59,6 +71,8 @@ pub fn initialize_handler(
     protocol_state.treasury_fee_bps = 9000; // 90%
     protocol_state.buyback_fee_bps = 500; // 5%
     protocol_state.operations_fee_bps = 500; // 5%
+    protocol_state.authorized_liquidator = authorized_liquidator;
+    protocol_state.price_authority = price_authority;
     protocol_state.bump = ctx.bumps.protocol_state;
 
     

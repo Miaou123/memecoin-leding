@@ -207,4 +207,54 @@ pub enum LendingError {
 
     #[msg("Invalid pairs")]
     InvalidAccountPairs = 6076,
+    
+    #[msg("Invalid Jupiter program")]
+    InvalidJupiterProgram = 6077,
+    
+    #[msg("Invalid vault")]
+    InvalidVault = 6078,
+    
+    #[msg("Staking not paused")]
+    StakingNotPaused = 6079,
+    
+    #[msg("Stake too low")]
+    StakeAmountTooLow = 6080,
+    
+    #[msg("Max loans reached")]
+    MaxLoansReached = 6081,
+    
+    #[msg("Invalid liquidator address")]
+    InvalidLiquidatorAddress = 6082,
+
+    #[msg("Unauthorized liquidator")]
+    UnauthorizedLiquidator = 6083,
+    
+    #[msg("Token blacklisted")]
+    TokenBlacklisted = 6084,
+    
+    #[msg("Invalid price authority")]
+    InvalidPriceAuthority = 6085,
+
+    #[msg("Price signature expired")]
+    PriceSignatureExpired = 6086,
+
+    // Keeping InvalidPriceSignature for potential future use
+    // to avoid renumbering all subsequent error codes
+    #[msg("Invalid price signature")]
+    InvalidPriceSignature = 6087,
+    
+    #[msg("Invalid account owner")]
+    InvalidAccountOwner = 6088,
+
+    #[msg("Invalid account data")]
+    InvalidAccountData = 6089,
+
+    #[msg("Invalid discriminator")]
+    InvalidDiscriminator = 6090,
+
+    #[msg("Invalid PDA")]
+    InvalidPDA = 6091,
+
+    #[msg("Invalid stake owner")]
+    InvalidStakeOwner = 6092,
 }

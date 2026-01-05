@@ -6,6 +6,7 @@ import { ProtocolStats } from '@memecoin-lending/types';
 import { MemecoinLendingClient } from '@memecoin-lending/sdk';
 import { PROGRAM_ID, getNetworkConfig, getCurrentNetwork, NetworkType } from '@memecoin-lending/config';
 import { prisma } from '../db/client.js';
+import { getAdminKeypair } from '../config/keys.js';
 
 // Add a helper function to load deployment directly
 function loadDeploymentFile(network: string = 'devnet') {
@@ -34,10 +35,8 @@ class ProtocolService {
       const networkConfig = getNetworkConfig(getCurrentNetwork());
       const connection = new Connection(networkConfig.rpcUrl, 'confirmed');
       
-      // Load wallet from file
-      const keypairPath = path.resolve(process.env.ADMIN_KEYPAIR_PATH || '../../scripts/keys/admin.json');
-      const keyData = JSON.parse(fs.readFileSync(keypairPath, 'utf8'));
-      const wallet = Keypair.fromSecretKey(Uint8Array.from(keyData));
+      // Load wallet from centralized loader
+      const wallet = getAdminKeypair();
       
       // Load IDL from target folder
       const idlPath = path.resolve('../../target/idl/memecoin_lending.json');

@@ -149,10 +149,6 @@ pub fn distribute_creator_fees_handler(ctx: Context<DistributeCreatorFees>) -> R
         distributable,
     )?;
     
-    msg!(
-        "Distributed {} lamports from creator fees (staker-focused):",
-        distributable
-    );
     
     Ok(())
 }

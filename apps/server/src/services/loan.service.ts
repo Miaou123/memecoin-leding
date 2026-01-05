@@ -21,6 +21,7 @@ import { websocketService } from '../websocket/index.js';
 import { securityMonitor } from './security-monitor.service.js';
 import { SECURITY_EVENT_TYPES } from '@memecoin-lending/types';
 import { PROGRAM_ID, getNetworkConfig, getCurrentNetwork } from '@memecoin-lending/config';
+import { getAdminKeypair } from '../config/keys.js';
 
 // Helper functions for manual TokenConfig deserialization
 function readPubkey(buffer: Buffer, offset: number): PublicKey {
@@ -70,10 +71,8 @@ class LoanService {
       const networkConfig = getNetworkConfig(getCurrentNetwork());
       const connection = new Connection(networkConfig.rpcUrl, 'confirmed');
       
-      // Load wallet from file
-      const keypairPath = path.resolve(process.env.ADMIN_KEYPAIR_PATH || '../../scripts/keys/admin.json');
-      const keyData = JSON.parse(fs.readFileSync(keypairPath, 'utf8'));
-      const wallet = Keypair.fromSecretKey(Uint8Array.from(keyData));
+      // Load wallet from centralized loader
+      const wallet = getAdminKeypair();
       
       // Load IDL from target folder
       const idlPath = path.resolve('../../target/idl/memecoin_lending.json');

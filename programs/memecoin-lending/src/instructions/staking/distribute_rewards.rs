@@ -73,60 +73,88 @@ pub fn distribute_rewards_handler<'info>(ctx: Context<'_, '_, '_, 'info, Distrib
         let user_wallet_info = &remaining_accounts[i + 1];
         i += 2;
         
-        // Deserialize UserStake
+        // ============================================================
+        // SECURITY VALIDATION 1: Verify account owner is this program
+        // ============================================================
+        require!(
+            user_stake_info.owner == &crate::ID,
+            LendingError::InvalidAccountOwner
+        );
+        
+        // ============================================================
+        // SECURITY VALIDATION 2: Verify account discriminator
+        // ============================================================
+        let user_stake_data = user_stake_info.try_borrow_data()?;
+        require!(
+            user_stake_data.len() >= 8,
+            LendingError::InvalidAccountData
+        );
+        
+        let discriminator = &user_stake_data[0..8];
+        require!(
+            discriminator == USER_STAKE_DISCRIMINATOR,
+            LendingError::InvalidDiscriminator
+        );
+        
+        // ============================================================
+        // SECURITY VALIDATION 3: Verify PDA derivation
+        // ============================================================
+        let (expected_pda, _bump) = Pubkey::find_program_address(
+            &[
+                USER_STAKE_SEED,
+                pool.key().as_ref(),
+                user_wallet_info.key().as_ref(),
+            ],
+            &crate::ID,
+        );
+        require!(
+            user_stake_info.key() == expected_pda,
+            LendingError::InvalidPDA
+        );
+        
+        // ============================================================
+        // SECURITY VALIDATION 4: Verify user_wallet matches stored owner
+        // ============================================================
+        // Owner is at offset 8 (after discriminator)
+        let stored_owner = Pubkey::try_from(
+            &user_stake_data[8..40]
+        ).map_err(|_| LendingError::InvalidAccountData)?;
+        require!(
+            stored_owner == user_wallet_info.key(),
+            LendingError::InvalidStakeOwner
+        );
+        
+        // Now safe to process - drop immutable borrow before mutable
+        drop(user_stake_data);
+        
+        // Re-borrow mutably for updates
         let mut user_stake_data = user_stake_info.try_borrow_mut_data()?;
         
-        // Validate account is writable and owned by program
+        // Read stake data (existing code)
+        let stake_offset = 8 + 32 + 32; // discriminator + owner + pool
+        let staked_amount = u64::from_le_bytes(
+            user_stake_data[stake_offset..stake_offset+8].try_into().unwrap()
+        );
         
-        if user_stake_info.owner != ctx.program_id {
-            continue;
-        }
+        let stake_start_epoch_offset = stake_offset + 8;
+        let stake_start_epoch = u64::from_le_bytes(
+            user_stake_data[stake_start_epoch_offset..stake_start_epoch_offset+8].try_into().unwrap()
+        );
         
-        // Parse UserStake fields manually
-        // Layout: disc(8) + owner(32) + pool(32) + staked_amount(8) + stake_start_epoch(8) + last_rewarded_epoch(8) + total_rewards_received(8) + first_stake_time(8) + bump(1) + reserved(32)
-        let mut offset = 8; // Skip discriminator
+        let last_rewarded_offset = stake_start_epoch_offset + 8;
+        let last_rewarded_epoch = u64::from_le_bytes(
+            user_stake_data[last_rewarded_offset..last_rewarded_offset+8].try_into().unwrap()
+        );
         
-        // Read owner
-        let owner_bytes: [u8; 32] = user_stake_data[offset..offset+32].try_into().unwrap();
-        let owner = Pubkey::new_from_array(owner_bytes);
-        offset += 32;
+        let total_received_offset = last_rewarded_offset + 8;
+        let total_rewards_received = u64::from_le_bytes(
+            user_stake_data[total_received_offset..total_received_offset+8].try_into().unwrap()
+        );
         
-        // Skip pool
-        offset += 32;
-        
-        // Read staked_amount
-        let staked_amount = u64::from_le_bytes(user_stake_data[offset..offset+8].try_into().unwrap());
-        offset += 8;
-        
-        // Read stake_start_epoch
-        let stake_start_epoch = u64::from_le_bytes(user_stake_data[offset..offset+8].try_into().unwrap());
-        offset += 8;
-        
-        // Read last_rewarded_epoch
-        let last_rewarded_epoch = u64::from_le_bytes(user_stake_data[offset..offset+8].try_into().unwrap());
-        offset += 8;
-        
-        // Read total_rewards_received
-        let total_rewards_received = u64::from_le_bytes(user_stake_data[offset..offset+8].try_into().unwrap());
-        
-        // Skip if:
-        // 1. Already rewarded for this epoch
-        // 2. Wasn't eligible (staked during or after the distributable epoch)
-        // 3. Zero stake
-        if last_rewarded_epoch >= distributable_epoch {
-            continue;
-        }
-        
-        if stake_start_epoch >= distributable_epoch {
-            continue;
-        }
-        
-        if staked_amount == 0 {
-            continue;
-        }
-        
-        // Verify wallet matches owner
-        if user_wallet_info.key() != owner {
+        // Skip if not eligible for this epoch
+        if staked_amount == 0 
+            || stake_start_epoch >= distributable_epoch 
+            || last_rewarded_epoch >= distributable_epoch {
             continue;
         }
         

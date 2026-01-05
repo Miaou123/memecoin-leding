@@ -5,6 +5,7 @@ import { securityMonitor } from './security-monitor.service.js';
 import { SECURITY_EVENT_TYPES } from '@memecoin-lending/types';
 import * as fs from 'fs';
 import * as path from 'path';
+import { getAdminKeypair } from '../config/keys.js';
 
 // Constants
 const BATCH_SIZE = 10; // 10 users per transaction (20 accounts total)
@@ -71,17 +72,8 @@ class DistributionCrankService {
     if (this.initialized) return;
     
     try {
-      // Load admin wallet
-      const walletPath = process.env.ADMIN_WALLET_PATH || '../../keys/admin.json';
-      
-      if (!fs.existsSync(walletPath)) {
-        console.warn('⚠️ Admin keypair not found at', walletPath);
-        console.warn('⚠️ Distribution crank will not function without admin keypair');
-        return;
-      }
-      
-      const walletData = JSON.parse(fs.readFileSync(walletPath, 'utf-8'));
-      this.wallet = Keypair.fromSecretKey(Uint8Array.from(walletData));
+      // Load admin wallet from centralized loader
+      this.wallet = getAdminKeypair();
       
       console.log(`🔑 Distribution crank wallet: ${this.wallet.publicKey.toString()}`);
       

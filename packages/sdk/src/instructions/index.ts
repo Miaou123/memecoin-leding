@@ -667,7 +667,6 @@ export async function updateFees(
 export async function updateWallets(
   program: Program,
   params: {
-    newAdmin?: PublicKey;
     newBuybackWallet?: PublicKey;
     newOperationsWallet?: PublicKey;
   }
@@ -676,7 +675,6 @@ export async function updateWallets(
   
   return program.methods
     .updateWallets(
-      params.newAdmin ?? null,
       params.newBuybackWallet ?? null,
       params.newOperationsWallet ?? null
     )

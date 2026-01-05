@@ -30,16 +30,9 @@ pub fn advance_epoch_handler(ctx: Context<AdvanceEpoch>) -> Result<()> {
     
     // Note: We no longer block epoch advancement based on distribution status
     // This allows epochs to continue even if the vault is empty
-    // Any undistributed rewards are effectively forfeited when we advance
     
-    // Log any undistributed rewards being forfeited
-    let forfeited = pool.last_epoch_rewards.saturating_sub(pool.last_epoch_distributed);
-    if forfeited > 0 {
-        msg!(
-            "⚠️ Advancing epoch with {} lamports undistributed (forfeited)",
-            forfeited
-        );
-    }
+    // Roll over undistributed rewards instead of forfeiting
+    let undistributed = pool.last_epoch_rewards.saturating_sub(pool.last_epoch_distributed);
     
     // Move current epoch data to last_epoch for distribution
     pool.last_epoch_rewards = pool.current_epoch_rewards;
@@ -47,7 +40,7 @@ pub fn advance_epoch_handler(ctx: Context<AdvanceEpoch>) -> Result<()> {
     pool.last_epoch_distributed = 0;
     
     // Advance to next epoch
-    let old_epoch = pool.current_epoch;
+    let _old_epoch = pool.current_epoch;
     pool.current_epoch = pool.current_epoch
         .checked_add(1)
         .ok_or(LendingError::MathOverflow)?;
@@ -56,17 +49,10 @@ pub fn advance_epoch_handler(ctx: Context<AdvanceEpoch>) -> Result<()> {
         .checked_add(1)
         .ok_or(LendingError::MathOverflow)?;
     
-    // Reset current epoch counters
-    pool.current_epoch_rewards = 0;
+    // Reset current epoch counters - roll over undistributed rewards
+    pool.current_epoch_rewards = undistributed; // Roll over undistributed rewards
     pool.current_epoch_eligible_stake = pool.total_staked; // All stakers now eligible
     
-    msg!(
-        "Advanced from epoch {} to {}. Rewards to distribute: {} lamports to {} eligible stake",
-        old_epoch,
-        pool.current_epoch,
-        pool.last_epoch_rewards,
-        pool.last_epoch_eligible_stake
-    );
     
     Ok(())
 }

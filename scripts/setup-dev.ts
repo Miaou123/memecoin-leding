@@ -96,7 +96,7 @@ SOLANA_NETWORK=devnet
 SOLANA_RPC_URL=https://devnet.helius-rpc.com/?api-key=
 PROGRAM_ID=${programKeypair.publicKey.toString()}
 ADMIN_WALLET=${adminKeypair.publicKey.toString()}
-ADMIN_WALLET_PRIVATE_KEY=${JSON.stringify(Array.from(adminKeypair.secretKey))}
+# Admin keypair is loaded from /keys/admin.json (project root)
 LIQUIDATOR_WALLET=${liquidatorKeypair.publicKey.toString()}
 
 # API

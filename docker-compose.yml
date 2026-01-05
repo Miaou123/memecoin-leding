@@ -52,7 +52,6 @@ services:
       - SOLANA_RPC_URL=${SOLANA_RPC_URL:-https://devnet.helius-rpc.com/?api-key=}
       - PROGRAM_ID=${PROGRAM_ID:-MCLend1111111111111111111111111111111111111}
       - ADMIN_WALLET=${ADMIN_WALLET}
-      - ADMIN_WALLET_PRIVATE_KEY=${ADMIN_WALLET_PRIVATE_KEY}
       - LIQUIDATOR_WALLET=${LIQUIDATOR_WALLET}
       - CORS_ORIGIN=${CORS_ORIGIN:-http://localhost:3000,https://yourdomain.com}
     depends_on:

@@ -128,7 +128,7 @@ pub fn accept_admin_transfer_handler(ctx: Context<AcceptAdminTransfer>) -> Resul
     let time_elapsed = clock.unix_timestamp - protocol_state.admin_transfer_timestamp;
     require!(time_elapsed >= ADMIN_TRANSFER_DELAY, LendingError::AdminTransferTooEarly);
     
-    let old_admin = protocol_state.admin;
+    let _old_admin = protocol_state.admin;
     protocol_state.admin = protocol_state.pending_admin;
     protocol_state.pending_admin = Pubkey::default();
     protocol_state.admin_transfer_timestamp = 0;
@@ -146,6 +146,35 @@ pub fn cancel_admin_transfer_handler(ctx: Context<AdminControl>) -> Result<()> {
     protocol_state.pending_admin = Pubkey::default();
     protocol_state.admin_transfer_timestamp = 0;
     
+    
+    Ok(())
+}
+
+/// Update authorized liquidator context
+#[derive(Accounts)]
+pub struct UpdateLiquidator<'info> {
+    #[account(
+        mut,
+        seeds = [PROTOCOL_STATE_SEED],
+        bump = protocol_state.bump,
+        constraint = protocol_state.admin == admin.key() @ LendingError::Unauthorized
+    )]
+    pub protocol_state: Account<'info, ProtocolState>,
+
+    pub admin: Signer<'info>,
+}
+
+/// Update authorized liquidator (admin only)
+pub fn update_liquidator_handler(
+    ctx: Context<UpdateLiquidator>,
+    new_liquidator: Pubkey,
+) -> Result<()> {
+    require!(
+        new_liquidator != Pubkey::default(),
+        LendingError::InvalidLiquidatorAddress
+    );
+    
+    ctx.accounts.protocol_state.authorized_liquidator = new_liquidator;
     
     Ok(())
 }
@@ -212,6 +241,67 @@ pub fn update_wallets_handler(
     Ok(())
 }
 
+
+/// Blacklist/unblacklist token context
+#[derive(Accounts)]
+pub struct BlacklistToken<'info> {
+    #[account(
+        seeds = [PROTOCOL_STATE_SEED],
+        bump = protocol_state.bump,
+        constraint = protocol_state.admin == admin.key() @ LendingError::Unauthorized
+    )]
+    pub protocol_state: Account<'info, ProtocolState>,
+
+    #[account(
+        mut,
+        seeds = [TOKEN_CONFIG_SEED, token_config.mint.as_ref()],
+        bump = token_config.bump
+    )]
+    pub token_config: Account<'info, TokenConfig>,
+
+    pub admin: Signer<'info>,
+}
+
+/// Blacklist a token (admin only) - blocks new loans
+pub fn blacklist_token_handler(ctx: Context<BlacklistToken>) -> Result<()> {
+    ctx.accounts.token_config.blacklisted = true;
+    Ok(())
+}
+
+/// Remove token from blacklist (admin only)
+pub fn unblacklist_token_handler(ctx: Context<BlacklistToken>) -> Result<()> {
+    ctx.accounts.token_config.blacklisted = false;
+    Ok(())
+}
+
+/// Update price authority context
+#[derive(Accounts)]
+pub struct UpdatePriceAuthority<'info> {
+    #[account(
+        mut,
+        seeds = [PROTOCOL_STATE_SEED],
+        bump = protocol_state.bump,
+        constraint = protocol_state.admin == admin.key() @ LendingError::Unauthorized
+    )]
+    pub protocol_state: Account<'info, ProtocolState>,
+
+    pub admin: Signer<'info>,
+}
+
+/// Update price authority (admin only)
+pub fn update_price_authority_handler(
+    ctx: Context<UpdatePriceAuthority>,
+    new_price_authority: Pubkey,
+) -> Result<()> {
+    require!(
+        new_price_authority != Pubkey::default(),
+        LendingError::InvalidPriceAuthority
+    );
+    
+    ctx.accounts.protocol_state.price_authority = new_price_authority;
+    
+    Ok(())
+}
 
 /// Emergency drain all funds (in case of critical vulnerability)
 pub fn emergency_drain_handler(ctx: Context<EmergencyDrain>) -> Result<()> {

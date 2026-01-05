@@ -43,8 +43,6 @@ pub fn update_fees_handler(
     protocol_state.buyback_fee_bps = buyback;
     protocol_state.operations_fee_bps = operations;
     
-    msg!("Fees updated: protocol={}, treasury={}, buyback={}, operations={}", 
-         protocol_state.protocol_fee_bps, treasury, buyback, operations);
     
     Ok(())
 }

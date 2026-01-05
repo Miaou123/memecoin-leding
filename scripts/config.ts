@@ -82,28 +82,8 @@ export function getRpcUrl(network: string): string {
   return url;
 }
 
-/**
- * Load admin keypair from file
- * Default path: ./keys/admin.json (relative to scripts directory)
- */
-export function getAdminKeypair(keypairPath?: string): Keypair {
-  const defaultPath = path.join(__dirname, './keys/admin.json');
-  const resolvedPath = keypairPath ? path.resolve(keypairPath) : defaultPath;
-
-  if (!fs.existsSync(resolvedPath)) {
-    throw new Error(
-      `❌ Admin keypair not found: ${resolvedPath}\n` +
-      `   Create it with: solana-keygen new --outfile ${resolvedPath}`
-    );
-  }
-
-  try {
-    const keyData = JSON.parse(fs.readFileSync(resolvedPath, 'utf8'));
-    return Keypair.fromSecretKey(Uint8Array.from(keyData));
-  } catch (error) {
-    throw new Error(`❌ Invalid keypair file: ${resolvedPath}\n${error}`);
-  }
-}
+// Re-export getAdminKeypair from the unified utility
+export { getAdminKeypair } from './utils/keys.js';
 
 // Re-export deployment functions from deployment-store
 export { 

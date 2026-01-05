@@ -28,12 +28,12 @@ pub struct EmergencyDrainRewards<'info> {
 }
 
 pub fn emergency_drain_rewards_handler(ctx: Context<EmergencyDrainRewards>) -> Result<()> {
-    let _staking_pool = &mut ctx.accounts.staking_pool;
+    let staking_pool = &ctx.accounts.staking_pool;
     let reward_vault = &ctx.accounts.reward_vault;
     let authority = &ctx.accounts.authority;
     
-    // Only allow if protocol is paused or in emergency
-    // For now, allow admin to drain at any time for development
+    // Require staking to be paused for emergency drain
+    require!(staking_pool.paused, LendingError::StakingNotPaused);
     
     // Get current balance
     let vault_balance = reward_vault.lamports();

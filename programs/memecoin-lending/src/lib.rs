@@ -7,6 +7,7 @@ pub mod utils;
 pub mod swap;
 
 use instructions::*;
+use instructions::admin::{UpdateLiquidator, BlacklistToken, UpdatePriceAuthority};
 
 declare_id!("DWPzC5B8wCYFJFw9khPiCwSvErNJTVaBxpUzrxbTCNJk");
 
@@ -20,8 +21,17 @@ pub mod memecoin_lending {
         admin: Pubkey,
         buyback_wallet: Pubkey,
         operations_wallet: Pubkey,
+        authorized_liquidator: Pubkey,
+        price_authority: Pubkey,
     ) -> Result<()> {
-        instructions::initialize::initialize_handler(ctx, admin, buyback_wallet, operations_wallet)
+        instructions::initialize::initialize_handler(
+            ctx, 
+            admin, 
+            buyback_wallet, 
+            operations_wallet, 
+            authorized_liquidator,
+            price_authority,
+        )
     }
 
     /// Whitelist a new token for lending
@@ -51,8 +61,16 @@ pub mod memecoin_lending {
         ctx: Context<CreateLoan>,
         collateral_amount: u64,
         duration_seconds: u64,
+        approved_price: u64,
+        price_timestamp: i64,
     ) -> Result<()> {
-        instructions::create_loan::create_loan_handler(ctx, collateral_amount, duration_seconds)
+        instructions::create_loan::create_loan_handler(
+            ctx, 
+            collateral_amount, 
+            duration_seconds,
+            approved_price,
+            price_timestamp,
+        )
     }
 
     /// Repay an active loan
@@ -131,6 +149,22 @@ pub mod memecoin_lending {
         new_operations_wallet: Option<Pubkey>,
     ) -> Result<()> {
         instructions::admin::update_wallets_handler(ctx, new_buyback_wallet, new_operations_wallet)
+    }
+    
+    /// Update authorized liquidator (admin only)
+    pub fn update_liquidator(
+        ctx: Context<UpdateLiquidator>,
+        new_liquidator: Pubkey,
+    ) -> Result<()> {
+        instructions::admin::update_liquidator_handler(ctx, new_liquidator)
+    }
+    
+    /// Update price authority (admin only)
+    pub fn update_price_authority(
+        ctx: Context<UpdatePriceAuthority>,
+        new_price_authority: Pubkey,
+    ) -> Result<()> {
+        instructions::admin::update_price_authority_handler(ctx, new_price_authority)
     }
     /// Initialize epoch-based staking pool
     pub fn initialize_staking(
@@ -214,5 +248,15 @@ pub mod memecoin_lending {
     /// Emergency drain staking reward vault (admin only)
     pub fn emergency_drain_rewards(ctx: Context<EmergencyDrainRewards>) -> Result<()> {
         instructions::staking::emergency_drain_rewards::emergency_drain_rewards_handler(ctx)
+    }
+    
+    /// Blacklist a token - blocks new loans (admin only)
+    pub fn blacklist_token(ctx: Context<BlacklistToken>) -> Result<()> {
+        instructions::admin::blacklist_token_handler(ctx)
+    }
+
+    /// Remove token from blacklist (admin only)
+    pub fn unblacklist_token(ctx: Context<BlacklistToken>) -> Result<()> {
+        instructions::admin::unblacklist_token_handler(ctx)
     }
 }

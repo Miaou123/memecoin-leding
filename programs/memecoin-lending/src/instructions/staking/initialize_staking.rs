@@ -90,11 +90,6 @@ pub fn initialize_staking_handler(
     staking_pool.paused = false;
     staking_pool.bump = ctx.bumps.staking_pool;
     
-    msg!(
-        "Initialized staking pool. Token: {}. Epoch duration: {}s. Direct distribution mode.",
-        staking_pool.staking_token_mint,
-        epoch_duration
-    );
     
     Ok(())
 }

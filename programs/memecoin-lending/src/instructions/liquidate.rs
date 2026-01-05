@@ -10,6 +10,9 @@ use crate::swap::jupiter::execute_jupiter_swap;
 const OPERATIONS_SPLIT_BPS: u64 = 500; // 5%
 const BPS_DENOMINATOR: u64 = 10000;
 
+/// Jupiter V6 Program ID
+pub const JUPITER_V6_PROGRAM_ID: Pubkey = pubkey!("JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4");
+
 #[derive(Accounts)]
 pub struct Liquidate<'info> {
     #[account(
@@ -84,8 +87,11 @@ pub struct Liquidate<'info> {
 
     // === Common Accounts ===
 
-    /// Payer for transaction fees
-    #[account(mut)]
+    /// Payer for transaction fees - MUST be authorized liquidator
+    #[account(
+        mut,
+        constraint = payer.key() == protocol_state.authorized_liquidator @ LendingError::UnauthorizedLiquidator
+    )]
     pub payer: Signer<'info>,
 
     pub token_program: Program<'info, Token>,
@@ -193,6 +199,17 @@ pub fn liquidate_handler<'info>(
             
             require!(!route_accounts.is_empty(), LendingError::MissingJupiterAccounts);
 
+            // Validate first account is Jupiter program
+            let jupiter_program = &route_accounts[0];
+            require!(
+                jupiter_program.key() == JUPITER_V6_PROGRAM_ID,
+                LendingError::InvalidJupiterProgram
+            );
+            require!(
+                jupiter_program.executable,
+                LendingError::InvalidJupiterProgram
+            );
+
             // Execute Jupiter swap (jupiter_program is first account in remaining_accounts)
             execute_jupiter_swap(
                 &route_accounts[0], // First remaining account should be Jupiter program
@@ -259,14 +276,6 @@ pub fn liquidate_handler<'info>(
 
     // User exposure tracking removed for stack size optimization
 
-    msg!(
-        "Loan liquidated: reason={:?}, collateral={}, proceeds={} SOL (treasury={}, ops={})",
-        liquidation_reason,
-        collateral_amount,
-        sol_proceeds,
-        treasury_share,
-        operations_share
-    );
     
     // FIX 1: Exit reentrancy guard
     ReentrancyGuard::exit(protocol_state);

@@ -163,7 +163,6 @@ export class MemecoinLendingClient {
   }
 
   async updateWallets(params: {
-    newAdmin?: PublicKey;
     newBuybackWallet?: PublicKey;
     newOperationsWallet?: PublicKey;
   }): Promise<TransactionSignature> {

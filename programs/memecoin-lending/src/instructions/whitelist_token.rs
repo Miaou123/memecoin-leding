@@ -94,6 +94,7 @@ pub fn whitelist_token_handler(
     token_config.total_volume = 0;
     token_config.total_active_borrowed = 0;
     token_config.is_protocol_token = is_protocol_token;
+    token_config.blacklisted = false;
     token_config.bump = ctx.bumps.token_config;
 
     

@@ -11,6 +11,7 @@ import { prisma } from '../db/client.js';
 import BN from 'bn.js';
 import fs from 'fs';
 import path from 'path';
+import { getAdminKeypair } from '../config/keys.js';
 
 // Helper function to get PumpFun bonding curve PDA
 function getPumpFunBondingCurve(mint: PublicKey): PublicKey {
@@ -280,21 +281,12 @@ export class TokenVerificationService {
         return;
       }
 
-      const keypairPath = process.env.ADMIN_KEYPAIR_PATH;
-      if (!keypairPath) {
-        console.warn('[TokenVerification] ADMIN_KEYPAIR_PATH not set, auto-whitelist disabled');
+      try {
+        this.adminKeypair = getAdminKeypair();
+      } catch (error: any) {
+        console.warn(`[TokenVerification] Failed to load admin keypair: ${error.message}, auto-whitelist disabled`);
         return;
       }
-
-      const resolvedPath = path.resolve(keypairPath);
-      if (!fs.existsSync(resolvedPath)) {
-        console.warn(`[TokenVerification] Admin keypair not found: ${resolvedPath}, auto-whitelist disabled`);
-        return;
-      }
-
-      this.adminKeypair = Keypair.fromSecretKey(
-        Uint8Array.from(JSON.parse(fs.readFileSync(resolvedPath, 'utf8')))
-      );
 
       const network = (process.env.SOLANA_NETWORK as NetworkType) || 'devnet';
       const networkConfig = getNetworkConfig(network);

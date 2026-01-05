@@ -2,6 +2,7 @@ use anchor_lang::prelude::*;
 use anchor_spl::token::{self, Token, TokenAccount, Transfer};
 use crate::state::*;
 use crate::error::LendingError;
+use crate::utils::MIN_STAKE_AMOUNT;
 
 #[derive(Accounts)]
 pub struct Stake<'info> {
@@ -24,6 +25,7 @@ pub struct Stake<'info> {
     
     #[account(
         mut,
+        constraint = staking_vault.key() == staking_pool.staking_vault @ LendingError::InvalidVault,
         constraint = staking_vault.mint == staking_pool.staking_token_mint @ LendingError::InvalidTokenAccount
     )]
     pub staking_vault: Account<'info, TokenAccount>,
@@ -44,6 +46,7 @@ pub struct Stake<'info> {
 
 pub fn stake_handler(ctx: Context<Stake>, amount: u64) -> Result<()> {
     require!(amount > 0, LendingError::InvalidAmount);
+    require!(amount >= MIN_STAKE_AMOUNT, LendingError::StakeAmountTooLow);
     
     let clock = Clock::get()?;
     let staking_pool = &mut ctx.accounts.staking_pool;

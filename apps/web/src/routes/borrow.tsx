@@ -12,6 +12,7 @@ import { TokenSelectionUnified } from '@/components/tokens/TokenSelectionUnified
 import { Connection, Transaction, PublicKey } from '@solana/web3.js';
 import BN from 'bn.js';
 import { SuccessModal } from '@/components/ui/SuccessModal';
+import { createLoan } from '@/lib/loan-transactions';
 // Simple debounce utility
 function debounce<T extends (...args: any[]) => void>(func: T, delay: number): T {
   let timeoutId: number;
@@ -106,47 +107,33 @@ export default function Borrow() {
         throw new Error(`Loan not allowed: ${loanEligibility.reason() || 'Token not eligible'}`);
       }
       
-      // 1. Get unsigned transaction from server (no pre-auth needed)
       // Convert UI amount to raw units (multiply by 10^decimals)
       const tokenDecimals = 6; // PumpFun tokens use 6 decimals
       const rawCollateralAmount = (parseFloat(collateralAmount() || '0') * Math.pow(10, tokenDecimals)).toString();
       
-      const response = await api.createLoanUnsigned({
-        tokenMint: selectedToken()!,
-        collateralAmount: rawCollateralAmount,
-        durationSeconds: duration(),
-        borrower: wallet.publicKey()!.toString(),
-      });
-      
-      // 2. Deserialize and prepare transaction
-      const tx = Transaction.from(Buffer.from(response.transaction, 'base64'));
       const connection = new Connection(import.meta.env.VITE_SOLANA_RPC_URL || 'https://devnet.helius-rpc.com/?api-key=');
-      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
-      tx.recentBlockhash = blockhash;
-      tx.feePayer = wallet.publicKey()!;
       
-      // 3. Sign with user's wallet (this proves ownership)
-      const signedTx = await wallet.signTransaction!(tx);
+      // Use the new backend-signed transaction flow
+      const result = await createLoan(
+        {
+          tokenMint: selectedToken()!,
+          collateralAmount: rawCollateralAmount,
+          durationSeconds: duration(),
+          borrower: wallet.publicKey()!.toString(),
+        },
+        wallet.signTransaction!,
+        connection
+      );
       
-      // 4. Send to Solana
-      const signature = await connection.sendRawTransaction(signedTx.serialize());
-      
-      // 5. Confirm transaction
-      await connection.confirmTransaction({
-        signature,
-        blockhash,
-        lastValidBlockHeight,
-      });
-      
-      // 6. Track the loan in database (backend will parse transaction to find actual loan PDA)
+      // Track the loan in database
       const loan = await api.trackLoan({
-        loanPubkey: '', // Backend will determine this from transaction
-        txSignature: signature,
+        loanPubkey: result.loanPda,
+        txSignature: result.signature,
         borrower: wallet.publicKey()!.toString(),
         tokenMint: selectedToken(),
       });
       
-      return { signature, loan, estimate: loanEstimate.data! };
+      return { signature: result.signature, loan, estimate: loanEstimate.data! };
     },
     onSuccess: (result) => {
       setLoanResult(result);
