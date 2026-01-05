@@ -47,6 +47,9 @@ function loadDeploymentConfig(network: string = 'devnet'): { programId: string }
       path.join(process.cwd(), '..', 'deployments', `${network}-latest.json`),
       path.join(process.cwd(), '..', '..', 'deployments', `${network}-latest.json`),
       path.join(__dirname, '..', '..', '..', 'deployments', `${network}-latest.json`),
+      path.join(__dirname, '..', '..', '..', '..', 'deployments', `${network}-latest.json`),
+      // Handle when run from scripts directory
+      path.join(process.cwd(), '..', '..', '..', 'deployments', `${network}-latest.json`),
     ];
     
     for (const p of possiblePaths) {
@@ -80,8 +83,9 @@ function getProgramIdForNetwork(network: string = 'devnet'): string {
   if (process.env.PROGRAM_ID) return process.env.PROGRAM_ID;
   if (process.env.VITE_PROGRAM_ID) return process.env.VITE_PROGRAM_ID;
   
-  // Fallback (should not reach here in production)
-  console.warn('No program ID found! Using fallback.');
+  // Fallback - use known devnet program ID
+  // Fallback - use known devnet program ID
+  // Silent fallback since deployment files may not be accessible from all contexts
   return 'Ex1UJrdAUqosatT1moQSPTMepfKtnKWKfsKMTjZBeKva';
 }
 

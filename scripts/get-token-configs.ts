@@ -142,4 +142,4 @@ function formatPoolTypeSimple(poolType: any): string {
   return 'Unknown';
 }
 
-program.parse();
+program.parse(process.argv);

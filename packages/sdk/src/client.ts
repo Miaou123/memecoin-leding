@@ -107,6 +107,7 @@ export class MemecoinLendingClient {
     poolType: number;
     minLoanAmount: BN;
     maxLoanAmount: BN;
+    isProtocolToken?: boolean;
   }): Promise<TransactionSignature> {
     return instructions.whitelistToken(this.program, params);
   }

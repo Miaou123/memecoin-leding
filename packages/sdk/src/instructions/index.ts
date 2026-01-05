@@ -60,6 +60,7 @@ export async function whitelistToken(
     poolAddress?: PublicKey; // Optional - will be derived if not provided
     minLoanAmount: BN;
     maxLoanAmount: BN;
+    isProtocolToken?: boolean; // ADD THIS
   }
 ): Promise<TransactionSignature> {
   // Derive pool address based on pool type if not provided
@@ -83,7 +84,8 @@ export async function whitelistToken(
       poolAddress,
       params.poolType,
       params.minLoanAmount,
-      params.maxLoanAmount
+      params.maxLoanAmount,
+      params.isProtocolToken ?? false // ADD THIS
     )
     .accounts({
       protocolState,
