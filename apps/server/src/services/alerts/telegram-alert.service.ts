@@ -26,43 +26,26 @@ export class TelegramAlertService {
     try {
       const message = this.formatMessage(event);
       
-      console.log('🔍 Debug: Sending Telegram alert:', {
-        apiUrl: this.apiUrl,
-        chatId: this.chatId,
-        messageLength: message.length
-      });
-      
-      const payload = {
-        chat_id: this.chatId,
-        text: message,
-        parse_mode: 'HTML',
-        disable_web_page_preview: true,
-      };
-      
-      console.log('📤 Telegram API payload:', payload);
-      
       const response = await fetch(`${this.apiUrl}/sendMessage`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          chat_id: this.chatId,
+          text: message,
+          parse_mode: 'HTML',
+          disable_web_page_preview: true,
+        }),
       });
 
       const result = await response.json() as any;
-      
-      console.log('📥 Telegram API response:', {
-        status: response.status,
-        ok: response.ok,
-        result: result
-      });
       
       if (!response.ok || !result.ok) {
         console.error('Telegram API error:', result);
         return false;
       }
 
-      console.log('✅ Telegram alert sent successfully');
       return true;
     } catch (error: any) {
       console.error('Failed to send Telegram alert:', error.message);

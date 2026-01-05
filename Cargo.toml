@@ -5,11 +5,14 @@ members = [
 ]
 
 [profile.release]
-overflow-checks = true
-lto = "fat"
-codegen-units = 1
+opt-level = "z"         # Optimize for size
+lto = true              # Enable link-time optimization
+codegen-units = 1       # Better optimization at cost of compilation speed
+panic = "abort"         # Smaller panic handling
+strip = true            # Strip symbols and debug info
+overflow-checks = true  # Re-enabled for security
 
 [profile.release.build-override]
-opt-level = 3
+opt-level = "z"         # Optimize build dependencies for size too
 incremental = false
 codegen-units = 1

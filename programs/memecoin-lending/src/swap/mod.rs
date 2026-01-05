@@ -1,5 +1,4 @@
-pub mod pumpfun;
 pub mod jupiter;
+// pub mod pumpfun; // Disabled - not supported for liquidation
 
-pub use pumpfun::*;
 pub use jupiter::*;

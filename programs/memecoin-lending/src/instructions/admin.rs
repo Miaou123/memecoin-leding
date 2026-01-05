@@ -90,7 +90,6 @@ pub fn pause_handler(ctx: Context<AdminControl>) -> Result<()> {
     
     protocol_state.paused = true;
     
-    msg!("Protocol paused by admin: {}", ctx.accounts.admin.key());
     
     Ok(())
 }
@@ -101,28 +100,10 @@ pub fn resume_handler(ctx: Context<AdminControl>) -> Result<()> {
     
     protocol_state.paused = false;
     
-    msg!("Protocol resumed by admin: {}", ctx.accounts.admin.key());
     
     Ok(())
 }
 
-/// Emergency admin update (requires protocol to be paused)
-pub fn update_admin_handler(ctx: Context<AdminControl>, new_admin: Pubkey) -> Result<()> {
-    let protocol_state = &mut ctx.accounts.protocol_state;
-    
-    // Emergency admin update only allowed when paused
-    require!(protocol_state.paused, LendingError::ProtocolNotPaused);
-    require!(new_admin != Pubkey::default(), LendingError::InvalidAdminAddress);
-    
-    let old_admin = protocol_state.admin;
-    protocol_state.admin = new_admin;
-    protocol_state.pending_admin = Pubkey::default();
-    protocol_state.admin_transfer_timestamp = 0;
-    
-    msg!("EMERGENCY: Admin updated from {} to {}", old_admin, new_admin);
-    
-    Ok(())
-}
 
 /// Initiate admin transfer (starts 48h timelock)
 pub fn initiate_admin_transfer_handler(ctx: Context<AdminControl>, new_admin: Pubkey) -> Result<()> {
@@ -135,8 +116,6 @@ pub fn initiate_admin_transfer_handler(ctx: Context<AdminControl>, new_admin: Pu
     protocol_state.pending_admin = new_admin;
     protocol_state.admin_transfer_timestamp = clock.unix_timestamp;
     
-    msg!("Admin transfer initiated to {}. Can be accepted after {} seconds.", 
-         new_admin, ADMIN_TRANSFER_DELAY);
     
     Ok(())
 }
@@ -154,7 +133,6 @@ pub fn accept_admin_transfer_handler(ctx: Context<AcceptAdminTransfer>) -> Resul
     protocol_state.pending_admin = Pubkey::default();
     protocol_state.admin_transfer_timestamp = 0;
     
-    msg!("Admin transferred from {} to {}", old_admin, protocol_state.admin);
     
     Ok(())
 }
@@ -168,7 +146,6 @@ pub fn cancel_admin_transfer_handler(ctx: Context<AdminControl>) -> Result<()> {
     protocol_state.pending_admin = Pubkey::default();
     protocol_state.admin_transfer_timestamp = 0;
     
-    msg!("Admin transfer cancelled");
     
     Ok(())
 }
@@ -212,7 +189,6 @@ pub fn withdraw_treasury_handler(ctx: Context<WithdrawTreasury>, amount: u64) ->
     // Treasury balance is tracked by the actual lamport balance of the treasury account
     // No need to track it separately in protocol_state
     
-    msg!("Treasury withdrawal: {} SOL to admin {}", amount, ctx.accounts.admin.key());
     
     Ok(())
 }
@@ -220,28 +196,17 @@ pub fn withdraw_treasury_handler(ctx: Context<WithdrawTreasury>, amount: u64) ->
 /// Update wallet addresses (admin only)
 pub fn update_wallets_handler(
     ctx: Context<AdminControl>,
-    new_admin: Option<Pubkey>,
     new_buyback_wallet: Option<Pubkey>,
     new_operations_wallet: Option<Pubkey>,
 ) -> Result<()> {
     let protocol_state = &mut ctx.accounts.protocol_state;
     
-    if let Some(admin) = new_admin {
-        if admin == Pubkey::default() {
-            return Err(LendingError::InvalidAdminAddress.into());
-        }
-        protocol_state.admin = admin;
-        msg!("Admin updated to: {}", admin);
-    }
-    
     if let Some(buyback) = new_buyback_wallet {
         protocol_state.buyback_wallet = buyback;
-        msg!("Buyback wallet updated to: {}", buyback);
     }
     
     if let Some(operations) = new_operations_wallet {
         protocol_state.operations_wallet = operations;
-        msg!("Operations wallet updated to: {}", operations);
     }
     
     Ok(())
@@ -279,7 +244,6 @@ pub fn emergency_drain_handler(ctx: Context<EmergencyDrain>) -> Result<()> {
     protocol_state.total_sol_borrowed = 0;
     protocol_state.total_fees_earned = 0;
     
-    msg!("EMERGENCY DRAIN: {} SOL drained to admin {}", treasury_balance, ctx.accounts.admin.key());
     
     // Note: In a production emergency drain, you would also want to:
     // 1. Drain all token vaults (passed via remaining_accounts)

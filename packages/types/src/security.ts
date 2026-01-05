@@ -8,6 +8,8 @@ export type SecurityCategory =
   | 'Price Feeds'
   | 'Price Monitoring'
   | 'Staking'
+  | 'Treasury'
+  | 'Protocol'
   | 'Admin'
   | 'External Services'
   | 'Validation'
@@ -54,8 +56,6 @@ export interface SecurityStats {
 
 export interface AlertConfig {
   telegram?: { botToken: string; chatId: string; enabled: boolean };
-  discord?: { webhookUrl: string; enabled: boolean };
-  slack?: { webhookUrl: string; enabled: boolean };
   minSeverity: SecuritySeverity;
   rateLimitMinutes: number;
 }
@@ -121,6 +121,30 @@ export const SECURITY_EVENT_TYPES = {
   DISTRIBUTION_RATE_LIMITED: 'DISTRIBUTION_RATE_LIMITED',
   DISTRIBUTION_BATCH_FAILED: 'DISTRIBUTION_BATCH_FAILED',
   DISTRIBUTION_EPOCH_LOST: 'DISTRIBUTION_EPOCH_LOST',
+  
+  // Treasury Security
+  TREASURY_LOW_BALANCE: 'TREASURY_LOW_BALANCE',
+  TREASURY_CRITICAL_BALANCE: 'TREASURY_CRITICAL_BALANCE',
+  TREASURY_LARGE_WITHDRAWAL: 'TREASURY_LARGE_WITHDRAWAL',
+  TREASURY_WITHDRAWAL: 'TREASURY_WITHDRAWAL',
+  TREASURY_FUNDED: 'TREASURY_FUNDED',
+  TREASURY_DRAIN_PATTERN: 'TREASURY_DRAIN_PATTERN',
+  
+  // Reward Vault Security  
+  REWARD_VAULT_LOW_BALANCE: 'REWARD_VAULT_LOW_BALANCE',
+  REWARD_VAULT_EMPTY: 'REWARD_VAULT_EMPTY',
+  REWARD_VAULT_FUNDED: 'REWARD_VAULT_FUNDED',
+  
+  // Protocol State
+  PROTOCOL_PAUSED: 'PROTOCOL_PAUSED',
+  PROTOCOL_RESUMED: 'PROTOCOL_RESUMED',
+  PROTOCOL_CONFIG_CHANGED: 'PROTOCOL_CONFIG_CHANGED',
+  PROTOCOL_ADMIN_CHANGED: 'PROTOCOL_ADMIN_CHANGED',
+  PROTOCOL_FEE_CHANGED: 'PROTOCOL_FEE_CHANGED',
+  
+  // Large Transactions
+  LOAN_LARGE_AMOUNT: 'LOAN_LARGE_AMOUNT',
+  LOAN_BURST_ACTIVITY: 'LOAN_BURST_ACTIVITY',
   
   // Admin
   ADMIN_ACCESS: 'ADMIN_ACCESS',

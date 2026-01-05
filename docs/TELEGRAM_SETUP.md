@@ -55,17 +55,6 @@ The bot will send alerts for events with severity >= MEDIUM, including:
 - 🟠 **MEDIUM**: Rate limit violations, admin actions
 - 🟣 **CRITICAL**: Database errors, missing configurations
 
-## Optional: Discord/Slack Integration
-
-You can also add Discord or Slack webhooks:
-
-```bash
-# Discord webhook (optional)
-DISCORD_WEBHOOK_URL="https://discord.com/api/webhooks/..."
-
-# Slack webhook (optional)  
-SLACK_WEBHOOK_URL="https://hooks.slack.com/services/..."
-```
 
 ## Security Settings
 

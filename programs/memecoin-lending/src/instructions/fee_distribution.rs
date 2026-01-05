@@ -58,10 +58,6 @@ pub fn initialize_fee_receiver_handler(
     fee_receiver.total_fees_distributed = 0;
     fee_receiver.bump = ctx.bumps.fee_receiver;
     
-    msg!("Fee receiver initialized (staker-focused split):");
-    msg!("  Treasury:   {}%", treasury_split_bps / 100);
-    msg!("  Staking:    {}%", staking_split_bps / 100);
-    msg!("  Operations: {}%", operations_split_bps / 100);
     
     Ok(())
 }
@@ -157,9 +153,6 @@ pub fn distribute_creator_fees_handler(ctx: Context<DistributeCreatorFees>) -> R
         "Distributed {} lamports from creator fees (staker-focused):",
         distributable
     );
-    msg!("  Treasury ({}%):   {} lamports", fee_receiver.treasury_split_bps / 100, treasury_amount);
-    msg!("  Staking ({}%):    {} lamports", fee_receiver.staking_split_bps / 100, staking_amount);
-    msg!("  Operations ({}%): {} lamports", fee_receiver.operations_split_bps / 100, operations_amount);
     
     Ok(())
 }

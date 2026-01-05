@@ -706,6 +706,88 @@ class LoanService {
       include: { token: true },
     });
 
+    // Security monitoring for large loans and burst activity
+    const solAmount = parseFloat(dbLoan.solBorrowed) / 1e9; // Convert lamports to SOL
+    const LARGE_LOAN_THRESHOLD = 10; // SOL
+    
+    // Monitor large loans
+    if (solAmount >= LARGE_LOAN_THRESHOLD) {
+      await securityMonitor.log({
+        severity: 'HIGH',
+        category: 'Loans',
+        eventType: SECURITY_EVENT_TYPES.LOAN_LARGE_AMOUNT,
+        message: `Large loan created: ${solAmount.toFixed(4)} SOL`,
+        details: {
+          loanId: loanPubkey,
+          borrower: params.borrower,
+          tokenMint: params.tokenMint,
+          solAmount: solAmount,
+          collateralAmount: dbLoan.collateralAmount,
+          entryPrice: dbLoan.entryPrice,
+          liquidationPrice: dbLoan.liquidationPrice,
+          threshold: LARGE_LOAN_THRESHOLD,
+        },
+        source: 'loan-service',
+        userId: params.borrower,
+        txSignature: params.txSignature,
+      });
+    }
+    
+    // Monitor burst activity (multiple loans from same user in short time)
+    const BURST_WINDOW_MINUTES = 10;
+    const BURST_THRESHOLD = 3; // 3+ loans in 10 minutes
+    const burstWindowStart = new Date(Date.now() - BURST_WINDOW_MINUTES * 60 * 1000);
+    
+    const recentLoans = await prisma.loan.count({
+      where: {
+        borrower: params.borrower,
+        createdAt: {
+          gte: burstWindowStart,
+        },
+        status: LoanStatus.Active,
+      },
+    });
+    
+    if (recentLoans >= BURST_THRESHOLD) {
+      const recentLoansList = await prisma.loan.findMany({
+        where: {
+          borrower: params.borrower,
+          createdAt: {
+            gte: burstWindowStart,
+          },
+        },
+        select: {
+          id: true,
+          solBorrowed: true,
+          tokenMint: true,
+          createdAt: true,
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+      
+      const totalBorrowed = recentLoansList.reduce((sum, loan) => 
+        sum + (parseFloat(loan.solBorrowed) / 1e9), 0
+      );
+      
+      await securityMonitor.log({
+        severity: 'CRITICAL',
+        category: 'Loans',
+        eventType: SECURITY_EVENT_TYPES.LOAN_BURST_ACTIVITY,
+        message: `Burst loan activity detected: ${recentLoans} loans in ${BURST_WINDOW_MINUTES} minutes`,
+        details: {
+          borrower: params.borrower,
+          loansCount: recentLoans,
+          totalBorrowed: totalBorrowed,
+          timeWindowMinutes: BURST_WINDOW_MINUTES,
+          threshold: BURST_THRESHOLD,
+          recentLoans: recentLoansList,
+        },
+        source: 'loan-service',
+        userId: params.borrower,
+        txSignature: params.txSignature,
+      });
+    }
+
     // Register for price monitoring
     try {
       fastPriceMonitor.registerLiquidationThreshold(

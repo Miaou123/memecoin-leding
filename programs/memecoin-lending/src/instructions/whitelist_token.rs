@@ -96,7 +96,6 @@ pub fn whitelist_token_handler(
     token_config.is_protocol_token = is_protocol_token;
     token_config.bump = ctx.bumps.token_config;
 
-    msg!("Token whitelisted: {} (tier: {:?}, pool_type: {:?})", ctx.accounts.token_mint.key(), token_tier, pool_type);
     
     Ok(())
 }

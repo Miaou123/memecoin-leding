@@ -1,8 +1,9 @@
 import { Hono } from 'hono';
-import { ApiResponse, ProtocolStats } from '@memecoin-lending/types';
+import { ApiResponse, ProtocolStats, SECURITY_EVENT_TYPES } from '@memecoin-lending/types';
 import { protocolService } from '../services/protocol.service.js';
 import { requireAdmin } from '../middleware/auth.js';
 import { apiRateLimit } from '../middleware/rateLimit.js';
+import { securityMonitor } from '../services/security-monitor.service.js';
 import { z } from 'zod';
 import { zValidator } from '@hono/zod-validator';
 
@@ -52,7 +53,24 @@ protocolRouter.get('/config', async (c) => {
 // Admin: Pause protocol
 protocolRouter.post('/pause', requireAdmin, async (c) => {
   try {
+    const adminInfo = (c as any).get('adminInfo') || { publicKey: 'unknown', ip: c.req.header('x-forwarded-for') || 'unknown' };
+    
     await protocolService.pauseProtocol();
+    
+    // Log security event
+    await securityMonitor.log({
+      severity: 'HIGH',
+      category: 'Protocol',
+      eventType: SECURITY_EVENT_TYPES.PROTOCOL_PAUSED,
+      message: 'Protocol paused by admin',
+      details: {
+        adminPublicKey: adminInfo.publicKey,
+        timestamp: new Date().toISOString(),
+      },
+      source: 'protocol-api',
+      userId: adminInfo.publicKey,
+      ip: adminInfo.ip,
+    });
     
     return c.json<ApiResponse<{ message: string }>>({
       success: true,
@@ -69,7 +87,24 @@ protocolRouter.post('/pause', requireAdmin, async (c) => {
 // Admin: Resume protocol
 protocolRouter.post('/resume', requireAdmin, async (c) => {
   try {
+    const adminInfo = (c as any).get('adminInfo') || { publicKey: 'unknown', ip: c.req.header('x-forwarded-for') || 'unknown' };
+    
     await protocolService.resumeProtocol();
+    
+    // Log security event
+    await securityMonitor.log({
+      severity: 'HIGH',
+      category: 'Protocol',
+      eventType: SECURITY_EVENT_TYPES.PROTOCOL_RESUMED,
+      message: 'Protocol resumed by admin',
+      details: {
+        adminPublicKey: adminInfo.publicKey,
+        timestamp: new Date().toISOString(),
+      },
+      source: 'protocol-api',
+      userId: adminInfo.publicKey,
+      ip: adminInfo.ip,
+    });
     
     return c.json<ApiResponse<{ message: string }>>({
       success: true,
@@ -132,7 +167,26 @@ protocolRouter.put(
     const body = c.req.valid('json');
     
     try {
+      const adminInfo = (c as any).get('adminInfo') || { publicKey: 'unknown', ip: c.req.header('x-forwarded-for') || 'unknown' };
+      
       await protocolService.updateTokenConfig(body);
+      
+      // Log security event
+      await securityMonitor.log({
+        severity: 'MEDIUM',
+        category: 'Protocol',
+        eventType: SECURITY_EVENT_TYPES.PROTOCOL_CONFIG_CHANGED,
+        message: `Token configuration updated for ${body.mint}`,
+        details: {
+          adminPublicKey: adminInfo.publicKey,
+          tokenMint: body.mint,
+          changes: body,
+          timestamp: new Date().toISOString(),
+        },
+        source: 'protocol-api',
+        userId: adminInfo.publicKey,
+        ip: adminInfo.ip,
+      });
       
       return c.json<ApiResponse<{ message: string }>>({
         success: true,
@@ -160,7 +214,27 @@ protocolRouter.post(
     const { amount } = c.req.valid('json');
     
     try {
+      const adminInfo = (c as any).get('adminInfo') || { publicKey: 'unknown', ip: c.req.header('x-forwarded-for') || 'unknown' };
+      
       const txSignature = await protocolService.withdrawTreasury(amount);
+      
+      // Log security event
+      await securityMonitor.log({
+        severity: 'CRITICAL',
+        category: 'Treasury',
+        eventType: SECURITY_EVENT_TYPES.TREASURY_WITHDRAWAL,
+        message: `Admin treasury withdrawal: ${amount} SOL`,
+        details: {
+          adminPublicKey: adminInfo.publicKey,
+          amount,
+          txSignature,
+          timestamp: new Date().toISOString(),
+        },
+        source: 'protocol-api',
+        userId: adminInfo.publicKey,
+        ip: adminInfo.ip,
+        txSignature,
+      });
       
       return c.json<ApiResponse<{ txSignature: string }>>({
         success: true,

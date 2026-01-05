@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import { zValidator } from '@hono/zod-validator';
 import { securityMonitor } from '../../services/security-monitor.service.js';
+import { treasuryMonitor } from '../../services/treasury-monitor.service.js';
 import { requireAdmin } from '../../middleware/auth.js';
 import { prisma } from '../../db/client.js';
 import type { SecuritySeverity, SecurityCategory } from '@memecoin-lending/types';
@@ -275,6 +276,88 @@ securityRoutes.get('/summary', async (c) => {
     return c.json({ 
       success: false, 
       error: 'Failed to retrieve security summary' 
+    }, 500);
+  }
+});
+
+// Get treasury monitor status and health
+securityRoutes.get('/treasury', async (c) => {
+  try {
+    const status = treasuryMonitor.getStatus();
+    
+    // Get recent treasury-related events
+    const recentTreasuryEvents = securityMonitor.getRecentEvents(20, { category: 'Treasury' });
+    
+    // Calculate treasury health score
+    let healthScore = 100;
+    let alerts = [];
+    
+    if (!status.initialized) {
+      healthScore -= 50;
+      alerts.push('Treasury monitoring not initialized');
+    }
+    
+    if (status.treasuryBalance < status.thresholds.treasuryCritical) {
+      healthScore -= 30;
+      alerts.push('Treasury balance critically low');
+    } else if (status.treasuryBalance < status.thresholds.treasuryLow) {
+      healthScore -= 20;
+      alerts.push('Treasury balance low');
+    }
+    
+    if (status.rewardVaultBalance < status.thresholds.rewardVaultLow) {
+      healthScore -= 15;
+      alerts.push('Reward vault balance low');
+    }
+    
+    if (status.recentWithdrawals >= 3) {
+      healthScore -= 10;
+      alerts.push('High withdrawal activity detected');
+    }
+    
+    // Get treasury funding/withdrawal trends from events
+    const treasuryEvents = recentTreasuryEvents.filter(e => 
+      e.eventType === 'TREASURY_FUNDED' || 
+      e.eventType === 'TREASURY_WITHDRAWAL' ||
+      e.eventType === 'TREASURY_LARGE_WITHDRAWAL'
+    );
+    
+    const withdrawalEvents = treasuryEvents.filter(e => 
+      e.eventType === 'TREASURY_WITHDRAWAL' || 
+      e.eventType === 'TREASURY_LARGE_WITHDRAWAL'
+    );
+    
+    const fundingEvents = treasuryEvents.filter(e => 
+      e.eventType === 'TREASURY_FUNDED'
+    );
+    
+    return c.json({
+      success: true,
+      data: {
+        status,
+        healthScore: Math.max(0, healthScore),
+        alerts,
+        recentActivity: {
+          totalEvents: recentTreasuryEvents.length,
+          withdrawals: withdrawalEvents.length,
+          fundings: fundingEvents.length,
+          lastActivity: recentTreasuryEvents.length > 0 
+            ? recentTreasuryEvents[0].timestamp 
+            : null,
+        },
+        recentEvents: recentTreasuryEvents.slice(0, 10), // Last 10 events
+        monitoring: {
+          enabled: status.initialized,
+          balanceThresholds: status.thresholds,
+          lastCheck: new Date().toISOString(),
+        },
+      },
+    });
+  } catch (error: any) {
+    console.error('Failed to get treasury status:', error);
+    return c.json({ 
+      success: false, 
+      error: 'Failed to retrieve treasury status' 
     }, 500);
   }
 });

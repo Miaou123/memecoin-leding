@@ -64,13 +64,11 @@ pub fn stake_handler(ctx: Context<Stake>, amount: u64) -> Result<()> {
         user_stake.first_stake_time = clock.unix_timestamp;
         user_stake.bump = ctx.bumps.user_stake;
         
-        msg!("New staker. Will be eligible starting epoch {}", staking_pool.current_epoch + 1);
     } else if was_zero_stake {
         // Re-staking after full unstake - reset (anti-gaming)
         user_stake.stake_start_epoch = staking_pool.current_epoch;
         user_stake.last_rewarded_epoch = staking_pool.current_epoch;
         
-        msg!("Re-staking. Will be eligible starting epoch {}", staking_pool.current_epoch + 1);
     }
     
     // Check if user is already eligible (staked before current epoch)
@@ -105,13 +103,6 @@ pub fn stake_handler(ctx: Context<Stake>, amount: u64) -> Result<()> {
         amount,
     )?;
     
-    msg!(
-        "Staked {} tokens. User total: {}. Pool total: {}. Eligible: {}",
-        amount,
-        user_stake.staked_amount,
-        staking_pool.total_staked,
-        is_eligible
-    );
     
     Ok(())
 }

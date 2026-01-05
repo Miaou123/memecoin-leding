@@ -61,7 +61,6 @@ pub fn initialize_handler(
     protocol_state.operations_fee_bps = 500; // 5%
     protocol_state.bump = ctx.bumps.protocol_state;
 
-    msg!("Protocol initialized with admin: {}, buyback: {}, operations: {}", admin, buyback_wallet, operations_wallet);
     
     Ok(())
 }

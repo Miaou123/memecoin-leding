@@ -158,12 +158,6 @@ pub fn liquidate_handler<'info>(
         LendingError::SlippageTooHigh
     );
 
-    msg!(
-        "Liquidation slippage check: expected={}, min_acceptable={}, provided={}",
-        expected_sol_value,
-        min_acceptable_output,
-        min_sol_output
-    );
 
     // Update loan status
     loan.status = liquidation_reason;
@@ -207,7 +201,6 @@ pub fn liquidate_handler<'info>(
                 vault_signer,
             )?;
 
-            msg!("Jupiter swap executed: {} tokens", collateral_amount);
         },
     }
 

@@ -34,7 +34,6 @@ pub fn emergency_drain_rewards_handler(ctx: Context<EmergencyDrainRewards>) -> R
     
     // Only allow if protocol is paused or in emergency
     // For now, allow admin to drain at any time for development
-    msg!("⚠️ EMERGENCY: Draining staking reward vault");
     
     // Get current balance
     let vault_balance = reward_vault.lamports();
@@ -49,13 +48,9 @@ pub fn emergency_drain_rewards_handler(ctx: Context<EmergencyDrainRewards>) -> R
     let drain_amount = vault_balance.saturating_sub(min_balance);
     
     if drain_amount == 0 {
-        msg!("No SOL to drain (only rent-exempt balance remains)");
         return Ok(());
     }
     
-    msg!("Draining {} lamports ({} SOL) from reward vault", 
-         drain_amount, 
-         drain_amount as f64 / 1_000_000_000.0);
     
     // Transfer SOL from reward vault to authority
     let bump = ctx.bumps.reward_vault;
@@ -76,9 +71,6 @@ pub fn emergency_drain_rewards_handler(ctx: Context<EmergencyDrainRewards>) -> R
     
     transfer(cpi_context, drain_amount)?;
     
-    msg!("✅ Emergency drain complete: {} SOL transferred to admin {}", 
-         drain_amount as f64 / 1_000_000_000.0, 
-         authority.key());
     
     Ok(())
 }

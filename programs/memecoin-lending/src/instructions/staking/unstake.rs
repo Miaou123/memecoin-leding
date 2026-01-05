@@ -76,7 +76,6 @@ pub fn unstake_handler(ctx: Context<Unstake>, amount: u64) -> Result<()> {
     if user_stake.staked_amount == 0 {
         user_stake.stake_start_epoch = staking_pool.current_epoch;
         user_stake.last_rewarded_epoch = staking_pool.current_epoch;
-        msg!("Fully unstaked. Must wait full epoch to earn again.");
     }
     
     // Transfer tokens back to user
@@ -96,12 +95,6 @@ pub fn unstake_handler(ctx: Context<Unstake>, amount: u64) -> Result<()> {
         amount,
     )?;
     
-    msg!(
-        "Unstaked {} tokens. User remaining: {}. Pool total: {}",
-        amount,
-        user_stake.staked_amount,
-        staking_pool.total_staked
-    );
     
     Ok(())
 }

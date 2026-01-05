@@ -60,16 +60,9 @@ pub fn distribute_rewards_handler<'info>(ctx: Context<'_, '_, '_, 'info, Distrib
     
     // If vault is empty or nearly empty, skip distribution
     if rewards_pool < 1000 { // Less than 0.000001 SOL
-        msg!("Vault balance too low for distribution: {} lamports", vault_balance);
         return Ok(());
     }
     
-    msg!(
-        "Distribution: vault has {} lamports, tracked rewards {}, will distribute {}",
-        vault_balance,
-        pool.last_epoch_rewards,
-        rewards_pool
-    );
     
     let mut total_distributed_this_call: u64 = 0;
     
@@ -86,7 +79,6 @@ pub fn distribute_rewards_handler<'info>(ctx: Context<'_, '_, '_, 'info, Distrib
         // Validate account is writable and owned by program
         
         if user_stake_info.owner != ctx.program_id {
-            msg!("Skipping account not owned by program");
             continue;
         }
         
@@ -122,12 +114,10 @@ pub fn distribute_rewards_handler<'info>(ctx: Context<'_, '_, '_, 'info, Distrib
         // 2. Wasn't eligible (staked during or after the distributable epoch)
         // 3. Zero stake
         if last_rewarded_epoch >= distributable_epoch {
-            msg!("User {} already rewarded for epoch {}", owner, distributable_epoch);
             continue;
         }
         
         if stake_start_epoch >= distributable_epoch {
-            msg!("User {} not eligible (staked epoch {})", owner, stake_start_epoch);
             continue;
         }
         
@@ -137,7 +127,6 @@ pub fn distribute_rewards_handler<'info>(ctx: Context<'_, '_, '_, 'info, Distrib
         
         // Verify wallet matches owner
         if user_wallet_info.key() != owner {
-            msg!("Wallet mismatch for user {}", owner);
             continue;
         }
         
@@ -156,7 +145,6 @@ pub fn distribute_rewards_handler<'info>(ctx: Context<'_, '_, '_, 'info, Distrib
         // Check vault has enough (re-check in case of concurrent distributions)
         let current_vault_balance = ctx.accounts.reward_vault.lamports();
         if current_vault_balance < share {
-            msg!("Insufficient vault balance. Needed: {}, Have: {}", share, current_vault_balance);
             // Stop distributing if vault runs out
             break;
         }
@@ -191,7 +179,6 @@ pub fn distribute_rewards_handler<'info>(ctx: Context<'_, '_, '_, 'info, Distrib
         
         total_distributed_this_call += share;
         
-        msg!("Distributed {} lamports to {}", share, owner);
     }
     
     // Update pool stats
@@ -203,12 +190,6 @@ pub fn distribute_rewards_handler<'info>(ctx: Context<'_, '_, '_, 'info, Distrib
         .checked_add(total_distributed_this_call)
         .ok_or(LendingError::MathOverflow)?;
     
-    msg!(
-        "Batch complete. Distributed {} lamports. Total for epoch: {}/{}",
-        total_distributed_this_call,
-        pool.last_epoch_distributed,
-        pool.last_epoch_rewards
-    );
     
     Ok(())
 }

@@ -5,7 +5,6 @@ pub mod instructions;
 pub mod state;
 pub mod utils;
 pub mod swap;
-pub mod events;
 
 use instructions::*;
 
@@ -82,10 +81,6 @@ pub mod memecoin_lending {
         instructions::admin::resume_handler(ctx)
     }
 
-    /// Emergency admin update (requires protocol to be paused)
-    pub fn update_admin(ctx: Context<AdminControl>, new_admin: Pubkey) -> Result<()> {
-        instructions::admin::update_admin_handler(ctx, new_admin)
-    }
 
     /// Initiate admin transfer with 48h timelock
     pub fn initiate_admin_transfer(ctx: Context<AdminControl>, new_admin: Pubkey) -> Result<()> {
@@ -132,11 +127,10 @@ pub mod memecoin_lending {
     /// Update wallet addresses (admin only)
     pub fn update_wallets(
         ctx: Context<AdminControl>,
-        new_admin: Option<Pubkey>,
         new_buyback_wallet: Option<Pubkey>,
         new_operations_wallet: Option<Pubkey>,
     ) -> Result<()> {
-        instructions::admin::update_wallets_handler(ctx, new_admin, new_buyback_wallet, new_operations_wallet)
+        instructions::admin::update_wallets_handler(ctx, new_buyback_wallet, new_operations_wallet)
     }
     /// Initialize epoch-based staking pool
     pub fn initialize_staking(

@@ -126,12 +126,6 @@ pub fn create_loan_handler(
         duration_seconds,
     )?;
 
-    msg!(
-        "LTV adjustment: base={} bps, duration={}s, effective={} bps",
-        token_config.ltv_bps,
-        duration_seconds,
-        effective_ltv
-    );
 
     // Calculate loan amount based on duration-adjusted LTV
     let sol_loan_amount = LoanCalculator::calculate_loan_amount(
@@ -168,11 +162,6 @@ pub fn create_loan_handler(
         LendingError::SingleLoanTooLarge
     );
 
-    msg!(
-        "Single loan check: {} <= {} (10% of treasury)", 
-        sol_loan_amount, 
-        max_single_loan
-    );
 
     // ============================================================
     // SECURITY CHECK 2: Per-Token Exposure Limit (10% of treasury)
@@ -193,11 +182,6 @@ pub fn create_loan_handler(
         LendingError::TokenExposureTooHigh
     );
 
-    msg!(
-        "Token exposure check: {} <= {} (10% of treasury)", 
-        new_token_exposure, 
-        max_token_exposure
-    );
 
     // Note: User exposure tracking removed to fix stack overflow
     // Can be re-implemented in a separate instruction if needed
@@ -277,12 +261,6 @@ pub fn create_loan_handler(
 
     // User exposure tracking removed for stack size optimization
 
-    msg!(
-        "Loan created: {} SOL borrowed against {} tokens (price: {})",
-        sol_loan_amount,
-        collateral_amount,
-        current_price
-    );
     
     // FIX 1: Exit reentrancy guard
     ReentrancyGuard::exit(protocol_state);

@@ -448,34 +448,6 @@ impl UserStake {
         32;     // _reserved
 }
 
-/// Historical record of each epoch's rewards
-/// Stored separately to allow claiming old epochs
-#[account]
-pub struct EpochRewardRecord {
-    /// The epoch this record is for
-    pub epoch: u64,
-    
-    /// Total rewards distributed this epoch
-    pub total_rewards: u64,
-    
-    /// Total eligible stake during this epoch
-    pub total_eligible_stake: u64,
-    
-    /// Timestamp when epoch ended
-    pub ended_at: i64,
-    
-    /// Bump seed
-    pub bump: u8,
-}
-
-impl EpochRewardRecord {
-    pub const LEN: usize = 8 +  // discriminator
-        8 +     // epoch
-        8 +     // total_rewards
-        8 +     // total_eligible_stake
-        8 +     // ended_at
-        1;      // bump
-}
 
 /// Fee receiver account for collecting pumpfun creator fees
 #[account]

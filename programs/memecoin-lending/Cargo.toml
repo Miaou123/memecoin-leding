@@ -20,11 +20,13 @@ idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
 custom-heap = []
 custom-panic = []
 anchor-debug = []
+# Size optimization feature  
+release-optimize = ["no-log-ix-name"]
 
 [dependencies]
-anchor-lang = { version = "0.31.1", features = ["init-if-needed"] }
-anchor-spl = "0.31.1"
-getrandom = { version = "0.2", features = ["custom"] }
+anchor-lang = { version = "0.31.1", features = ["init-if-needed"], default-features = false }
+anchor-spl = { version = "0.31.1", default-features = false, features = ["token", "associated_token", "token_2022"] }
+getrandom = { version = "0.2", features = ["custom"], default-features = false }
 
 [dev-dependencies]
 anchor-client = "0.31.1"

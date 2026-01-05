@@ -248,14 +248,6 @@ pub fn repay_loan_handler(ctx: Context<RepayLoan>) -> Result<()> {
 
     // User exposure tracking removed for stack size optimization
 
-    msg!(
-        "Loan repaid: principal={} SOL, fee={} SOL (treasury={}, staking={}, ops={})",
-        sol_borrowed,
-        protocol_fee,
-        treasury_fee_with_dust,
-        staking_fee,
-        operations_fee
-    );
     
     // FIX 1: Exit reentrancy guard
     ReentrancyGuard::exit(protocol_state);

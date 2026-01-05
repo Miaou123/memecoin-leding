@@ -46,6 +46,5 @@ pub fn fund_treasury_handler(ctx: Context<FundTreasury>, amount: u64) -> Result<
     // Track the deposit
     protocol_state.treasury_balance = SafeMath::add(protocol_state.treasury_balance, amount)?;
     
-    msg!("Treasury funded with {} lamports by {}", amount, ctx.accounts.funder.key());
     Ok(())
 }

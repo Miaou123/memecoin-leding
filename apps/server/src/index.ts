@@ -27,6 +27,7 @@ import { initializeFastPriceMonitor, fastPriceMonitor } from './services/fast-pr
 import { loanService } from './services/loan.service.js';
 import { distributionCrankService } from './services/distribution-crank.service.js';
 import { FeeClaimerService } from './services/fee-claimer.service.js';
+import { treasuryMonitor } from './services/treasury-monitor.service.js';
 import { Connection, Keypair } from '@solana/web3.js';
 import { Program, AnchorProvider, Wallet, Idl } from '@coral-xyz/anchor';
 import { PROGRAM_ID } from '@memecoin-lending/config';
@@ -299,6 +300,20 @@ const server = serve({
   }).catch((error) => {
     console.error('Failed to start fee claimer:', error);
   });
+  
+  // Initialize treasury monitor
+  if (process.env.TREASURY_PDA && process.env.ENABLE_TREASURY_MONITORING !== 'false') {
+    treasuryMonitor.initialize(
+      process.env.TREASURY_PDA,
+      process.env.REWARD_VAULT_PDA // Optional
+    ).then(() => {
+      console.log('🏦 Treasury monitor initialized and running');
+    }).catch((error) => {
+      console.error('Failed to initialize treasury monitor:', error);
+    });
+  } else {
+    console.log('🏦 Treasury monitoring disabled (TREASURY_PDA not configured)');
+  }
 });
 
 // Initialize WebSocket - pass the server, it creates WebSocketServer internally
@@ -314,6 +329,10 @@ async function gracefulShutdown(signal: string) {
       console.log('Stopping fee claimer service...');
       feeClaimerService.stopAutoClaim();
     }
+    
+    // Stop treasury monitor
+    console.log('Stopping treasury monitor...');
+    treasuryMonitor.stop();
     
     await fastPriceMonitor.shutdown();
     wss.close();

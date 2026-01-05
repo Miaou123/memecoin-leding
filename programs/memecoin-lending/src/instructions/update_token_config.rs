@@ -32,7 +32,6 @@ pub fn update_token_config_handler(
     // Update enabled status
     if let Some(enabled_value) = enabled {
         token_config.enabled = enabled_value;
-        msg!("Token {} enabled status updated to: {}", token_config.mint, enabled_value);
     }
 
     // Update LTV ratio with validation
@@ -41,7 +40,6 @@ pub fn update_token_config_handler(
             return Err(LendingError::LtvTooHigh.into());
         }
         token_config.ltv_bps = ltv_value;
-        msg!("Token {} LTV updated to: {} bps", token_config.mint, ltv_value);
     }
 
     

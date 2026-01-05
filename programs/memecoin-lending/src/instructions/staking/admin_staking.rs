@@ -19,13 +19,11 @@ pub struct PauseStaking<'info> {
 
 pub fn pause_staking_handler(ctx: Context<PauseStaking>) -> Result<()> {
     ctx.accounts.staking_pool.paused = true;
-    msg!("Staking paused by admin");
     Ok(())
 }
 
 pub fn resume_staking_handler(ctx: Context<PauseStaking>) -> Result<()> {
     ctx.accounts.staking_pool.paused = false;
-    msg!("Staking resumed by admin");
     Ok(())
 }
 
@@ -49,7 +47,6 @@ pub fn update_epoch_duration_handler(ctx: Context<UpdateEpochDuration>, new_dura
     require!(new_duration <= 604800, LendingError::InvalidEpochDuration); // Max 1 week
     
     ctx.accounts.staking_pool.epoch_duration = new_duration;
-    msg!("Epoch duration updated to {} seconds", new_duration);
     Ok(())
 }
 
@@ -78,7 +75,6 @@ pub fn force_advance_epoch_handler(ctx: Context<ForceAdvanceEpoch>) -> Result<()
     pool.current_epoch_eligible_stake = pool.total_staked;
     pool.current_epoch_rewards = 0;
     
-    msg!("Force advanced to epoch {} by admin", pool.current_epoch);
     Ok(())
 }
 
@@ -121,7 +117,6 @@ pub fn emergency_withdraw_handler(ctx: Context<EmergencyWithdraw>) -> Result<()>
     let drain_amount = vault_balance.saturating_sub(min_balance);
     
     if drain_amount == 0 {
-        msg!("No SOL to withdraw (only rent-exempt balance remains)");
         return Ok(());
     }
     
@@ -129,6 +124,5 @@ pub fn emergency_withdraw_handler(ctx: Context<EmergencyWithdraw>) -> Result<()>
     **ctx.accounts.reward_vault.to_account_info().try_borrow_mut_lamports()? -= drain_amount;
     **ctx.accounts.authority.to_account_info().try_borrow_mut_lamports()? += drain_amount;
     
-    msg!("Emergency withdraw: {} lamports to admin. Staking paused.", drain_amount);
     Ok(())
 }

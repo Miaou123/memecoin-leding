@@ -9,8 +9,6 @@ import type {
   SecurityCategory 
 } from '@memecoin-lending/types';
 import { TelegramAlertService } from './alerts/telegram-alert.service.js';
-import { DiscordAlertService } from './alerts/discord-alert.service.js';
-import { SlackAlertService } from './alerts/slack-alert.service.js';
 import { prisma } from '../db/client.js';
 
 // Severity comparison helper
@@ -30,8 +28,6 @@ interface EventFilters {
 
 interface AlertTestResult {
   telegram?: { success: boolean; error?: string };
-  discord?: { success: boolean; error?: string };
-  slack?: { success: boolean; error?: string };
 }
 
 export class SecurityMonitorService {
@@ -41,8 +37,6 @@ export class SecurityMonitorService {
   private eventCounters = new Map<string, { count: number; firstSeen: number }>();
   
   private telegramService?: TelegramAlertService;
-  private discordService?: DiscordAlertService;
-  private slackService?: SlackAlertService;
   
   private config: AlertConfig;
   
@@ -53,13 +47,6 @@ export class SecurityMonitorService {
     };
     
     // Initialize alert services based on configuration
-    console.log('🔍 Debug: Checking Telegram env vars:', {
-      hasToken: !!process.env.TELEGRAM_BOT_TOKEN,
-      tokenPreview: process.env.TELEGRAM_BOT_TOKEN?.substring(0, 10) + '...',
-      chatId: process.env.TELEGRAM_CHAT_ID,
-      enabled: process.env.TELEGRAM_ALERTS_ENABLED,
-    });
-    
     if (process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID && process.env.TELEGRAM_ALERTS_ENABLED !== 'false') {
       this.telegramService = new TelegramAlertService(
         process.env.TELEGRAM_BOT_TOKEN,
@@ -70,33 +57,12 @@ export class SecurityMonitorService {
         chatId: process.env.TELEGRAM_CHAT_ID,
         enabled: true,
       };
-      console.log('✅ Telegram service initialized with chat ID:', process.env.TELEGRAM_CHAT_ID);
-    } else {
-      console.log('❌ Telegram service not initialized - missing env vars');
-    }
-    
-    if (process.env.DISCORD_WEBHOOK_URL && process.env.DISCORD_ALERTS_ENABLED === 'true') {
-      this.discordService = new DiscordAlertService(process.env.DISCORD_WEBHOOK_URL);
-      this.config.discord = {
-        webhookUrl: process.env.DISCORD_WEBHOOK_URL,
-        enabled: true,
-      };
-    }
-    
-    if (process.env.SLACK_WEBHOOK_URL && process.env.SLACK_ALERTS_ENABLED === 'true') {
-      this.slackService = new SlackAlertService(process.env.SLACK_WEBHOOK_URL);
-      this.config.slack = {
-        webhookUrl: process.env.SLACK_WEBHOOK_URL,
-        enabled: true,
-      };
     }
     
     console.log(chalk.cyan('🔒 Security Monitor initialized'));
     console.log(chalk.gray(`   Min Severity: ${this.config.minSeverity}`));
     console.log(chalk.gray(`   Rate Limit: ${this.config.rateLimitMinutes} minutes`));
     console.log(chalk.gray(`   Telegram: ${this.telegramService ? '✅' : '❌'}`));
-    console.log(chalk.gray(`   Discord: ${this.discordService ? '✅' : '❌'}`));
-    console.log(chalk.gray(`   Slack: ${this.slackService ? '✅' : '❌'}`));
   }
   
   async log(input: SecurityEventInput): Promise<void> {
@@ -213,27 +179,11 @@ export class SecurityMonitorService {
   }
   
   private async sendAlerts(event: SecurityEvent): Promise<void> {
-    const promises: Promise<boolean>[] = [];
-    
     if (this.telegramService) {
-      promises.push(this.telegramService.sendAlert(event));
-    }
-    
-    if (this.discordService) {
-      promises.push(this.discordService.sendAlert(event));
-    }
-    
-    if (this.slackService) {
-      promises.push(this.slackService.sendAlert(event));
-    }
-    
-    const results = await Promise.allSettled(promises);
-    
-    const successful = results.filter(r => r.status === 'fulfilled' && r.value).length;
-    const failed = results.filter(r => r.status === 'rejected' || (r.status === 'fulfilled' && !r.value)).length;
-    
-    if (failed > 0) {
-      console.error(chalk.red(`Failed to send ${failed} out of ${results.length} alerts`));
+      const success = await this.telegramService.sendAlert(event);
+      if (!success) {
+        console.error(chalk.red(`Failed to send Telegram alert`));
+      }
     }
   }
   
@@ -346,24 +296,6 @@ export class SecurityMonitorService {
         results.telegram = { success };
       } catch (error: any) {
         results.telegram = { success: false, error: error.message };
-      }
-    }
-    
-    if (this.discordService) {
-      try {
-        const success = await this.discordService.sendAlert(testEvent);
-        results.discord = { success };
-      } catch (error: any) {
-        results.discord = { success: false, error: error.message };
-      }
-    }
-    
-    if (this.slackService) {
-      try {
-        const success = await this.slackService.sendAlert(testEvent);
-        results.slack = { success };
-      } catch (error: any) {
-        results.slack = { success: false, error: error.message };
       }
     }
     
