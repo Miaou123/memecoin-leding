@@ -163,3 +163,30 @@ model WhitelistAuditLog {
   @@index([adminAddress])
   @@index([timestamp])
 }
+
+model SecurityEvent {
+  id          String   @id @default(uuid())
+  timestamp   DateTime @default(now())
+  severity    String   // LOW, MEDIUM, HIGH, CRITICAL
+  category    String
+  eventType   String
+  message     String
+  details     Json?
+  source      String
+  userId      String?
+  ip          String?
+  txSignature String?
+  alerted     Boolean  @default(false)
+  resolved    Boolean  @default(false)
+  resolvedAt  DateTime?
+  resolvedBy  String?
+  notes       String?
+  
+  createdAt   DateTime @default(now())
+  
+  @@index([timestamp])
+  @@index([severity])
+  @@index([category])
+  @@index([eventType])
+  @@index([resolved])
+}

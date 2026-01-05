@@ -179,7 +179,6 @@ WEB_APP_URL=http://localhost:3000
       console.log(chalk.gray('5. Start development servers:'));
       console.log(chalk.gray('   - Backend: pnpm --filter @memecoin-lending/server dev'));
       console.log(chalk.gray('   - Frontend: pnpm --filter @memecoin-lending/web dev'));
-      console.log(chalk.gray('   - Bot: pnpm --filter @memecoin-lending/telegram-bot dev'));
       
       console.log(chalk.blue('\n🔧 Development URLs:'));
       console.log(chalk.gray('  Web App:    http://localhost:3000'));

@@ -1,6 +1,6 @@
 # Memecoin Lending Protocol
 
-A complete full-stack memecoin lending protocol built on Solana, featuring a Rust program, TypeScript backend, SolidJS frontend, and Telegram bot.
+A complete full-stack memecoin lending protocol built on Solana, featuring a Rust program, TypeScript backend, and SolidJS frontend.
 
 ## 🏗️ Architecture
 
@@ -9,7 +9,6 @@ This monorepo contains:
 - **Solana Program** (Rust/Anchor): On-chain lending logic with PDAs
 - **Backend Server** (TypeScript): REST API, WebSocket, liquidation bot, price monitoring
 - **Frontend DApp** (SolidJS): Web interface for borrowing and loan management
-- **Telegram Bot** (TypeScript): Notifications and basic interactions
 - **Shared Packages**: Types, SDK, configuration, and utilities
 
 ## 🚀 Quick Start
@@ -54,8 +53,6 @@ pnpm --filter @memecoin-lending/server dev
 # Terminal 2 - Frontend  
 pnpm --filter @memecoin-lending/web dev
 
-# Terminal 3 - Telegram Bot (optional)
-pnpm --filter @memecoin-lending/telegram-bot dev
 ```
 
 5. **Access the application:**
@@ -73,8 +70,7 @@ memecoin-lending/
 │   └── config/                  # @memecoin-lending/config
 ├── apps/
 │   ├── web/                     # SolidJS frontend
-│   ├── server/                  # Backend API + services
-│   └── telegram-bot/            # Telegram bot
+│   └── server/                  # Backend API + services
 ├── programs/                    # Solana programs (Anchor)
 │   └── memecoin-lending/
 ├── scripts/                     # Deployment scripts
@@ -97,12 +93,6 @@ memecoin-lending/
 - ✅ Loan management dashboard
 - ✅ Repayment interface
 - ✅ Real-time price updates
-
-### Telegram Bot
-- ✅ Wallet linking
-- ✅ Loan notifications
-- ✅ Price alerts
-- ✅ Portfolio monitoring
 
 ### Backend Services
 - ✅ REST API with rate limiting
@@ -154,7 +144,6 @@ pnpm run scripts deploy --environment development
 ```bash
 # Set environment variables
 export DB_PASSWORD="secure_password"
-export TELEGRAM_BOT_TOKEN="your_token"
 export PROGRAM_ID="your_program_id"
 export API_URL="https://api.yourdomain.com"
 
@@ -186,7 +175,6 @@ Create `.env` file (use `.env.example` as template):
 ```bash
 # Core
 DB_PASSWORD=your_secure_password
-TELEGRAM_BOT_TOKEN=your_bot_token
 PROGRAM_ID=your_program_id
 
 # Solana
@@ -240,22 +228,6 @@ WEB_APP_URL=https://yourdomain.com
 ### Authorization
 - User-specific loan access
 - Admin-only protocol operations
-- Telegram account linking verification
-
-## 🤖 Telegram Bot
-
-### Commands
-- `/start` - Welcome and setup
-- `/link <wallet>` - Link Solana wallet
-- `/loans` - View your loans
-- `/prices` - Current token prices
-- `/alerts` - Configure notifications
-
-### Notifications
-- ✅ Loan created confirmation
-- ⏰ Due date reminders (1h, 15m)
-- ❌ Liquidation alerts
-- 📈 Price drop warnings
 
 ## 🏦 Protocol Operations
 

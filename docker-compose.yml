@@ -67,22 +67,6 @@ services:
     volumes:
       - ./keys:/app/keys:ro
 
-  # Telegram Bot
-  telegram-bot:
-    build:
-      context: .
-      dockerfile: apps/telegram-bot/Dockerfile
-    restart: unless-stopped
-    environment:
-      - NODE_ENV=production
-      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
-      - API_URL=http://server:3001/api
-      - WEB_APP_URL=${WEB_APP_URL:-https://yourdomain.com}
-    depends_on:
-      - server
-    networks:
-      - memecoin-lending
-
   # Frontend (SolidJS)
   web:
     build:

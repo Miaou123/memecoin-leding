@@ -2,17 +2,26 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { Server } from 'http';
 import { parse } from 'url';
 import { WebSocketEvent, WebSocketMessage, SubscriptionParams } from '@memecoin-lending/types';
+import { securityMonitor } from '../services/security-monitor.service.js';
+import { SECURITY_EVENT_TYPES } from '@memecoin-lending/types';
+import { IncomingMessage } from 'http';
 
 interface WebSocketConnection {
   ws: WebSocket;
   userId?: string;
   subscriptions: Set<string>;
+  ip: string;
+  connectedAt: number;
 }
 
 class WebSocketService {
   private wss: WebSocketServer | null = null;
   private connections = new Map<WebSocket, WebSocketConnection>();
   private userConnections = new Map<string, Set<WebSocket>>();
+  
+  // SECURITY: Track connections per IP for flood detection
+  private connectionsByIp = new Map<string, Set<WebSocket>>();
+  private readonly MAX_CONNECTIONS_PER_IP = 10;
   
   initialize(server: Server): WebSocketServer {
     this.wss = new WebSocketServer({ 
@@ -27,17 +36,51 @@ class WebSocketService {
     return this.wss;
   }
   
-  private handleConnection(ws: WebSocket, request: any) {
-    const url = parse(request.url, true);
+  private async handleConnection(ws: WebSocket, request: IncomingMessage) {
+    const ip = (request.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() ||
+               request.headers['x-real-ip'] as string ||
+               request.socket.remoteAddress ||
+               'unknown';
+               
+    // SECURITY: Check for connection flood
+    const ipConnections = this.connectionsByIp.get(ip) || new Set();
+    
+    if (ipConnections.size >= this.MAX_CONNECTIONS_PER_IP) {
+      await securityMonitor.log({
+        severity: 'MEDIUM',
+        category: 'WebSocket',
+        eventType: SECURITY_EVENT_TYPES.WS_CONNECTION_FLOOD,
+        message: `WebSocket connection flood from ${ip}`,
+        details: {
+          ip,
+          currentConnections: ipConnections.size,
+          limit: this.MAX_CONNECTIONS_PER_IP,
+          userAgent: request.headers['user-agent']?.slice(0, 200),
+        },
+        source: 'websocket',
+        ip,
+      });
+      
+      ws.close(1008, 'Too many connections from this IP');
+      return;
+    }
+    
+    const url = parse(request.url || '', true);
     const userId = url.query.userId as string;
     
     const connection: WebSocketConnection = {
       ws,
       userId,
       subscriptions: new Set(),
+      ip,
+      connectedAt: Date.now(),
     };
     
     this.connections.set(ws, connection);
+    
+    // Track by IP
+    ipConnections.add(ws);
+    this.connectionsByIp.set(ip, ipConnections);
     
     if (userId) {
       if (!this.userConnections.has(userId)) {
@@ -46,7 +89,7 @@ class WebSocketService {
       this.userConnections.get(userId)!.add(ws);
     }
     
-    console.log(`📱 WebSocket connected: ${userId || 'anonymous'}`);
+    console.log(`📱 WebSocket connected: ${userId || 'anonymous'} from ${ip}`);
     
     // Send welcome message
     this.send(ws, WebSocketEvent.PROTOCOL_UPDATE, {
@@ -68,40 +111,94 @@ class WebSocketService {
     });
   }
   
-  private handleMessage(ws: WebSocket, data: any) {
+  private async handleMessage(ws: WebSocket, data: any) {
     try {
       const message: WebSocketMessage = JSON.parse(data.toString());
       const connection = this.connections.get(ws);
       
       if (!connection) return;
       
+      // SECURITY: Validate message structure
+      if (!message.event || typeof message.event !== 'string') {
+        await securityMonitor.log({
+          severity: 'LOW',
+          category: 'WebSocket',
+          eventType: SECURITY_EVENT_TYPES.WS_INVALID_MESSAGE,
+          message: 'Invalid WebSocket message: missing or invalid event field',
+          details: {
+            dataPreview: data.toString().slice(0, 200),
+            userId: connection.userId,
+            ip: connection.ip,
+          },
+          source: 'websocket',
+          ip: connection.ip,
+          userId: connection.userId,
+        });
+        return;
+      }
+      
       switch (message.event) {
         case WebSocketEvent.SUBSCRIBE_LOANS:
-          this.handleSubscribeLoans(connection, message.data);
+          await this.handleSubscribeLoans(connection, message.data);
           break;
           
         case WebSocketEvent.SUBSCRIBE_PRICES:
-          this.handleSubscribePrices(connection, message.data);
+          await this.handleSubscribePrices(connection, message.data);
           break;
           
         case WebSocketEvent.SUBSCRIBE_USER:
-          this.handleSubscribeUser(connection, message.data);
+          await this.handleSubscribeUser(connection, message.data);
           break;
           
         case WebSocketEvent.UNSUBSCRIBE:
-          this.handleUnsubscribe(connection, message.data);
+          await this.handleUnsubscribe(connection, message.data);
           break;
           
         default:
           console.warn('Unknown WebSocket event:', message.event);
+          
+          // SECURITY: Log unknown event attempts
+          await securityMonitor.log({
+            severity: 'LOW',
+            category: 'WebSocket',
+            eventType: SECURITY_EVENT_TYPES.WS_INVALID_MESSAGE,
+            message: `Unknown WebSocket event: ${message.event}`,
+            details: {
+              event: message.event,
+              dataPreview: JSON.stringify(message.data)?.slice(0, 100),
+              userId: connection.userId,
+              ip: connection.ip,
+            },
+            source: 'websocket',
+            ip: connection.ip,
+            userId: connection.userId,
+          });
       }
       
-    } catch (error) {
+    } catch (error: any) {
+      const connection = this.connections.get(ws);
       console.error('Failed to parse WebSocket message:', error);
+      
+      // SECURITY: Log message parsing failures
+      await securityMonitor.log({
+        severity: 'LOW',
+        category: 'WebSocket',
+        eventType: SECURITY_EVENT_TYPES.WS_INVALID_MESSAGE,
+        message: `Failed to parse WebSocket message: ${error.message}`,
+        details: {
+          error: error.message,
+          dataPreview: data.toString().slice(0, 200),
+          userId: connection?.userId,
+          ip: connection?.ip,
+        },
+        source: 'websocket',
+        ip: connection?.ip,
+        userId: connection?.userId,
+      });
     }
   }
   
-  private handleSubscribeLoans(connection: WebSocketConnection, params: SubscriptionParams['loans']) {
+  private async handleSubscribeLoans(connection: WebSocketConnection, params: SubscriptionParams['loans']) {
     const subscriptionKey = `loans:${JSON.stringify(params || {})}`;
     connection.subscriptions.add(subscriptionKey);
     
@@ -110,9 +207,47 @@ class WebSocketService {
     });
   }
   
-  private handleSubscribePrices(connection: WebSocketConnection, params: SubscriptionParams['prices']) {
+  private async handleSubscribePrices(connection: WebSocketConnection, params: SubscriptionParams['prices']) {
     if (params?.tokenMints) {
+      // SECURITY: Validate token mints array
+      if (!Array.isArray(params.tokenMints) || params.tokenMints.length > 50) {
+        await securityMonitor.log({
+          severity: 'LOW',
+          category: 'WebSocket',
+          eventType: SECURITY_EVENT_TYPES.WS_INVALID_MESSAGE,
+          message: 'Invalid tokenMints in price subscription',
+          details: {
+            tokenMintsCount: params.tokenMints?.length,
+            userId: connection.userId,
+            ip: connection.ip,
+          },
+          source: 'websocket',
+          ip: connection.ip,
+          userId: connection.userId,
+        });
+        return;
+      }
+      
       for (const mint of params.tokenMints) {
+        // SECURITY: Validate mint address format
+        if (typeof mint !== 'string' || mint.length < 32 || mint.length > 44) {
+          await securityMonitor.log({
+            severity: 'LOW',
+            category: 'WebSocket',
+            eventType: SECURITY_EVENT_TYPES.WS_INVALID_MESSAGE,
+            message: 'Invalid token mint address in price subscription',
+            details: {
+              mint: mint?.slice(0, 20) + '...',
+              userId: connection.userId,
+              ip: connection.ip,
+            },
+            source: 'websocket',
+            ip: connection.ip,
+            userId: connection.userId,
+          });
+          continue;
+        }
+        
         const subscriptionKey = `prices:${mint}`;
         connection.subscriptions.add(subscriptionKey);
       }
@@ -125,8 +260,46 @@ class WebSocketService {
     });
   }
   
-  private handleSubscribeUser(connection: WebSocketConnection, params: SubscriptionParams['user']) {
+  private async handleSubscribeUser(connection: WebSocketConnection, params: SubscriptionParams['user']) {
     if (params?.wallet) {
+      // SECURITY: Validate wallet address format
+      if (typeof params.wallet !== 'string' || params.wallet.length < 32 || params.wallet.length > 44) {
+        await securityMonitor.log({
+          severity: 'LOW',
+          category: 'WebSocket',
+          eventType: SECURITY_EVENT_TYPES.WS_INVALID_MESSAGE,
+          message: 'Invalid wallet address in user subscription',
+          details: {
+            wallet: params.wallet?.slice(0, 20) + '...',
+            userId: connection.userId,
+            ip: connection.ip,
+          },
+          source: 'websocket',
+          ip: connection.ip,
+          userId: connection.userId,
+        });
+        return;
+      }
+      
+      // SECURITY: Check for unauthorized subscription attempts (user trying to subscribe to another user's data)
+      if (connection.userId && connection.userId !== params.wallet) {
+        await securityMonitor.log({
+          severity: 'MEDIUM',
+          category: 'WebSocket',
+          eventType: SECURITY_EVENT_TYPES.WS_UNAUTHORIZED,
+          message: `Unauthorized user subscription attempt`,
+          details: {
+            requestedWallet: params.wallet.slice(0, 8) + '...',
+            connectionUserId: connection.userId?.slice(0, 8) + '...',
+            ip: connection.ip,
+          },
+          source: 'websocket',
+          ip: connection.ip,
+          userId: connection.userId,
+        });
+        return;
+      }
+      
       connection.userId = params.wallet;
       const subscriptionKey = `user:${params.wallet}`;
       connection.subscriptions.add(subscriptionKey);
@@ -156,6 +329,17 @@ class WebSocketService {
         userConnections.delete(ws);
         if (userConnections.size === 0) {
           this.userConnections.delete(connection.userId);
+        }
+      }
+    }
+    
+    // SECURITY: Clean up IP tracking
+    if (connection?.ip) {
+      const ipConnections = this.connectionsByIp.get(connection.ip);
+      if (ipConnections) {
+        ipConnections.delete(ws);
+        if (ipConnections.size === 0) {
+          this.connectionsByIp.delete(connection.ip);
         }
       }
     }

@@ -5,6 +5,8 @@ import { priceMonitorJob } from './price-monitor.job.js';
 import { syncJob } from './sync.job.js';
 import { notificationJob } from './notification.job.js';
 import { distributionCrankJob } from './distribution-crank.job.js';
+import { securityMonitor } from '../services/security-monitor.service.js';
+import { SECURITY_EVENT_TYPES } from '@memecoin-lending/types';
 
 // BullMQ requires maxRetriesPerRequest: null for blocking operations
 const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', {
@@ -114,25 +116,155 @@ export async function initializeJobs() {
       { name: 'distribution-tick', data: {}, every: 30000 },
     ]);
     
-    // Error handlers
-    liquidationWorker.on('failed', (job, err) => {
+    // SECURITY: Enhanced error handlers with security logging
+    liquidationWorker.on('failed', async (job, err) => {
       console.error(`❌ Liquidation job failed:`, job?.name, err.message);
+      
+      await securityMonitor.log({
+        severity: 'HIGH',
+        category: 'Background Jobs',
+        eventType: SECURITY_EVENT_TYPES.JOB_FAILED,
+        message: `Liquidation worker job failed: ${job?.name}`,
+        details: {
+          jobName: job?.name,
+          jobId: job?.id,
+          error: err.message,
+          stack: err.stack?.slice(0, 500),
+          data: job?.data,
+          attemptsMade: job?.attemptsMade,
+          queue: 'liquidation',
+        },
+        source: 'liquidation-worker',
+      });
     });
     
-    priceMonitorWorker.on('failed', (job, err) => {
+    priceMonitorWorker.on('failed', async (job, err) => {
       console.error(`❌ Price monitor job failed:`, job?.name, err.message);
+      
+      await securityMonitor.log({
+        severity: 'MEDIUM',
+        category: 'Background Jobs',
+        eventType: SECURITY_EVENT_TYPES.JOB_FAILED,
+        message: `Price monitor worker job failed: ${job?.name}`,
+        details: {
+          jobName: job?.name,
+          jobId: job?.id,
+          error: err.message,
+          attemptsMade: job?.attemptsMade,
+          queue: 'price-monitor',
+        },
+        source: 'price-monitor-worker',
+      });
     });
     
-    syncWorker.on('failed', (job, err) => {
+    syncWorker.on('failed', async (job, err) => {
       console.error(`❌ Sync job failed:`, job?.name, err.message);
+      
+      await securityMonitor.log({
+        severity: 'MEDIUM',
+        category: 'Background Jobs',
+        eventType: SECURITY_EVENT_TYPES.JOB_FAILED,
+        message: `Sync worker job failed: ${job?.name}`,
+        details: {
+          jobName: job?.name,
+          jobId: job?.id,
+          error: err.message,
+          attemptsMade: job?.attemptsMade,
+          queue: 'sync',
+        },
+        source: 'sync-worker',
+      });
     });
     
-    notificationWorker.on('failed', (job, err) => {
+    notificationWorker.on('failed', async (job, err) => {
       console.error(`❌ Notification job failed:`, job?.name, err.message);
+      
+      await securityMonitor.log({
+        severity: 'LOW',
+        category: 'Background Jobs',
+        eventType: SECURITY_EVENT_TYPES.JOB_FAILED,
+        message: `Notification worker job failed: ${job?.name}`,
+        details: {
+          jobName: job?.name,
+          jobId: job?.id,
+          error: err.message,
+          attemptsMade: job?.attemptsMade,
+          queue: 'notification',
+        },
+        source: 'notification-worker',
+      });
     });
     
-    distributionCrankWorker.on('failed', (job, err) => {
+    distributionCrankWorker.on('failed', async (job, err) => {
       console.error(`❌ Distribution crank job failed:`, job?.name, err.message);
+      
+      await securityMonitor.log({
+        severity: 'HIGH',
+        category: 'Background Jobs',
+        eventType: SECURITY_EVENT_TYPES.JOB_FAILED,
+        message: `Distribution crank job failed: ${job?.name}`,
+        details: {
+          jobName: job?.name,
+          jobId: job?.id,
+          error: err.message,
+          stack: err.stack?.slice(0, 500),
+          attemptsMade: job?.attemptsMade,
+          queue: 'distribution-crank',
+        },
+        source: 'distribution-crank-worker',
+      });
+    });
+
+    // SECURITY: Add stalled job handlers for critical workers
+    liquidationWorker.on('stalled', async (jobId) => {
+      console.warn(`⚠️ Liquidation job stalled: ${jobId}`);
+      
+      await securityMonitor.log({
+        severity: 'HIGH',
+        category: 'Background Jobs',
+        eventType: SECURITY_EVENT_TYPES.JOB_STALLED,
+        message: `Critical liquidation job stalled: ${jobId}`,
+        details: { 
+          jobId,
+          queue: 'liquidation',
+          impact: 'liquidations-blocked',
+        },
+        source: 'liquidation-worker',
+      });
+    });
+
+    distributionCrankWorker.on('stalled', async (jobId) => {
+      console.warn(`⚠️ Distribution crank job stalled: ${jobId}`);
+      
+      await securityMonitor.log({
+        severity: 'HIGH',
+        category: 'Background Jobs',
+        eventType: SECURITY_EVENT_TYPES.JOB_STALLED,
+        message: `Critical distribution crank job stalled: ${jobId}`,
+        details: { 
+          jobId,
+          queue: 'distribution-crank',
+          impact: 'rewards-distribution-blocked',
+        },
+        source: 'distribution-crank-worker',
+      });
+    });
+
+    priceMonitorWorker.on('stalled', async (jobId) => {
+      console.warn(`⚠️ Price monitor job stalled: ${jobId}`);
+      
+      await securityMonitor.log({
+        severity: 'MEDIUM',
+        category: 'Background Jobs',
+        eventType: SECURITY_EVENT_TYPES.JOB_STALLED,
+        message: `Price monitor job stalled: ${jobId}`,
+        details: { 
+          jobId,
+          queue: 'price-monitor',
+          impact: 'price-updates-delayed',
+        },
+        source: 'price-monitor-worker',
+      });
     });
     
     // Log active counts

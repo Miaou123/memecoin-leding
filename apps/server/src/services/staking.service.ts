@@ -3,6 +3,8 @@ import { Program, AnchorProvider } from '@coral-xyz/anchor';
 import BN from 'bn.js';
 import { StakingStats, UserStake, DEFAULT_FEE_CONFIG, FeeDistributionConfig } from '@memecoin-lending/types';
 import { getStakingPoolPDA, getRewardVaultPDA, deriveUserStakePDA, PROGRAM_ID } from '@memecoin-lending/config';
+import { securityMonitor } from './security-monitor.service.js';
+import { SECURITY_EVENT_TYPES } from '@memecoin-lending/types';
 
 // Helper functions for reading account data
 function readU64(buffer: Buffer, offset: number): BN {
@@ -38,6 +40,18 @@ class StakingService {
       const [rewardVaultPDA] = getRewardVaultPDA();
       
       if (!stakingPoolPDA || !rewardVaultPDA) {
+        // SECURITY: Log missing staking PDAs configuration
+        await securityMonitor.log({
+          severity: 'CRITICAL',
+          category: 'Staking',
+          eventType: SECURITY_EVENT_TYPES.STAKING_CONFIG_ERROR,
+          message: 'Staking PDAs not found in deployment configuration',
+          details: {
+            stakingPoolPDA: !!stakingPoolPDA,
+            rewardVaultPDA: !!rewardVaultPDA,
+          },
+          source: 'staking-service',
+        });
         throw new Error('Staking PDAs not found in deployment file');
       }
       
@@ -204,6 +218,20 @@ class StakingService {
       
     } catch (error: any) {
       console.error('❌ Failed to fetch staking stats:', error.message);
+      
+      // SECURITY: Log staking stats fetch failures
+      await securityMonitor.log({
+        severity: 'HIGH',
+        category: 'Staking',
+        eventType: SECURITY_EVENT_TYPES.STAKING_FETCH_ERROR,
+        message: `Failed to fetch staking stats: ${error.message}`,
+        details: {
+          error: error.message,
+          stack: error.stack?.slice(0, 500),
+        },
+        source: 'staking-service',
+      });
+      
       // Return default values on error
       return {
         totalStaked: '0',
@@ -234,12 +262,37 @@ class StakingService {
         userPubkey = new PublicKey(address);
       } catch (e) {
         console.warn(`[SECURITY] Invalid public key format: ${address}`);
+        
+        // SECURITY: Log invalid address format attempts
+        await securityMonitor.log({
+          severity: 'LOW',
+          category: 'Staking',
+          eventType: SECURITY_EVENT_TYPES.STAKING_INVALID_ADDRESS,
+          message: 'Invalid public key format in getUserStake',
+          details: {
+            invalidAddress: address?.slice(0, 20) + '...',
+            error: e instanceof Error ? e.message : 'Unknown error',
+          },
+          source: 'staking-service',
+        });
+        
         return null;
       }
       
       // Derive PDAs
       const [stakingPoolPDA] = getStakingPoolPDA();
       if (!stakingPoolPDA) {
+        // SECURITY: Log missing staking pool PDA
+        await securityMonitor.log({
+          severity: 'CRITICAL',
+          category: 'Staking',
+          eventType: SECURITY_EVENT_TYPES.STAKING_CONFIG_ERROR,
+          message: 'Staking pool PDA not found in deployment configuration',
+          details: {
+            userAddress: address?.slice(0, 8) + '...',
+          },
+          source: 'staking-service',
+        });
         throw new Error('Staking pool PDA not found in deployment');
       }
       const [userStakePDA] = deriveUserStakePDA(stakingPoolPDA, userPubkey);
@@ -252,6 +305,23 @@ class StakingService {
       
       if (!userStakePDA.equals(expectedPDA)) {
         console.error(`[SECURITY] UserStake PDA mismatch! Config: ${userStakePDA.toString()}, Expected: ${expectedPDA.toString()}`);
+        
+        // SECURITY: Log PDA derivation mismatch - potential config tampering
+        await securityMonitor.log({
+          severity: 'HIGH',
+          category: 'Staking',
+          eventType: SECURITY_EVENT_TYPES.STAKING_PDA_MISMATCH,
+          message: 'UserStake PDA derivation mismatch detected',
+          details: {
+            userAddress: address.slice(0, 8) + '...',
+            configPDA: userStakePDA.toString().slice(0, 8) + '...',
+            expectedPDA: expectedPDA.toString().slice(0, 8) + '...',
+            stakingPoolPDA: stakingPoolPDA.toString().slice(0, 8) + '...',
+          },
+          source: 'staking-service',
+          userId: address,
+        });
+        
         return null;
       }
       
@@ -301,6 +371,22 @@ class StakingService {
       
     } catch (error: any) {
       console.error('❌ Failed to fetch user stake:', error.message);
+      
+      // SECURITY: Log user stake fetch failures
+      await securityMonitor.log({
+        severity: 'MEDIUM',
+        category: 'Staking',
+        eventType: SECURITY_EVENT_TYPES.STAKING_FETCH_ERROR,
+        message: `Failed to fetch user stake for ${address?.slice(0, 8)}...`,
+        details: {
+          userAddress: address?.slice(0, 8) + '...',
+          error: error.message,
+          stack: error.stack?.slice(0, 300),
+        },
+        source: 'staking-service',
+        userId: address,
+      });
+      
       return null;
     }
   }
@@ -319,7 +405,7 @@ class StakingService {
       }
       
       // User is eligible for current epoch if they staked before it started
-      const isEligibleCurrentEpoch = userStake.stakeStartEpoch < stats.currentEpoch;
+      const isEligibleCurrentEpoch = userStake.stakeStartEpoch != null && userStake.stakeStartEpoch < stats.currentEpoch;
       
       // Calculate pending rewards from last epoch if not yet distributed
       let pendingLamports = 0;
@@ -330,7 +416,8 @@ class StakingService {
         const lastEpochNumber = stats.currentEpoch - 1;
         
         // Check if user was eligible for last epoch
-        if (userStake.stakeStartEpoch <= lastEpochNumber && 
+        if (userStake.stakeStartEpoch != null && userStake.lastRewardedEpoch != null &&
+            userStake.stakeStartEpoch <= lastEpochNumber && 
             userStake.lastRewardedEpoch < lastEpochNumber) {
           
           const undistributedRewards = parseFloat(stats.lastEpochRewards) - parseFloat(stats.lastEpochDistributed || '0');
@@ -353,6 +440,21 @@ class StakingService {
       
     } catch (error: any) {
       console.error('❌ Failed to calculate pending rewards:', error.message);
+      
+      // SECURITY: Log pending rewards calculation failures
+      await securityMonitor.log({
+        severity: 'MEDIUM',
+        category: 'Staking',
+        eventType: SECURITY_EVENT_TYPES.STAKING_CALCULATION_ERROR,
+        message: `Failed to calculate pending rewards for ${address?.slice(0, 8)}...`,
+        details: {
+          userAddress: address?.slice(0, 8) + '...',
+          error: error.message,
+        },
+        source: 'staking-service',
+        userId: address,
+      });
+      
       return { pending: '0', pendingSol: 0, isEligibleCurrentEpoch: false };
     }
   }

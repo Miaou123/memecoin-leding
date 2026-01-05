@@ -1,8 +1,7 @@
 import { Connection, Keypair, PublicKey, Transaction, SystemProgram, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { Program, AnchorProvider, Wallet } from '@coral-xyz/anchor';
-import { OnlinePumpSdk } from '@pump-fun/pump-sdk';
-import fs from 'fs';
-import path from 'path';
+// @ts-ignore
+import PumpSDK from '@pump-fun/pump-sdk';
 import { getFeeReceiverPDA, getTreasuryPDA, getRewardVaultPDA, getProtocolStatePDA, getDeploymentProgramId } from '@memecoin-lending/config';
 
 const MIN_CLAIM_THRESHOLD = 0.01 * LAMPORTS_PER_SOL;
@@ -37,7 +36,7 @@ interface ServiceStatus {
 
 class FeeClaimerService {
   private connection: Connection;
-  private pumpSdk: OnlinePumpSdk;
+  private pumpSdk: any;
   private adminKeypair: Keypair;
   private program: Program;
   private intervalId: NodeJS.Timeout | null = null;
@@ -69,7 +68,7 @@ class FeeClaimerService {
     this.connection = connection;
     this.adminKeypair = adminKeypair;
     this.program = program;
-    this.pumpSdk = new OnlinePumpSdk(connection);
+    this.pumpSdk = new PumpSDK.OnlinePumpSdk(connection);
     
     this.minClaimThreshold = options?.minClaimThreshold || MIN_CLAIM_THRESHOLD;
     this.intervalMs = options?.intervalMs || 5 * 60 * 1000; // Default 5 minutes
@@ -206,7 +205,7 @@ class FeeClaimerService {
         const collectTx = new Transaction().add(...collectIx);
         const collectSig = await this.connection.sendTransaction(collectTx, [this.adminKeypair]);
         await this.connection.confirmTransaction(collectSig);
-        result.signatures.collect = collectSig;
+        if (result.signatures) result.signatures.collect = collectSig;
         console.log(`✅ Collected fees: ${collectSig}`);
 
         // Wait for balance update
@@ -229,7 +228,7 @@ class FeeClaimerService {
           );
           const transferSig = await this.connection.sendTransaction(transferTx, [this.adminKeypair]);
           await this.connection.confirmTransaction(transferSig);
-          result.signatures.transfer = transferSig;
+          if (result.signatures) result.signatures.transfer = transferSig;
           result.distributed = transferAmount / LAMPORTS_PER_SOL;
           console.log(`✅ Transferred ${result.distributed} SOL to FeeReceiver: ${transferSig}`);
         }
@@ -262,7 +261,7 @@ class FeeClaimerService {
           })
           .rpc();
 
-        result.signatures.distribute = distributeSig;
+        if (result.signatures) result.signatures.distribute = distributeSig;
         console.log(`✅ Distributed fees: ${distributeSig}`);
         
         // Calculate breakdown (40/40/20)

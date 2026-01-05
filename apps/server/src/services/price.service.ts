@@ -7,6 +7,8 @@ import Redis from 'ioredis';
 import { PumpFunSDK } from 'pumpdotfun-sdk';
 import { AnchorProvider } from '@coral-xyz/anchor';
 import { WebSocket } from 'ws';
+import { securityMonitor } from './security-monitor.service.js';
+import { SECURITY_EVENT_TYPES } from '@memecoin-lending/types';
 
 const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
 
@@ -126,6 +128,19 @@ class PriceService {
         this.wsConnected = true;
         this.wsReconnectAttempts = 0;
         
+        // SECURITY: Log successful WebSocket connection
+        securityMonitor.log({
+          severity: 'LOW',
+          category: 'Price Monitoring',
+          eventType: SECURITY_EVENT_TYPES.PRICE_WEBSOCKET_CONNECTED,
+          message: 'Jupiter WebSocket connection established',
+          details: {
+            wsUrl: 'wss://price.jup.ag/v4/price-stream',
+            reconnectAttempt: this.wsReconnectAttempts,
+          },
+          source: 'price-service',
+        });
+        
         // Subscribe to tracked tokens
         this.subscribeToTrackedTokens();
       });
@@ -142,40 +157,142 @@ class PriceService {
       this.jupiterWS.on('close', (code: number, reason: string) => {
         logger.warn(`🔌 Jupiter WebSocket disconnected: ${code} ${reason}`);
         this.wsConnected = false;
+        
+        // SECURITY: Log WebSocket disconnection
+        securityMonitor.log({
+          severity: 'MEDIUM',
+          category: 'Price Monitoring',
+          eventType: SECURITY_EVENT_TYPES.PRICE_WEBSOCKET_DISCONNECTED,
+          message: 'Jupiter WebSocket connection lost',
+          details: {
+            code,
+            reason,
+            uptime: Date.now() - this.serviceStartTime,
+            trackedTokens: this.trackedMints.size,
+          },
+          source: 'price-service',
+        });
+        
         this.scheduleReconnect();
       });
 
       this.jupiterWS.on('error', (error: Error) => {
         logger.error('🔌 Jupiter WebSocket error:', error);
         this.wsConnected = false;
+        
+        // SECURITY: Log WebSocket errors
+        securityMonitor.log({
+          severity: 'HIGH',
+          category: 'Price Monitoring',
+          eventType: SECURITY_EVENT_TYPES.PRICE_WEBSOCKET_ERROR,
+          message: `Jupiter WebSocket error: ${error.message}`,
+          details: {
+            error: error.message,
+            stack: error.stack?.slice(0, 500),
+            trackedTokens: this.trackedMints.size,
+            connectionAttempts: this.wsReconnectAttempts,
+          },
+          source: 'price-service',
+        });
       });
 
-    } catch (error) {
+    } catch (error: any) {
       logger.error('Failed to initialize Jupiter WebSocket:', error);
+      
+      // SECURITY: Log WebSocket initialization failure
+      securityMonitor.log({
+        severity: 'HIGH',
+        category: 'Price Monitoring',
+        eventType: SECURITY_EVENT_TYPES.PRICE_WEBSOCKET_INIT_FAILED,
+        message: `Failed to initialize Jupiter WebSocket: ${error.message}`,
+        details: {
+          error: error.message,
+          stack: error.stack?.slice(0, 500),
+        },
+        source: 'price-service',
+      });
     }
   }
 
   /**
    * SECURITY: Handle real-time price updates from Jupiter WebSocket
    */
-  private handlePriceUpdate(update: JupiterWSPriceUpdate): void {
-    const extendedData: ExtendedPriceData = {
-      mint: update.id,
-      usdPrice: parseFloat(update.price),
-      source: 'jupiter-ws',
-      timestamp: update.timestamp || Date.now(),
-    };
+  private async handlePriceUpdate(update: JupiterWSPriceUpdate): Promise<void> {
+    try {
+      const priceValue = parseFloat(update.price);
+      
+      // SECURITY: Validate price data
+      if (isNaN(priceValue) || priceValue <= 0 || priceValue > 1000000) {
+        await securityMonitor.log({
+          severity: 'MEDIUM',
+          category: 'Price Monitoring',
+          eventType: SECURITY_EVENT_TYPES.PRICE_INVALID_DATA,
+          message: 'Invalid price data received from WebSocket',
+          details: {
+            tokenMint: update.id,
+            price: update.price,
+            timestamp: update.timestamp,
+          },
+          source: 'price-service',
+        });
+        return;
+      }
+      
+      // Check for extreme price movements
+      const cached = this.cache.get(update.id);
+      if (cached) {
+        const oldPrice = cached.data.usdPrice;
+        const priceChange = Math.abs((priceValue - oldPrice) / oldPrice);
+        
+        if (priceChange > 0.5) { // 50% price movement
+          await securityMonitor.log({
+            severity: 'HIGH',
+            category: 'Price Monitoring',
+            eventType: SECURITY_EVENT_TYPES.PRICE_EXTREME_MOVEMENT,
+            message: `Extreme price movement detected: ${(priceChange * 100).toFixed(1)}%`,
+            details: {
+              tokenMint: update.id,
+              oldPrice,
+              newPrice: priceValue,
+              changePercent: priceChange * 100,
+              timeDelta: Date.now() - cached.timestamp,
+            },
+            source: 'price-service',
+          });
+        }
+      }
+      
+      const extendedData: ExtendedPriceData = {
+        mint: update.id,
+        usdPrice: priceValue,
+        source: 'jupiter-ws',
+        timestamp: update.timestamp || Date.now(),
+      };
 
-    // Update cache with real-time data
-    this.cache.set(update.id, { data: extendedData, timestamp: Date.now() });
-    
-    // Also cache in Redis
-    redis.setex(`price:${update.id}`, 5, JSON.stringify(extendedData));
-    
-    logger.debug(`📈 Real-time price update: ${update.id} = $${update.price}`);
-    
-    // CHECK FOR LIQUIDATIONS IMMEDIATELY
-    this.checkLiquidationThresholds(update.id, parseFloat(update.price));
+      // Update cache with real-time data
+      this.cache.set(update.id, { data: extendedData, timestamp: Date.now() });
+      
+      // Also cache in Redis
+      redis.setex(`price:${update.id}`, 5, JSON.stringify(extendedData));
+      
+      logger.debug(`📈 Real-time price update: ${update.id} = $${update.price}`);
+      
+      // CHECK FOR LIQUIDATIONS IMMEDIATELY
+      this.checkLiquidationThresholds(update.id, priceValue);
+    } catch (error: any) {
+      await securityMonitor.log({
+        severity: 'MEDIUM',
+        category: 'Price Monitoring',
+        eventType: SECURITY_EVENT_TYPES.PRICE_UPDATE_FAILED,
+        message: `Failed to handle price update: ${error.message}`,
+        details: {
+          tokenMint: update.id,
+          price: update.price,
+          error: error.message,
+        },
+        source: 'price-service',
+      });
+    }
   }
 
   /**
@@ -210,8 +327,22 @@ class PriceService {
           this.triggerUrgentLiquidation(loan.id, priceInSol, liquidationPrice);
         }
       }
-    } catch (error) {
+    } catch (error: any) {
       logger.error('Failed to check liquidation thresholds:', error);
+      
+      // SECURITY: Log liquidation check failures
+      await securityMonitor.log({
+        severity: 'HIGH',
+        category: 'Price Monitoring',
+        eventType: SECURITY_EVENT_TYPES.PRICE_LIQUIDATION_CHECK_FAILED,
+        message: `Failed to check liquidation thresholds: ${error.message}`,
+        details: {
+          tokenMint: mint,
+          usdPrice,
+          error: error.message,
+        },
+        source: 'price-service',
+      });
     }
   }
 
@@ -392,7 +523,40 @@ class PriceService {
     const extPrice = await this.getPrice(mint);
     
     if (!extPrice) {
+      // SECURITY: Log when price data is completely unavailable
+      await securityMonitor.log({
+        severity: 'HIGH',
+        category: 'Price Monitoring',
+        eventType: SECURITY_EVENT_TYPES.PRICE_STALE_DATA,
+        message: 'No price data available for token',
+        details: {
+          tokenMint: mint,
+          cacheSize: this.cache.size,
+          jupiterAvailable: this.jupiterAvailable,
+          pumpFunAvailable: this.pumpFunAvailable,
+          dexScreenerAvailable: this.dexScreenerAvailable,
+        },
+        source: 'price-service',
+      });
       throw new Error('Token not found');
+    }
+    
+    // SECURITY: Check for stale price data
+    const dataAge = Date.now() - extPrice.timestamp;
+    if (dataAge > 60000) { // 1 minute old
+      await securityMonitor.log({
+        severity: 'MEDIUM',
+        category: 'Price Monitoring',
+        eventType: SECURITY_EVENT_TYPES.PRICE_STALE_DATA,
+        message: `Returning stale price data (${Math.round(dataAge / 1000)}s old)`,
+        details: {
+          tokenMint: mint,
+          dataAge: Math.round(dataAge / 1000),
+          source: extPrice.source,
+          price: extPrice.usdPrice,
+        },
+        source: 'price-service',
+      });
     }
     
     // Convert to PriceData format

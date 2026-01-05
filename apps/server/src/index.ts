@@ -16,6 +16,7 @@ import pricesRouter from './routes/prices.js';
 import adminWhitelistRouter from './routes/admin/whitelist.js';
 import adminFeesRouter, { setFeeClaimerService } from './routes/admin/fees.js';
 import { stakingRoutes } from './routes/staking.js';
+import { securityRoutes } from './routes/admin/security.routes.js';
 
 // Import services
 import { initializeJobs } from './jobs/index.js';
@@ -73,6 +74,7 @@ app.route('/api/staking', stakingRoutes);
 // Admin routes
 app.route('/api/admin/whitelist', adminWhitelistRouter);
 app.route('/api/admin/fees', adminFeesRouter);
+app.route('/api/admin/security', securityRoutes);
 
 // Error handler
 app.onError(errorHandler);

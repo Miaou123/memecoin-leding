@@ -18,6 +18,8 @@ import { priceService } from './price.service.js';
 import { notificationService } from './notification.service.js';
 import { fastPriceMonitor } from './fast-price-monitor.js';
 import { websocketService } from '../websocket/index.js';
+import { securityMonitor } from './security-monitor.service.js';
+import { SECURITY_EVENT_TYPES } from '@memecoin-lending/types';
 import { PROGRAM_ID, getNetworkConfig, getCurrentNetwork } from '@memecoin-lending/config';
 
 // Helper functions for manual TokenConfig deserialization
@@ -152,6 +154,7 @@ class LoanService {
       maxLoanAmount: '100000000000', // 100 SOL in lamports
       activeLoansCount: '0',
       totalVolume: '0',
+      isProtocolToken: false, // Manual whitelist tokens are not protocol tokens
     };
 
     console.log('[LoanService] Using DB token config:', {
@@ -202,45 +205,101 @@ class LoanService {
   }
   
   async createLoan(params: CreateLoanRequest & { borrower: string }): Promise<{ transaction: string }> {
-    const client = await this.getClient();
-    
-    // Import tokenVerificationService dynamically to avoid circular dependency
-    const { tokenVerificationService } = await import('./token-verification.service.js');
-    
-    // First verify and potentially auto-whitelist the token
-    console.log('[LoanService] Verifying token for loan creation:', params.tokenMint.substring(0, 8) + '...');
-    const verification = await tokenVerificationService.verifyToken(params.tokenMint);
-    
-    if (!verification.isValid) {
-      throw new Error(verification.reason || 'Token not eligible for loans');
+    try {
+      const client = await this.getClient();
+      
+      // Import tokenVerificationService dynamically to avoid circular dependency
+      const { tokenVerificationService } = await import('./token-verification.service.js');
+      
+      // First verify and potentially auto-whitelist the token
+      console.log('[LoanService] Verifying token for loan creation:', params.tokenMint.substring(0, 8) + '...');
+      const verification = await tokenVerificationService.verifyToken(params.tokenMint);
+      
+      if (!verification.isValid) {
+        await securityMonitor.log({
+          severity: 'MEDIUM',
+          category: 'Loans',
+          eventType: SECURITY_EVENT_TYPES.LOAN_INVALID_COLLATERAL,
+          message: `Loan creation attempted with invalid token`,
+          details: {
+            tokenMint: params.tokenMint,
+            reason: verification.reason,
+            borrower: params.borrower,
+            collateralAmount: params.collateralAmount,
+          },
+          source: 'loan-service',
+          userId: params.borrower,
+        });
+        throw new Error(verification.reason || 'Token not eligible for loans');
+      }
+      
+      // Check treasury balance before proceeding  
+      const loanEstimate = await this.estimateLoan(params);
+      // TODO: Add treasury balance check when getTreasuryBalance method is available
+      // const treasuryBalance = await this.getTreasuryBalance();
+      // const requiredSol = parseFloat(loanEstimate.loanTerms.solAmount);
+      
+      // if (treasuryBalance < requiredSol) {
+      //   await securityMonitor.log({
+      //     severity: 'HIGH',
+      //     category: 'Loans',
+      //     eventType: SECURITY_EVENT_TYPES.LOAN_TREASURY_INSUFFICIENT,
+      //     message: 'Treasury has insufficient funds for loan',
+      //     details: {
+      //       requested: requiredSol,
+      //       available: treasuryBalance,
+      //       borrower: params.borrower,
+      //       tokenMint: params.tokenMint,
+      //     },
+      //     source: 'loan-service',
+      //     userId: params.borrower,
+      //   });
+      //   throw new Error('Insufficient treasury balance');
+      // }
+      
+      // Build unsigned transaction
+      const tx = await buildCreateLoanTransaction(client.program, {
+        tokenMint: new PublicKey(params.tokenMint),
+        collateralAmount: new BN(params.collateralAmount),
+        durationSeconds: new BN(params.durationSeconds),
+        borrower: new PublicKey(params.borrower),
+      });
+      
+      // Get recent blockhash
+      const { blockhash } = await client.connection.getLatestBlockhash();
+      tx.recentBlockhash = blockhash;
+      tx.feePayer = new PublicKey(params.borrower);
+      
+      // SECURITY: Track token for real-time price monitoring via WebSocket
+      priceService.trackToken(params.tokenMint);
+      
+      // Serialize and return (unsigned)
+      const serializedTx = tx.serialize({ 
+        requireAllSignatures: false,
+        verifySignatures: false 
+      }).toString('base64');
+      
+      return { transaction: serializedTx };
+      
+    } catch (error: any) {
+      await securityMonitor.log({
+        severity: 'MEDIUM',
+        category: 'Loans',
+        eventType: SECURITY_EVENT_TYPES.LOAN_CREATION_FAILED,
+        message: `Loan creation failed: ${error.message}`,
+        details: {
+          borrower: params.borrower,
+          tokenMint: params.tokenMint,
+          collateralAmount: params.collateralAmount,
+          durationSeconds: params.durationSeconds,
+          error: error.message,
+          stack: error.stack?.slice(0, 500),
+        },
+        source: 'loan-service',
+        userId: params.borrower,
+      });
+      throw error;
     }
-    
-    // Estimate loan first to validate parameters (will recheck token but that's ok for safety)
-    await this.estimateLoan(params);
-    
-    // Build unsigned transaction
-    const tx = await buildCreateLoanTransaction(client.program, {
-      tokenMint: new PublicKey(params.tokenMint),
-      collateralAmount: new BN(params.collateralAmount),
-      durationSeconds: new BN(params.durationSeconds),
-      borrower: new PublicKey(params.borrower),
-    });
-    
-    // Get recent blockhash
-    const { blockhash } = await client.connection.getLatestBlockhash();
-    tx.recentBlockhash = blockhash;
-    tx.feePayer = new PublicKey(params.borrower);
-    
-    // SECURITY: Track token for real-time price monitoring via WebSocket
-    priceService.trackToken(params.tokenMint);
-    
-    // Serialize and return (unsigned)
-    const serializedTx = tx.serialize({ 
-      requireAllSignatures: false,
-      verifySignatures: false 
-    }).toString('base64');
-    
-    return { transaction: serializedTx };
   }
   
   async buildRepayTransaction(loanPubkey: string, repayer: string): Promise<{ transaction: string }> {
@@ -285,27 +344,28 @@ class LoanService {
   }
 
   async repayLoan(loanPubkey: string, repayer: string): Promise<Loan> {
-    const client = await this.getClient();
-    
-    // Get loan from database
-    const dbLoan = await prisma.loan.findUnique({
-      where: { id: loanPubkey },
-    });
-    
-    if (!dbLoan) {
-      throw new Error('Loan not found');
-    }
-    
-    if (dbLoan.borrower !== repayer) {
-      throw new Error('Only borrower can repay loan');
-    }
-    
-    if (dbLoan.status !== LoanStatus.Active) {
-      throw new Error('Loan is not active');
-    }
-    
-    // Repay loan on-chain
-    const txSignature = await client.repayLoan(new PublicKey(loanPubkey));
+    try {
+      const client = await this.getClient();
+      
+      // Get loan from database
+      const dbLoan = await prisma.loan.findUnique({
+        where: { id: loanPubkey },
+      });
+      
+      if (!dbLoan) {
+        throw new Error('Loan not found');
+      }
+      
+      if (dbLoan.borrower !== repayer) {
+        throw new Error('Only borrower can repay loan');
+      }
+      
+      if (dbLoan.status !== LoanStatus.Active) {
+        throw new Error('Loan is not active');
+      }
+      
+      // Repay loan on-chain
+      const txSignature = await client.repayLoan(new PublicKey(loanPubkey));
     
     // Update database
     const updatedLoan = await prisma.loan.update({
@@ -342,6 +402,23 @@ class LoanService {
     });
     
     return this.formatLoan(updatedLoan);
+    
+    } catch (error: any) {
+      await securityMonitor.log({
+        severity: 'MEDIUM',
+        category: 'Loans',
+        eventType: SECURITY_EVENT_TYPES.LOAN_REPAY_FAILED,
+        message: `Loan repayment failed: ${error.message}`,
+        details: {
+          loanPubkey,
+          repayer,
+          error: error.message,
+        },
+        source: 'loan-service',
+        userId: repayer,
+      });
+      throw error;
+    }
   }
   
   async confirmRepayment(loanPubkey: string, txSignature: string): Promise<Loan> {

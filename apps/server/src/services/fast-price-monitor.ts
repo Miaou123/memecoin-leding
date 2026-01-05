@@ -8,6 +8,8 @@
  */
 
 import { EventEmitter } from 'events';
+import { securityMonitor } from './security-monitor.service.js';
+import { SECURITY_EVENT_TYPES } from '@memecoin-lending/types';
 
 const JUPITER_PRICE_API = 'https://api.jup.ag/price/v3';
 const POLL_INTERVAL_MS = 5000; // 5 seconds (development mode)
@@ -137,6 +139,21 @@ class FastPriceMonitor extends EventEmitter {
       }
     } catch (error: any) {
       console.error('❌ Failed to fetch SOL price:', error.message);
+      
+      // SECURITY: Log SOL price fetch failures
+      await securityMonitor.log({
+        severity: 'HIGH',
+        category: 'Price Monitoring',
+        eventType: SECURITY_EVENT_TYPES.PRICE_API_ERROR,
+        message: `Failed to fetch SOL price for fast monitor: ${error.message}`,
+        details: {
+          api: 'jupiter',
+          endpoint: 'price/v3',
+          mint: 'SOL',
+          error: error.message,
+        },
+        source: 'fast-price-monitor',
+      });
     }
   }
   
@@ -172,8 +189,38 @@ class FastPriceMonitor extends EventEmitter {
       this.consecutiveErrors++;
       console.error(`❌ Price poll failed (${this.consecutiveErrors}/${this.maxConsecutiveErrors}):`, error.message);
       
+      // SECURITY: Log consecutive API errors
+      await securityMonitor.log({
+        severity: this.consecutiveErrors >= 5 ? 'CRITICAL' : 'HIGH',
+        category: 'Price Monitoring',
+        eventType: SECURITY_EVENT_TYPES.PRICE_API_ERROR,
+        message: `Fast price monitor API failure (${this.consecutiveErrors} consecutive)`,
+        details: {
+          consecutiveErrors: this.consecutiveErrors,
+          maxErrors: this.maxConsecutiveErrors,
+          monitoredTokens: this.monitors.size,
+          error: error.message,
+        },
+        source: 'fast-price-monitor',
+      });
+      
       if (this.consecutiveErrors >= this.maxConsecutiveErrors) {
         console.error('🚨 Too many consecutive errors - stopping monitor');
+        
+        // SECURITY: Alert when monitor stops due to errors
+        await securityMonitor.log({
+          severity: 'CRITICAL',
+          category: 'Price Monitoring',
+          eventType: SECURITY_EVENT_TYPES.PRICE_MONITOR_STOPPED,
+          message: 'Fast price monitor stopped due to consecutive API failures',
+          details: {
+            consecutiveErrors: this.consecutiveErrors,
+            monitoredTokens: this.monitors.size,
+            totalThresholds: Array.from(this.monitors.values()).reduce((sum, m) => sum + m.thresholds.length, 0),
+          },
+          source: 'fast-price-monitor',
+        });
+        
         this.stop();
         this.emit('error', new Error('Too many consecutive poll failures'));
       }
@@ -193,6 +240,21 @@ class FastPriceMonitor extends EventEmitter {
     if (!response.ok) {
       if (response.status === 429) {
         console.warn('⚠️ Rate limited by Jupiter API');
+        
+        // SECURITY: Log rate limiting events
+        await securityMonitor.log({
+          severity: 'MEDIUM',
+          category: 'Price Monitoring',
+          eventType: SECURITY_EVENT_TYPES.PRICE_API_RATE_LIMITED,
+          message: 'Fast price monitor hit Jupiter API rate limit',
+          details: {
+            api: 'jupiter',
+            batchSize: mints.length,
+            hasApiKey: !!this.apiKey,
+          },
+          source: 'fast-price-monitor',
+        });
+        
         await new Promise(r => setTimeout(r, 1000)); // Back off 1 second
       }
       throw new Error(`Jupiter API error: ${response.status}`);
@@ -291,6 +353,26 @@ class FastPriceMonitor extends EventEmitter {
     console.log(`🚨 Drop from entry: ${priceDropPercent.toFixed(2)}%`);
     console.log(`🚨 ════════════════════════════════════════════`);
     
+    // SECURITY: Log liquidation triggers
+    await securityMonitor.log({
+      severity: 'CRITICAL',
+      category: 'Liquidation',
+      eventType: SECURITY_EVENT_TYPES.LIQUIDATION_TRIGGERED,
+      message: `Price-based liquidation triggered for loan ${threshold.loanId.slice(0, 8)}...`,
+      details: {
+        loanId: threshold.loanId,
+        tokenMint: mint,
+        currentPrice,
+        liquidationPrice: threshold.liquidationPrice,
+        entryPrice: threshold.entryPrice,
+        priceDropPercent,
+        borrower: threshold.borrower,
+        solBorrowed: threshold.solBorrowed,
+      },
+      source: 'fast-price-monitor',
+      userId: threshold.borrower,
+    });
+    
     this.emit('liquidation-alert', alert);
     
     // Attempt immediate liquidation
@@ -313,6 +395,26 @@ class FastPriceMonitor extends EventEmitter {
       
     } catch (error: any) {
       console.error(`❌ Liquidation failed for ${threshold.loanId.slice(0, 8)}...:`, error.message);
+      
+      // SECURITY: Log liquidation failures
+      await securityMonitor.log({
+        severity: 'HIGH',
+        category: 'Liquidation',
+        eventType: SECURITY_EVENT_TYPES.LIQUIDATION_FAILED,
+        message: `Fast monitor liquidation failed: ${error.message}`,
+        details: {
+          loanId: threshold.loanId,
+          tokenMint: mint,
+          currentPrice,
+          liquidationPrice: threshold.liquidationPrice,
+          borrower: threshold.borrower,
+          error: error.message,
+          stack: error.stack?.slice(0, 500),
+        },
+        source: 'fast-price-monitor',
+        userId: threshold.borrower,
+      });
+      
       this.emit('liquidation-failed', { alert, error: error.message });
     }
   }

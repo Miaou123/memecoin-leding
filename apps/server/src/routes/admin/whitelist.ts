@@ -4,16 +4,41 @@ import { validator } from 'hono/validator';
 import { manualWhitelistService } from '../../services/manual-whitelist.service';
 import { logger } from '../../utils/logger';
 import { TokenTier } from '@memecoin-lending/types';
+import { securityMonitor } from '../../services/security-monitor.service.js';
+import { SECURITY_EVENT_TYPES } from '@memecoin-lending/types';
 
 const app = new Hono();
 
 // Admin authentication middleware (implement based on your auth system)
 const requireAdmin = async (c: any, next: any) => {
+  const ip = c.req.header('CF-Connecting-IP') || 
+             c.req.header('X-Forwarded-For')?.split(',')[0]?.trim() || 
+             c.req.header('X-Real-IP') || 
+             'unknown';
+  
   // Get admin address from headers or token
   const adminAddress = c.req.header('x-admin-address');
   const signature = c.req.header('x-signature');
   
   if (!adminAddress || !signature) {
+    // SECURITY: Log failed admin authentication attempt
+    await securityMonitor.log({
+      severity: 'MEDIUM',
+      category: 'Admin',
+      eventType: SECURITY_EVENT_TYPES.ADMIN_ACCESS_DENIED,
+      message: 'Admin access denied: missing credentials',
+      details: {
+        path: c.req.path,
+        method: c.req.method,
+        ip,
+        userAgent: c.req.header('User-Agent')?.slice(0, 100),
+        missingAdminAddress: !adminAddress,
+        missingSignature: !signature,
+      },
+      source: 'admin-whitelist-auth',
+      ip,
+    });
+    
     return c.json({ 
       success: false, 
       error: 'Admin authentication required' 
@@ -23,11 +48,46 @@ const requireAdmin = async (c: any, next: any) => {
   // TODO: Implement signature verification for admin auth
   // For now, just check if it's a valid address format
   if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(adminAddress)) {
+    // SECURITY: Log invalid admin address attempt
+    await securityMonitor.log({
+      severity: 'MEDIUM',
+      category: 'Admin',
+      eventType: SECURITY_EVENT_TYPES.ADMIN_ACCESS_DENIED,
+      message: 'Admin access denied: invalid address format',
+      details: {
+        adminAddress: adminAddress?.slice(0, 8) + '...',
+        path: c.req.path,
+        method: c.req.method,
+        ip,
+        userAgent: c.req.header('User-Agent')?.slice(0, 100),
+      },
+      source: 'admin-whitelist-auth',
+      ip,
+      userId: adminAddress,
+    });
+    
     return c.json({ 
       success: false, 
       error: 'Invalid admin address' 
     }, 401);
   }
+  
+  // SECURITY: Log successful admin access
+  await securityMonitor.log({
+    severity: 'LOW',
+    category: 'Admin',
+    eventType: SECURITY_EVENT_TYPES.ADMIN_ACCESS,
+    message: `Admin accessed whitelist API: ${c.req.method} ${c.req.path}`,
+    details: {
+      adminAddress: adminAddress.slice(0, 8) + '...',
+      path: c.req.path,
+      method: c.req.method,
+      ip,
+    },
+    source: 'admin-whitelist-auth',
+    ip,
+    userId: adminAddress,
+  });
   
   c.set('adminAddress', adminAddress);
   await next();
@@ -100,6 +160,28 @@ app.post(
       const data = c.req.valid('json');
 
       logger.info(`Admin ${adminAddress} adding token ${data.mint} to whitelist`);
+
+      // SECURITY: Log whitelist addition
+      await securityMonitor.log({
+        severity: 'MEDIUM',
+        category: 'Admin',
+        eventType: SECURITY_EVENT_TYPES.ADMIN_WHITELIST_ADD,
+        message: `Admin added token to whitelist: ${data.mint.substring(0, 8)}...`,
+        details: {
+          mint: data.mint,
+          symbol: data.symbol,
+          tier: data.tier,
+          ltvBps: data.ltvBps,
+          adminAddress: adminAddress.slice(0, 8) + '...',
+          reason: data.reason,
+        },
+        source: 'admin-whitelist',
+        ip: c.req.header('CF-Connecting-IP') || 
+            c.req.header('X-Forwarded-For')?.split(',')[0]?.trim() || 
+            c.req.header('X-Real-IP') || 
+            'unknown',
+        userId: adminAddress,
+      });
 
       const entry = await manualWhitelistService.addToWhitelist(
         {
@@ -263,6 +345,25 @@ app.put(
 
       logger.info(`Admin ${adminAddress} updating whitelist entry for ${mint}`);
 
+      // SECURITY: Log whitelist update
+      await securityMonitor.log({
+        severity: 'MEDIUM',
+        category: 'Admin',
+        eventType: SECURITY_EVENT_TYPES.ADMIN_WHITELIST_UPDATE,
+        message: `Admin updated whitelist entry: ${mint.substring(0, 8)}...`,
+        details: {
+          mint,
+          changes: data,
+          adminAddress: adminAddress.slice(0, 8) + '...',
+        },
+        source: 'admin-whitelist',
+        ip: c.req.header('CF-Connecting-IP') || 
+            c.req.header('X-Forwarded-For')?.split(',')[0]?.trim() || 
+            c.req.header('X-Real-IP') || 
+            'unknown',
+        userId: adminAddress,
+      });
+
       const entry = await manualWhitelistService.updateWhitelistEntry(
         mint,
         {
@@ -303,6 +404,25 @@ app.post('/:mint/enable', requireAdmin, async (c) => {
 
     logger.info(`Admin ${adminAddress} enabling whitelist entry for ${mint}`);
 
+    // SECURITY: Log whitelist enable
+    await securityMonitor.log({
+      severity: 'MEDIUM',
+      category: 'Admin',
+      eventType: SECURITY_EVENT_TYPES.ADMIN_WHITELIST_ENABLE,
+      message: `Admin enabled whitelist entry: ${mint.substring(0, 8)}...`,
+      details: {
+        mint,
+        adminAddress: adminAddress.slice(0, 8) + '...',
+        action: 'enable',
+      },
+      source: 'admin-whitelist',
+      ip: c.req.header('CF-Connecting-IP') || 
+          c.req.header('X-Forwarded-For')?.split(',')[0]?.trim() || 
+          c.req.header('X-Real-IP') || 
+          'unknown',
+      userId: adminAddress,
+    });
+
     await manualWhitelistService.enableEntry(mint, adminAddress);
 
     return c.json({
@@ -337,6 +457,26 @@ app.post('/:mint/disable', requireAdmin, async (c) => {
 
     logger.info(`Admin ${adminAddress} disabling whitelist entry for ${mint}`, { reason });
 
+    // SECURITY: Log whitelist disable
+    await securityMonitor.log({
+      severity: 'HIGH',
+      category: 'Admin',
+      eventType: SECURITY_EVENT_TYPES.ADMIN_WHITELIST_DISABLE,
+      message: `Admin disabled whitelist entry: ${mint.substring(0, 8)}...`,
+      details: {
+        mint,
+        adminAddress: adminAddress.slice(0, 8) + '...',
+        reason,
+        action: 'disable',
+      },
+      source: 'admin-whitelist',
+      ip: c.req.header('CF-Connecting-IP') || 
+          c.req.header('X-Forwarded-For')?.split(',')[0]?.trim() || 
+          c.req.header('X-Real-IP') || 
+          'unknown',
+      userId: adminAddress,
+    });
+
     await manualWhitelistService.disableEntry(mint, adminAddress, reason);
 
     return c.json({
@@ -370,6 +510,27 @@ app.delete('/:mint', requireAdmin, async (c) => {
     }
 
     logger.info(`Admin ${adminAddress} removing whitelist entry for ${mint}`, { reason });
+
+    // SECURITY: Log whitelist removal (CRITICAL since this is permanent)
+    await securityMonitor.log({
+      severity: 'CRITICAL',
+      category: 'Admin',
+      eventType: SECURITY_EVENT_TYPES.ADMIN_WHITELIST_REMOVE,
+      message: `Admin removed whitelist entry: ${mint.substring(0, 8)}...`,
+      details: {
+        mint,
+        adminAddress: adminAddress.slice(0, 8) + '...',
+        reason,
+        action: 'remove',
+        warning: 'PERMANENT_DELETION',
+      },
+      source: 'admin-whitelist',
+      ip: c.req.header('CF-Connecting-IP') || 
+          c.req.header('X-Forwarded-For')?.split(',')[0]?.trim() || 
+          c.req.header('X-Real-IP') || 
+          'unknown',
+      userId: adminAddress,
+    });
 
     await manualWhitelistService.removeFromWhitelist(mint, adminAddress, reason);
 

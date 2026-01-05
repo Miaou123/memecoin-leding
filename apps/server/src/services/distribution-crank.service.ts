@@ -1,6 +1,8 @@
 import { Connection, PublicKey, Keypair, LAMPORTS_PER_SOL, AccountMeta, SystemProgram } from '@solana/web3.js';
 import { Program, AnchorProvider, Wallet, BN, Idl } from '@coral-xyz/anchor';
 import { PROGRAM_ID, getNetworkConfig } from '@memecoin-lending/config';
+import { securityMonitor } from './security-monitor.service.js';
+import { SECURITY_EVENT_TYPES } from '@memecoin-lending/types';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -348,6 +350,19 @@ class DistributionCrankService {
     if (timeSinceLastDistribution < MIN_INTERVAL_BETWEEN_DISTRIBUTIONS_MS) {
       console.log(`⏳ Rate limit: Must wait ${MIN_INTERVAL_BETWEEN_DISTRIBUTIONS_MS - timeSinceLastDistribution}ms before next distribution`);
       result.errors.push('Rate limit: Too soon after last distribution');
+      await securityMonitor.log({
+        severity: 'MEDIUM',
+        category: 'Staking',
+        eventType: SECURITY_EVENT_TYPES.DISTRIBUTION_RATE_LIMITED,
+        message: 'Distribution rate limit exceeded - too soon after last distribution',
+        details: {
+          timeSinceLastDistribution,
+          minimumInterval: MIN_INTERVAL_BETWEEN_DISTRIBUTIONS_MS,
+          waitTime: MIN_INTERVAL_BETWEEN_DISTRIBUTIONS_MS - timeSinceLastDistribution,
+          lastDistribution: new Date(this.lastDistributionTime).toISOString(),
+        },
+        source: 'distribution-crank',
+      });
       return;
     }
     
@@ -358,6 +373,17 @@ class DistributionCrankService {
     if (this.distributionsThisHour.length >= MAX_DISTRIBUTIONS_PER_HOUR) {
       console.log(`⚠️ Rate limit: Reached maximum distributions per hour (${MAX_DISTRIBUTIONS_PER_HOUR})`);
       result.errors.push('Rate limit: Maximum distributions per hour exceeded');
+      await securityMonitor.log({
+        severity: 'MEDIUM',
+        category: 'Staking',
+        eventType: SECURITY_EVENT_TYPES.DISTRIBUTION_RATE_LIMITED,
+        message: 'Hourly distribution limit exceeded',
+        details: {
+          currentHourDistributions: this.distributionsThisHour.length,
+          limit: MAX_DISTRIBUTIONS_PER_HOUR,
+        },
+        source: 'distribution-crank',
+      });
       return;
     }
     
@@ -389,6 +415,21 @@ class DistributionCrankService {
         } else {
           result.errors.push(`Batch ${i + 1} failed: ${batchResult.error}`);
           console.error(`❌ Batch ${i + 1} failed:`, batchResult.error);
+          
+          // Log batch failure as security event
+          await securityMonitor.log({
+            severity: 'MEDIUM',
+            category: 'Staking',
+            eventType: SECURITY_EVENT_TYPES.DISTRIBUTION_BATCH_FAILED,
+            message: `Distribution batch ${i + 1} failed after retries`,
+            details: {
+              batchIndex: i + 1,
+              batchSize: batches[i].length,
+              error: batchResult.error,
+              epoch: forEpoch,
+            },
+            source: 'distribution-crank',
+          });
         }
         
         // Small delay between batches to avoid rate limits
@@ -447,7 +488,18 @@ class DistributionCrankService {
         // SECURITY: Validate discriminator
         const discriminator = data.slice(0, 8);
         if (!discriminator.equals(USER_STAKE_DISCRIMINATOR)) {
-          console.warn(`⚠️ SECURITY: Invalid discriminator for account ${pubkey.toString()}`);
+          await securityMonitor.log({
+            severity: 'HIGH',
+            category: 'Staking',
+            eventType: SECURITY_EVENT_TYPES.STAKING_DISCRIMINATOR_INVALID,
+            message: 'Invalid UserStake discriminator detected',
+            details: {
+              account: pubkey.toString(),
+              expectedDiscriminator: USER_STAKE_DISCRIMINATOR.toString('hex'),
+              receivedDiscriminator: discriminator.toString('hex'),
+            },
+            source: 'distribution-crank',
+          });
           continue;
         }
         
@@ -465,7 +517,18 @@ class DistributionCrankService {
         
         // SECURITY: Validate pool matches
         if (!pool.equals(this.stakingPoolPDA)) {
-          console.warn(`⚠️ SECURITY: Pool mismatch for account ${pubkey.toString()}. Expected ${this.stakingPoolPDA.toString()}, got ${pool.toString()}`);
+          await securityMonitor.log({
+            severity: 'MEDIUM',
+            category: 'Staking',
+            eventType: SECURITY_EVENT_TYPES.STAKING_POOL_MISMATCH,
+            message: 'UserStake pool field mismatch',
+            details: {
+              account: pubkey.toString(),
+              expectedPool: this.stakingPoolPDA?.toString(),
+              actualPool: pool.toString(),
+            },
+            source: 'distribution-crank',
+          });
           continue;
         }
         
@@ -476,7 +539,19 @@ class DistributionCrankService {
         );
         
         if (!pubkey.equals(expectedPDA)) {
-          console.warn(`⚠️ SECURITY: UserStake PDA mismatch! Expected ${expectedPDA.toString()}, got ${pubkey.toString()}`);
+          await securityMonitor.log({
+            severity: 'HIGH',
+            category: 'Staking',
+            eventType: SECURITY_EVENT_TYPES.STAKING_PDA_MISMATCH,
+            message: 'Invalid UserStake PDA detected - possible manipulation attempt',
+            details: {
+              expectedPDA: expectedPDA.toString(),
+              receivedPDA: pubkey.toString(),
+              owner: owner.toString(),
+              epoch: forEpoch,
+            },
+            source: 'distribution-crank',
+          });
           continue;
         }
         

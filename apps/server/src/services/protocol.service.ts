@@ -310,7 +310,6 @@ class ProtocolService {
       mint: new PublicKey(params.mint),
       enabled: params.enabled,
       ltvBps: params.ltvBps,
-      interestRateBps: params.interestRateBps,
     });
     
     // Update database if enabled status changed
