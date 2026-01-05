@@ -5,6 +5,7 @@ import { priceMonitorJob } from './price-monitor.job.js';
 import { syncJob } from './sync.job.js';
 import { notificationJob } from './notification.job.js';
 import { distributionCrankJob } from './distribution-crank.job.js';
+import { dailySummaryJob } from './daily-summary.job.js';
 import { securityMonitor } from '../services/security-monitor.service.js';
 import { SECURITY_EVENT_TYPES } from '@memecoin-lending/types';
 
@@ -109,6 +110,7 @@ export async function initializeJobs() {
     // Notifications
     await setupRepeatableJobs(notificationQueue, [
       { name: 'check-due-notifications', data: {}, every: 60000 },
+      { name: 'daily-summary', data: {}, every: 86400000 }, // 24 hours
     ]);
     
     // Distribution crank (30s)

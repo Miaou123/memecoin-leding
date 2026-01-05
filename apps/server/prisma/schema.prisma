@@ -17,11 +17,15 @@ model Token {
   enabled              Boolean  @default(true)
   logoUri              String?
   coingeckoId          String?
+  blacklisted          Boolean  @default(false)
+  blacklistReason      String?
+  poolLiquidity        String?
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
   
   loans                Loan[]
   priceHistory         PriceHistory[]
+  liquidationResults   LiquidationResult[]
   
   @@index([symbol])
 }
@@ -189,4 +193,27 @@ model SecurityEvent {
   @@index([category])
   @@index([eventType])
   @@index([resolved])
+}
+
+model LiquidationResult {
+  id                   String   @id @default(uuid())
+  tokenMint            String
+  token                Token    @relation(fields: [tokenMint], references: [id])
+  tokenSymbol          String
+  loanId               String
+  borrower             String
+  liquidatedAt         DateTime @default(now())
+  collateralAmount     String   // Amount of token collateral liquidated
+  expectedSolRecovery  String   // Expected SOL from liquidation based on oracle price
+  actualSolRecovery    String   // Actual SOL recovered from liquidation
+  lossLamports         String   // Loss in lamports (expected - actual)
+  lossBps              Int      // Loss in basis points
+  txSignature          String?  // Liquidation transaction signature
+  autoBlacklisted      Boolean  @default(false)
+  notes                String?
+  
+  @@index([tokenMint, liquidatedAt])
+  @@index([liquidatedAt])
+  @@index([lossBps])
+  @@index([autoBlacklisted])
 }

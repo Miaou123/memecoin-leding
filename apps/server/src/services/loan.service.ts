@@ -20,8 +20,11 @@ import { fastPriceMonitor } from './fast-price-monitor.js';
 import { websocketService } from '../websocket/index.js';
 import { securityMonitor } from './security-monitor.service.js';
 import { SECURITY_EVENT_TYPES } from '@memecoin-lending/types';
+import { recordLoanExposure, recordRepayment } from './exposure-monitor.service.js';
+import { recordLiquidationResult } from './liquidation-tracker.service.js';
 import { PROGRAM_ID, getNetworkConfig, getCurrentNetwork } from '@memecoin-lending/config';
 import { getAdminKeypair } from '../config/keys.js';
+import { executeSwap } from './jupiter-swap.service.js';
 
 // Helper functions for manual TokenConfig deserialization
 function readPubkey(buffer: Buffer, offset: number): PublicKey {
@@ -382,6 +385,17 @@ class LoanService {
     } catch (e) {
       // Ignore
     }
+
+    // Reduce exposure tracking
+    try {
+      recordRepayment(
+        dbLoan.tokenMint,
+        BigInt(dbLoan.collateralAmount),
+        BigInt(dbLoan.solBorrowed)
+      );
+    } catch (error: any) {
+      console.error('[LoanService] Failed to record repayment:', error.message);
+    }
     
     // Create notification
     await notificationService.createNotification({
@@ -455,6 +469,17 @@ class LoanService {
       fastPriceMonitor.removeLiquidationThreshold(existingLoan.tokenMint, loanPubkey);
     } catch (e) {
       // Ignore
+    }
+
+    // Reduce exposure tracking
+    try {
+      recordRepayment(
+        existingLoan.tokenMint,
+        BigInt(existingLoan.collateralAmount),
+        BigInt(existingLoan.solBorrowed)
+      );
+    } catch (error: any) {
+      console.error('[LoanService] Failed to record repayment:', error.message);
     }
     
     // Create notification for user
@@ -636,6 +661,97 @@ class LoanService {
     
     // Remove from monitoring
     fastPriceMonitor.removeLiquidationThreshold(dbLoan.tokenMint, loanPubkey);
+
+    // Track liquidation result - execute Jupiter swap to convert collateral to SOL
+    try {
+      const expectedRecovery = BigInt(dbLoan.solBorrowed);
+      let actualRecovery = expectedRecovery; // Default fallback
+      
+      // Execute Jupiter swap to convert seized collateral to SOL
+      console.log(`[LoanService] Executing Jupiter swap for liquidated collateral...`);
+      
+      await securityMonitor.log({
+        severity: 'MEDIUM',
+        category: 'Liquidation',
+        eventType: SECURITY_EVENT_TYPES.LIQUIDATION_SWAP_STARTED,
+        message: `Starting collateral swap for liquidated loan ${loanPubkey}`,
+        details: {
+          loanId: loanPubkey,
+          tokenMint: dbLoan.tokenMint,
+          collateralAmount: dbLoan.collateralAmount,
+          expectedRecovery: expectedRecovery.toString(),
+        },
+        source: 'loan-service',
+        txSignature,
+      });
+      
+      const swapResult = await executeSwap(
+        dbLoan.tokenMint,
+        BigInt(dbLoan.collateralAmount),
+        'liquidation', // vault address placeholder - Jupiter handles routing
+        500 // 5% slippage for liquidation
+      );
+      
+      if (swapResult.success && swapResult.outputAmount > 0n) {
+        actualRecovery = swapResult.outputAmount;
+        console.log(`[LoanService] Jupiter swap successful: ${actualRecovery} lamports recovered`);
+        
+        await securityMonitor.log({
+          severity: 'LOW',
+          category: 'Liquidation',
+          eventType: SECURITY_EVENT_TYPES.LIQUIDATION_SWAP_SUCCESS,
+          message: `Collateral swap completed for loan ${loanPubkey}`,
+          details: {
+            loanId: loanPubkey,
+            swapTxSignature: swapResult.txSignature,
+            expectedRecovery: expectedRecovery.toString(),
+            actualRecovery: actualRecovery.toString(),
+            priceImpactPct: swapResult.priceImpactPct,
+          },
+          source: 'loan-service',
+          txSignature: swapResult.txSignature,
+        });
+      } else {
+        console.warn(`[LoanService] Jupiter swap failed: ${swapResult.error}`);
+        
+        await securityMonitor.log({
+          severity: 'HIGH',
+          category: 'Liquidation',
+          eventType: SECURITY_EVENT_TYPES.LIQUIDATION_SWAP_FAILED,
+          message: `Collateral swap failed for loan ${loanPubkey}: ${swapResult.error}`,
+          details: {
+            loanId: loanPubkey,
+            tokenMint: dbLoan.tokenMint,
+            collateralAmount: dbLoan.collateralAmount,
+            error: swapResult.error,
+          },
+          source: 'loan-service',
+          txSignature,
+        });
+        
+        // Use expected recovery as fallback when swap fails
+        console.log(`[LoanService] Using expected recovery as fallback: ${expectedRecovery} lamports`);
+      }
+      
+      await recordLiquidationResult(
+        dbLoan.id,
+        loanPubkey,
+        dbLoan.tokenMint,
+        dbLoan.token?.symbol || 'UNKNOWN',
+        expectedRecovery,
+        actualRecovery,
+        txSignature
+      );
+      
+      // Also reduce exposure
+      recordRepayment(
+        dbLoan.tokenMint,
+        BigInt(dbLoan.collateralAmount),
+        actualRecovery // Use actual recovery amount
+      );
+    } catch (error: any) {
+      console.error('[LoanService] Failed to record liquidation result:', error.message);
+    }
     
     // Create notification
     await notificationService.createNotification({
@@ -820,6 +936,19 @@ class LoanService {
       loanId: loanPubkey, // Use the correct loanPubkey variable
     });
     
+    // Track exposure for monitoring
+    try {
+      await recordLoanExposure(
+        dbLoan.tokenMint,
+        token?.symbol || 'UNKNOWN',
+        BigInt(dbLoan.collateralAmount),
+        BigInt(dbLoan.solBorrowed)
+      );
+    } catch (error: any) {
+      console.error('[LoanService] Failed to record exposure:', error.message);
+      // Non-blocking - don't fail the loan creation
+    }
+
     // Emit websocket event
     websocketService.emit(WebSocketEvent.LOAN_CREATED, {
       loan: this.formatLoan(dbLoan),

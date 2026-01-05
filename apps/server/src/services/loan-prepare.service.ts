@@ -15,6 +15,8 @@ import BN from 'bn.js';
 import { getPriceAuthorityKeypair } from '../config/keys.js';
 import { getJupiterPrice } from './jupiter-price.service.js';
 import { getConnection, getProgram } from './solana.service.js';
+import { assertCircuitBreakerOk } from './circuit-breaker.service.js';
+import { checkWalletRateLimit } from './wallet-rate-limit.service.js';
 
 // Constants matching on-chain program
 const PROTOCOL_STATE_SEED = Buffer.from('protocol_state');
@@ -46,6 +48,15 @@ export interface PrepareLoanResponse {
 export async function prepareLoanTransaction(
   request: PrepareLoanRequest
 ): Promise<PrepareLoanResponse> {
+  // Check circuit breaker before preparing any loan
+  await assertCircuitBreakerOk();
+
+  // Check wallet rate limit
+  const rateLimitResult = await checkWalletRateLimit(request.borrower);
+  if (!rateLimitResult.allowed) {
+    throw new Error(rateLimitResult.reason || 'Rate limit exceeded');
+  }
+
   const connection = getConnection();
   const program = getProgram();
   const priceAuthority = getPriceAuthorityKeypair();

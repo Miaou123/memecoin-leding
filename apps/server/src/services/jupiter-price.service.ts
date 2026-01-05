@@ -52,7 +52,7 @@ export async function getJupiterPrice(tokenMint: string): Promise<{
       throw new Error(`Jupiter API error: ${response.status} ${response.statusText}`);
     }
 
-    const data: JupiterPriceResponse = await response.json();
+    const data = await response.json() as JupiterPriceResponse;
     
     const tokenData = data.data[tokenMint];
     const solData = data.data[NATIVE_SOL_MINT];

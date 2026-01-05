@@ -1,5 +1,6 @@
 import { Job } from 'bullmq';
 import { notificationService } from '../services/notification.service.js';
+import { dailySummaryJob } from './daily-summary.job.js';
 
 export async function notificationJob(job: Job) {
   const jobName = job.name;
@@ -13,6 +14,16 @@ export async function notificationJob(job: Job) {
       console.log('✅ Due notifications check completed');
       
       return { status: 'due_notifications_checked' };
+    }
+    
+    if (jobName === 'daily-summary') {
+      console.log('📊 Running daily summary...');
+      
+      const summary = await dailySummaryJob(job);
+      
+      console.log('✅ Daily summary completed');
+      
+      return { status: 'daily_summary_sent', summary };
     }
     
     // Handle individual notification sending

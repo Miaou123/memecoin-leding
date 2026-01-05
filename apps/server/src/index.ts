@@ -13,6 +13,9 @@ import { tokensRouter } from './api/tokens.js';
 import { protocolRouter } from './api/protocol.js';
 import { userRouter } from './api/user.js';
 import { loanPrepareRouter } from './api/loan-prepare.js';
+import { monitoringRouter } from './api/monitoring.js';
+import { adminRouter } from './api/admin.js';
+import { healthRouter } from './api/health.js';
 import pricesRouter from './routes/prices.js';
 import adminWhitelistRouter from './routes/admin/whitelist.js';
 import adminFeesRouter, { setFeeClaimerService } from './routes/admin/fees.js';
@@ -29,12 +32,27 @@ import { loanService } from './services/loan.service.js';
 import { distributionCrankService } from './services/distribution-crank.service.js';
 import { FeeClaimerService } from './services/fee-claimer.service.js';
 import { treasuryMonitor } from './services/treasury-monitor.service.js';
+import { treasuryHealthService } from './services/treasury-health.service.js';
+import { validateMainnetConfig, getNetworkConfig, isMainnet } from './config/network.js';
 import { Connection, Keypair } from '@solana/web3.js';
 import { Program, AnchorProvider, Wallet, Idl } from '@coral-xyz/anchor';
 import { PROGRAM_ID } from '@memecoin-lending/config';
 import fs from 'fs';
 import path from 'path';
 import { getAdminKeypair } from './config/keys.js';
+
+// Validate configuration on startup
+const networkConfig = getNetworkConfig();
+console.log(`🌐 Network: ${networkConfig.network}`);
+console.log(`📍 RPC: ${networkConfig.rpcUrl}`);
+console.log(`📦 Program: ${networkConfig.programId}`);
+
+if (isMainnet()) {
+  validateMainnetConfig();
+  console.log('🚀 Running in MAINNET mode');
+} else {
+  console.log('🧪 Running in DEVNET mode');
+}
 
 // Create Hono app
 const app = new Hono();
@@ -49,26 +67,12 @@ app.use('/*', cors({
 }));
 app.use('/*', logger());
 
-// Health check endpoint
-app.get('/health', async (c) => {
-  try {
-    await prisma.$queryRaw`SELECT 1`;
-    return c.json({ 
-      status: 'ok',
-      timestamp: new Date().toISOString(),
-      version: process.env.npm_package_version || '1.0.0'
-    });
-  } catch (error) {
-    return c.json({ 
-      status: 'error',
-      message: 'Database connection failed'
-    }, 503);
-  }
-});
+// Health endpoints provided by healthRouter below
 
 // API routes
 app.route('/api/loans', loansRouter);
 app.route('/api/loan', loanPrepareRouter);
+app.route('/api/monitoring', monitoringRouter);
 app.route('/api/tokens', tokensRouter);
 app.route('/api/protocol', protocolRouter);
 app.route('/api/user', userRouter);
@@ -76,9 +80,13 @@ app.route('/api/prices', pricesRouter);
 app.route('/api/staking', stakingRoutes);
 
 // Admin routes
+app.route('/api/admin', adminRouter);
 app.route('/api/admin/whitelist', adminWhitelistRouter);
 app.route('/api/admin/fees', adminFeesRouter);
 app.route('/api/admin/security', securityRoutes);
+
+// Health routes
+app.route('/', healthRouter);  // /health, /ready, /metrics at root
 
 // Error handler
 app.onError(errorHandler);
@@ -291,6 +299,18 @@ const server = serve({
   } else {
     console.log('🏦 Treasury monitoring disabled (TREASURY_PDA not configured)');
   }
+  
+  // Initialize treasury health monitoring
+  const treasuryPda = process.env.TREASURY_PDA;
+  if (treasuryPda) {
+    treasuryHealthService.initialize(treasuryPda).then(() => {
+      console.log('🏦 Treasury health monitoring started');
+    }).catch((error) => {
+      console.error('Failed to initialize treasury health monitoring:', error.message);
+    });
+  } else {
+    console.log('⚠️ TREASURY_PDA not set, treasury health monitoring disabled');
+  }
 });
 
 // Initialize WebSocket - pass the server, it creates WebSocketServer internally
@@ -310,6 +330,9 @@ async function gracefulShutdown(signal: string) {
     // Stop treasury monitor
     console.log('Stopping treasury monitor...');
     treasuryMonitor.stop();
+    
+    // Stop treasury health service
+    treasuryHealthService.stop();
     
     await fastPriceMonitor.shutdown();
     wss.close();
