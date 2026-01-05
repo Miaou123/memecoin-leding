@@ -81,6 +81,9 @@ importers:
       bn.js:
         specifier: ^5.2.1
         version: 5.2.2
+      bs58:
+        specifier: ^6.0.0
+        version: 6.0.0
       bullmq:
         specifier: ^5.0.0
         version: 5.66.4
@@ -105,6 +108,9 @@ importers:
       pumpdotfun-sdk:
         specifier: ^1.4.2
         version: 1.4.2(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(rollup@4.54.0)(typescript@5.9.3)(utf-8-validate@5.0.10)
+      tweetnacl:
+        specifier: ^1.0.3
+        version: 1.0.3
       uuid:
         specifier: ^13.0.0
         version: 13.0.0
@@ -118,6 +124,9 @@ importers:
       '@types/bn.js':
         specifier: ^5.1.0
         version: 5.2.0
+      '@types/bs58':
+        specifier: ^5.0.0
+        version: 5.0.0
       '@types/node':
         specifier: ^20.11.0
         version: 20.19.27
@@ -2109,6 +2118,10 @@ packages:
 
   '@types/bn.js@5.2.0':
     resolution: {integrity: sha512-DLbJ1BPqxvQhIGbeu8VbUC1DiAiahHtAYvA0ZEAa4P31F7IaArc8z3C3BRQdWX4mtLQuABG4yzp76ZrS02Ui1Q==}
+
+  '@types/bs58@5.0.0':
+    resolution: {integrity: sha512-cAw/jKBzo98m6Xz1X5ETqymWfIMbXbu6nK15W4LQYjeHJkVqSmM5PO8Bd9KVHQJ/F4rHcSso9LcjtgCW6TGu2w==}
+    deprecated: This is a stub types definition. bs58 provides its own type definitions, so you do not need this installed.
 
   '@types/chai@4.3.20':
     resolution: {integrity: sha512-/pC9HAB5I/xMlc5FP77qjCnI16ChlJfW0tGa0IUcFn38VJrTV6DeZ60NU5KZBtaOZqjdpwTWohz5HU1RrhiYxQ==}
@@ -4325,6 +4338,9 @@ packages:
   turbo@2.7.2:
     resolution: {integrity: sha512-5JIA5aYBAJSAhrhbyag1ZuMSgUZnHtI+Sq3H8D3an4fL8PeF+L1yYvbEJg47akP1PFfATMf5ehkqFnxfkmuwZQ==}
     hasBin: true
+
+  tweetnacl@1.0.3:
+    resolution: {integrity: sha512-6rt+RN7aOi1nGMyC4Xa5DdYiukl2UWCbcJft7YhxReBGQD7OAM8Pbxw6YMo4r2diNEA8FEmu32YOn9rhaiE5yw==}
 
   type-detect@4.1.0:
     resolution: {integrity: sha512-Acylog8/luQ8L7il+geoSxhEkazvkslg7PSNKOX59mbB9cOveP5aq9h74Y7YU8yDpJwetzQQrfIwtf4Wp4LKcw==}
@@ -7096,6 +7112,10 @@ snapshots:
   '@types/bn.js@5.2.0':
     dependencies:
       '@types/node': 20.19.27
+
+  '@types/bs58@5.0.0':
+    dependencies:
+      bs58: 6.0.0
 
   '@types/chai@4.3.20': {}
 
@@ -10028,6 +10048,8 @@ snapshots:
       turbo-linux-arm64: 2.7.2
       turbo-windows-64: 2.7.2
       turbo-windows-arm64: 2.7.2
+
+  tweetnacl@1.0.3: {}
 
   type-detect@4.1.0: {}
 

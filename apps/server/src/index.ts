@@ -7,6 +7,12 @@ import { config } from 'dotenv';
 // Load environment variables
 config();
 
+// Security middleware
+import { trustedProxyMiddleware } from './middleware/trustedProxy.js';
+import { apiSecurityHeaders } from './middleware/securityHeaders.js';
+import { defaultBodyLimit } from './middleware/bodyLimit.js';
+import { csrfProtection, csrfTokenEndpoint } from './middleware/csrf.js';
+
 // Import routers
 import { loansRouter } from './api/loans.js';
 import { tokensRouter } from './api/tokens.js';
@@ -21,6 +27,7 @@ import adminWhitelistRouter from './routes/admin/whitelist.js';
 import adminFeesRouter, { setFeeClaimerService } from './routes/admin/fees.js';
 import { stakingRoutes } from './routes/staking.js';
 import { securityRoutes } from './routes/admin/security.routes.js';
+import { testAuthRouter } from './api/test-auth.js';
 
 // Import services
 import { initializeJobs } from './jobs/index.js';
@@ -61,12 +68,35 @@ const app = new Hono();
 // Global service instance
 let feeClaimerService: FeeClaimerService | null = null;
 
-// Global middleware
-app.use('/*', cors({
+// ============================================
+// MIDDLEWARE ORDER MATTERS - Apply in this order:
+// ============================================
+
+// 1. Trusted proxy (must be first to get correct client IP)
+app.use('*', trustedProxyMiddleware);
+
+// 2. Request logging
+app.use('*', logger());
+
+// 3. Body size limits (before parsing)
+app.use('*', defaultBodyLimit);
+
+// 4. Security headers
+app.use('*', apiSecurityHeaders);
+
+// 5. CORS
+app.use('*', cors({
   origin: process.env.CORS_ORIGIN?.split(',') || ['http://localhost:3000', 'http://localhost:3001', 'http://localhost:5173'],
   credentials: true,
 }));
-app.use('/*', logger());
+
+// 6. CSRF protection (for mutation routes)
+app.use('/api/loans/*', csrfProtection);
+app.use('/api/admin/*', csrfProtection);
+app.use('/api/user/*', csrfProtection);
+
+// 7. CSRF token endpoint
+app.get('/api/csrf-token', csrfTokenEndpoint);
 
 // Health endpoints provided by healthRouter below
 
@@ -79,11 +109,14 @@ app.route('/api/protocol', protocolRouter);
 app.route('/api/user', userRouter);
 app.route('/api/prices', pricesRouter);
 app.route('/api/staking', stakingRoutes);
+app.route('/api/test-auth', testAuthRouter);
 
-// Admin routes
+// Admin routes - API key based
 app.route('/api/admin', adminRouter);
-app.route('/api/admin/whitelist', adminWhitelistRouter);
 app.route('/api/admin/fees', adminFeesRouter);
+
+// Admin routes - Signature based (wallet authentication)
+app.route('/api/admin/whitelist', adminWhitelistRouter);
 app.route('/api/admin/security', securityRoutes);
 
 // Health routes

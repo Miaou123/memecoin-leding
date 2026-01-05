@@ -1,97 +1,18 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { validator } from 'hono/validator';
+import { requireAdmin } from '../../middleware/auth.js';
 import { manualWhitelistService } from '../../services/manual-whitelist.service';
 import { logger } from '../../utils/logger';
 import { TokenTier } from '@memecoin-lending/types';
 import { securityMonitor } from '../../services/security-monitor.service.js';
 import { SECURITY_EVENT_TYPES } from '@memecoin-lending/types';
+import { getIp } from '../../middleware/trustedProxy.js';
 
 const app = new Hono();
 
-// Admin authentication middleware (implement based on your auth system)
-const requireAdmin = async (c: any, next: any) => {
-  const ip = c.req.header('CF-Connecting-IP') || 
-             c.req.header('X-Forwarded-For')?.split(',')[0]?.trim() || 
-             c.req.header('X-Real-IP') || 
-             'unknown';
-  
-  // Get admin address from headers or token
-  const adminAddress = c.req.header('x-admin-address');
-  const signature = c.req.header('x-signature');
-  
-  if (!adminAddress || !signature) {
-    // SECURITY: Log failed admin authentication attempt
-    await securityMonitor.log({
-      severity: 'MEDIUM',
-      category: 'Admin',
-      eventType: SECURITY_EVENT_TYPES.ADMIN_ACCESS_DENIED,
-      message: 'Admin access denied: missing credentials',
-      details: {
-        path: c.req.path,
-        method: c.req.method,
-        ip,
-        userAgent: c.req.header('User-Agent')?.slice(0, 100),
-        missingAdminAddress: !adminAddress,
-        missingSignature: !signature,
-      },
-      source: 'admin-whitelist-auth',
-      ip,
-    });
-    
-    return c.json({ 
-      success: false, 
-      error: 'Admin authentication required' 
-    }, 401);
-  }
-  
-  // TODO: Implement signature verification for admin auth
-  // For now, just check if it's a valid address format
-  if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(adminAddress)) {
-    // SECURITY: Log invalid admin address attempt
-    await securityMonitor.log({
-      severity: 'MEDIUM',
-      category: 'Admin',
-      eventType: SECURITY_EVENT_TYPES.ADMIN_ACCESS_DENIED,
-      message: 'Admin access denied: invalid address format',
-      details: {
-        adminAddress: adminAddress?.slice(0, 8) + '...',
-        path: c.req.path,
-        method: c.req.method,
-        ip,
-        userAgent: c.req.header('User-Agent')?.slice(0, 100),
-      },
-      source: 'admin-whitelist-auth',
-      ip,
-      userId: adminAddress,
-    });
-    
-    return c.json({ 
-      success: false, 
-      error: 'Invalid admin address' 
-    }, 401);
-  }
-  
-  // SECURITY: Log successful admin access
-  await securityMonitor.log({
-    severity: 'LOW',
-    category: 'Admin',
-    eventType: SECURITY_EVENT_TYPES.ADMIN_ACCESS,
-    message: `Admin accessed whitelist API: ${c.req.method} ${c.req.path}`,
-    details: {
-      adminAddress: adminAddress.slice(0, 8) + '...',
-      path: c.req.path,
-      method: c.req.method,
-      ip,
-    },
-    source: 'admin-whitelist-auth',
-    ip,
-    userId: adminAddress,
-  });
-  
-  c.set('adminAddress', adminAddress);
-  await next();
-};
+// Apply centralized admin authentication to all routes
+app.use('*', requireAdmin);
 
 // Validation schemas
 const createWhitelistSchema = z.object({
@@ -142,7 +63,6 @@ const getWhitelistSchema = z.object({
  */
 app.post(
   '/',
-  requireAdmin,
   validator('json', (value, c) => {
     const result = createWhitelistSchema.safeParse(value);
     if (!result.success) {
@@ -156,7 +76,7 @@ app.post(
   }),
   async (c) => {
     try {
-      const adminAddress = c.get('adminAddress' as never) as string;
+      const adminAddress = c.user?.wallet!;
       const data = c.req.valid('json');
 
       logger.info(`Admin ${adminAddress} adding token ${data.mint} to whitelist`);
@@ -176,10 +96,7 @@ app.post(
           reason: data.reason,
         },
         source: 'admin-whitelist',
-        ip: c.req.header('CF-Connecting-IP') || 
-            c.req.header('X-Forwarded-For')?.split(',')[0]?.trim() || 
-            c.req.header('X-Real-IP') || 
-            'unknown',
+        ip: getIp(c),
         userId: adminAddress,
       });
 
@@ -210,7 +127,6 @@ app.post(
  */
 app.get(
   '/',
-  requireAdmin,
   validator('query', (value, c) => {
     const result = getWhitelistSchema.safeParse(value);
     if (!result.success) {
@@ -260,7 +176,7 @@ app.get(
 /**
  * GET /admin/whitelist/stats - Get whitelist statistics
  */
-app.get('/stats', requireAdmin, async (c) => {
+app.get('/stats', async (c) => {
   try {
     const stats = await manualWhitelistService.getWhitelistStats();
 
@@ -280,7 +196,7 @@ app.get('/stats', requireAdmin, async (c) => {
 /**
  * GET /admin/whitelist/:mint - Get specific whitelist entry
  */
-app.get('/:mint', requireAdmin, async (c) => {
+app.get('/:mint', async (c) => {
   try {
     const { mint } = c.req.param();
 
@@ -318,7 +234,6 @@ app.get('/:mint', requireAdmin, async (c) => {
  */
 app.put(
   '/:mint',
-  requireAdmin,
   validator('json', (value, c) => {
     const result = updateWhitelistSchema.safeParse(value);
     if (!result.success) {
@@ -333,7 +248,7 @@ app.put(
   async (c) => {
     try {
       const { mint } = c.req.param();
-      const adminAddress = c.get('adminAddress' as never) as string;
+      const adminAddress = c.user?.wallet!;
       const data = c.req.valid('json');
 
       if (!mint || !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(mint)) {
@@ -357,10 +272,7 @@ app.put(
           adminAddress: adminAddress.slice(0, 8) + '...',
         },
         source: 'admin-whitelist',
-        ip: c.req.header('CF-Connecting-IP') || 
-            c.req.header('X-Forwarded-For')?.split(',')[0]?.trim() || 
-            c.req.header('X-Real-IP') || 
-            'unknown',
+        ip: getIp(c),
         userId: adminAddress,
       });
 
@@ -390,7 +302,7 @@ app.put(
 /**
  * POST /admin/whitelist/:mint/enable - Enable whitelist entry
  */
-app.post('/:mint/enable', requireAdmin, async (c) => {
+app.post('/:mint/enable', async (c) => {
   try {
     const { mint } = c.req.param();
     const adminAddress = c.get('adminAddress' as never) as string;
@@ -416,10 +328,7 @@ app.post('/:mint/enable', requireAdmin, async (c) => {
         action: 'enable',
       },
       source: 'admin-whitelist',
-      ip: c.req.header('CF-Connecting-IP') || 
-          c.req.header('X-Forwarded-For')?.split(',')[0]?.trim() || 
-          c.req.header('X-Real-IP') || 
-          'unknown',
+      ip: getIp(c),
       userId: adminAddress,
     });
 
@@ -441,7 +350,7 @@ app.post('/:mint/enable', requireAdmin, async (c) => {
 /**
  * POST /admin/whitelist/:mint/disable - Disable whitelist entry
  */
-app.post('/:mint/disable', requireAdmin, async (c) => {
+app.post('/:mint/disable', async (c) => {
   try {
     const { mint } = c.req.param();
     const adminAddress = c.get('adminAddress' as never) as string;
@@ -470,10 +379,7 @@ app.post('/:mint/disable', requireAdmin, async (c) => {
         action: 'disable',
       },
       source: 'admin-whitelist',
-      ip: c.req.header('CF-Connecting-IP') || 
-          c.req.header('X-Forwarded-For')?.split(',')[0]?.trim() || 
-          c.req.header('X-Real-IP') || 
-          'unknown',
+      ip: getIp(c),
       userId: adminAddress,
     });
 
@@ -495,7 +401,7 @@ app.post('/:mint/disable', requireAdmin, async (c) => {
 /**
  * DELETE /admin/whitelist/:mint - Remove token from whitelist
  */
-app.delete('/:mint', requireAdmin, async (c) => {
+app.delete('/:mint', async (c) => {
   try {
     const { mint } = c.req.param();
     const adminAddress = c.get('adminAddress' as never) as string;
@@ -525,10 +431,7 @@ app.delete('/:mint', requireAdmin, async (c) => {
         warning: 'PERMANENT_DELETION',
       },
       source: 'admin-whitelist',
-      ip: c.req.header('CF-Connecting-IP') || 
-          c.req.header('X-Forwarded-For')?.split(',')[0]?.trim() || 
-          c.req.header('X-Real-IP') || 
-          'unknown',
+      ip: getIp(c),
       userId: adminAddress,
     });
 
@@ -550,7 +453,7 @@ app.delete('/:mint', requireAdmin, async (c) => {
 /**
  * GET /admin/whitelist/:mint/audit-logs - Get audit logs for a specific entry
  */
-app.get('/:mint/audit-logs', requireAdmin, async (c) => {
+app.get('/:mint/audit-logs', async (c) => {
   try {
     const { mint } = c.req.param();
 
@@ -589,7 +492,7 @@ app.get('/:mint/audit-logs', requireAdmin, async (c) => {
 /**
  * GET /admin/whitelist/audit-logs/all - Get all audit logs
  */
-app.get('/audit-logs/all', requireAdmin, async (c) => {
+app.get('/audit-logs/all', async (c) => {
   try {
     const adminAddress = c.req.query('adminAddress');
     const limit = parseInt(c.req.query('limit') || '100');

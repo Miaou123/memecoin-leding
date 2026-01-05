@@ -3,6 +3,7 @@ import { HTTPException } from 'hono/http-exception';
 import { ZodError } from 'zod';
 import { securityMonitor } from '../services/security-monitor.service.js';
 import { SECURITY_EVENT_TYPES, SecuritySeverity, SecurityCategory } from '@memecoin-lending/types';
+import { getIp } from './trustedProxy.js';
 
 interface ErrorClassification {
   severity: SecuritySeverity;
@@ -71,10 +72,7 @@ function classifyError(err: Error): ErrorClassification {
 export const errorHandler = async (err: Error, c: Context) => {
   console.error('Error:', err);
 
-  const ip = c.req.header('CF-Connecting-IP') || 
-             c.req.header('X-Forwarded-For')?.split(',')[0]?.trim() || 
-             c.req.header('X-Real-IP') || 
-             'unknown';
+  const ip = getIp(c);
 
   // Don't log client errors (4xx) as security events unless they're auth related
   const shouldLogSecurity = !(err instanceof HTTPException && err.status < 500) || 

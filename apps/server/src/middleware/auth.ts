@@ -1,8 +1,11 @@
 import { Context, Next } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import { PublicKey } from '@solana/web3.js';
+import nacl from 'tweetnacl';
+import bs58 from 'bs58';
 import { securityMonitor } from '../services/security-monitor.service.js';
 import { SECURITY_EVENT_TYPES } from '@memecoin-lending/types';
+import { getIp } from './trustedProxy.js';
 
 export interface AuthUser {
   wallet: string;
@@ -21,10 +24,7 @@ export const authMiddleware = async (c: Context, next: Next) => {
   const publicKey = c.req.header('X-Public-Key');
   const timestamp = c.req.header('X-Timestamp');
   const userAgent = c.req.header('User-Agent') || 'unknown';
-  const ip = c.req.header('CF-Connecting-IP') || 
-            c.req.header('X-Forwarded-For') || 
-            c.req.header('X-Real-IP') || 
-            'unknown';
+  const ip = getIp(c);
   
   // SECURITY: Log missing authentication headers
   if (!signature || !publicKey || !timestamp) {
@@ -114,37 +114,88 @@ export const authMiddleware = async (c: Context, next: Next) => {
       throw new Error('Signature expired');
     }
     
-    // Verify signature
+    // Verify signature cryptographically
     const message = `Sign in to Memecoin Lending Protocol\nTimestamp: ${timestamp}`;
+    const messageBytes = new TextEncoder().encode(message);
     
-    // For now, just validate the format - in production you'd verify the signature
-    if (signature && publicKey) {
-      const isAdmin = publicKey === process.env.ADMIN_WALLET;
-      
-      // SECURITY: Log admin access attempts
-      if (isAdmin) {
-        await securityMonitor.log({
-          severity: 'MEDIUM',
-          category: 'Authentication',
-          eventType: SECURITY_EVENT_TYPES.AUTH_ADMIN_ACCESS,
-          message: 'Admin authentication successful',
-          details: {
-            path: c.req.path,
-            method: c.req.method,
-            userAgent,
-          },
-          source: 'auth-middleware',
-          ip,
-          userId: publicKey,
-        });
-      }
-      
-      // Set user context
-      c.user = {
-        wallet: publicKey,
-        isAdmin,
-      };
+    // Decode base58 signature
+    let signatureBytes: Uint8Array;
+    try {
+      signatureBytes = bs58.decode(signature);
+    } catch {
+      await securityMonitor.log({
+        severity: 'HIGH',
+        category: 'Authentication',
+        eventType: SECURITY_EVENT_TYPES.AUTH_SIGNATURE_INVALID,
+        message: 'Invalid signature format (not valid base58)',
+        details: {
+          publicKey: publicKey.substring(0, 8) + '...',
+          path: c.req.path,
+          method: c.req.method,
+          userAgent,
+        },
+        source: 'auth-middleware',
+        ip,
+        userId: publicKey,
+      });
+      throw new Error('Invalid signature format');
     }
+    
+    // Get public key bytes
+    const publicKeyBytes = new PublicKey(publicKey).toBytes();
+    
+    // Verify the signature using Ed25519
+    const isValidSignature = nacl.sign.detached.verify(
+      messageBytes,
+      signatureBytes,
+      publicKeyBytes
+    );
+    
+    if (!isValidSignature) {
+      await securityMonitor.log({
+        severity: 'HIGH',
+        category: 'Authentication',
+        eventType: SECURITY_EVENT_TYPES.AUTH_SIGNATURE_INVALID,
+        message: 'Cryptographic signature verification failed',
+        details: {
+          publicKey: publicKey.substring(0, 8) + '...',
+          path: c.req.path,
+          method: c.req.method,
+          userAgent,
+        },
+        source: 'auth-middleware',
+        ip,
+        userId: publicKey,
+      });
+      throw new Error('Invalid signature');
+    }
+    
+    // Only after successful verification, set the user context
+    const isAdmin = publicKey === process.env.ADMIN_WALLET;
+    
+    // SECURITY: Log admin access attempts
+    if (isAdmin) {
+      await securityMonitor.log({
+        severity: 'MEDIUM',
+        category: 'Authentication',
+        eventType: SECURITY_EVENT_TYPES.AUTH_ADMIN_ACCESS,
+        message: 'Admin authentication successful',
+        details: {
+          path: c.req.path,
+          method: c.req.method,
+          userAgent,
+        },
+        source: 'auth-middleware',
+        ip,
+        userId: publicKey,
+      });
+    }
+    
+    // Set user context
+    c.user = {
+      wallet: publicKey,
+      isAdmin,
+    };
   } catch (error: any) {
     console.error('Auth error:', error);
     
@@ -174,10 +225,7 @@ export const requireAuth = async (c: Context, next: Next) => {
   await authMiddleware(c, next);
   
   if (!c.user) {
-    const ip = c.req.header('CF-Connecting-IP') || 
-              c.req.header('X-Forwarded-For') || 
-              c.req.header('X-Real-IP') || 
-              'unknown';
+    const ip = getIp(c);
     
     // SECURITY: Log failed authentication attempts
     await securityMonitor.log({
@@ -205,10 +253,7 @@ export const requireAuth = async (c: Context, next: Next) => {
 export const requireAdmin = async (c: Context, next: Next) => {
   await authMiddleware(c, next);
   
-  const ip = c.req.header('CF-Connecting-IP') || 
-            c.req.header('X-Forwarded-For') || 
-            c.req.header('X-Real-IP') || 
-            'unknown';
+  const ip = getIp(c);
   
   if (!c.user?.isAdmin) {
     const severity = c.user ? 'HIGH' : 'MEDIUM'; // Higher severity if authenticated user tries admin access

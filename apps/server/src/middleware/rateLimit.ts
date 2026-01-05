@@ -3,6 +3,7 @@ import { HTTPException } from 'hono/http-exception';
 import Redis from 'ioredis';
 import { securityMonitor } from '../services/security-monitor.service.js';
 import { SECURITY_EVENT_TYPES } from '@memecoin-lending/types';
+import { getIp } from './trustedProxy.js';
 
 const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
 
@@ -31,10 +32,7 @@ export const rateLimiter = (options: RateLimitOptions) => {
   const { requests, windowMs, keyGenerator, name } = options;
   
   return async (c: Context, next: Next) => {
-    const ip = c.req.header('CF-Connecting-IP') || 
-               c.req.header('X-Forwarded-For')?.split(',')[0]?.trim() || 
-               c.req.header('X-Real-IP') || 
-               'unknown';
+    const ip = getIp(c);
                
     const key = keyGenerator 
       ? keyGenerator(c) 
