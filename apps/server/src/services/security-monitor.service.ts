@@ -71,7 +71,10 @@ export class SecurityMonitorService {
       timestamp: new Date(),
       alerted: false,
       ...input,
-      details: input.details || {},
+      details: {
+        ...input.details,
+        requestId: input.requestId,
+      },
     };
     
     // Console log with appropriate formatting

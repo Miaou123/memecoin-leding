@@ -8,6 +8,7 @@ import { config } from 'dotenv';
 config();
 
 // Security middleware
+import { requestIdMiddleware, getRequestId } from './middleware/requestId.js';
 import { trustedProxyMiddleware } from './middleware/trustedProxy.js';
 import { apiSecurityHeaders } from './middleware/securityHeaders.js';
 import { defaultBodyLimit } from './middleware/bodyLimit.js';
@@ -71,6 +72,9 @@ let feeClaimerService: FeeClaimerService | null = null;
 // ============================================
 // MIDDLEWARE ORDER MATTERS - Apply in this order:
 // ============================================
+
+// 0. Request ID (must be first for logging)
+app.use('*', requestIdMiddleware);
 
 // 1. Trusted proxy (must be first to get correct client IP)
 app.use('*', trustedProxyMiddleware);

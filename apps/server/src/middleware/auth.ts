@@ -66,6 +66,7 @@ export const authMiddleware = async (c: Context, next: Next) => {
         },
         source: 'auth-middleware',
         ip,
+        requestId: c.get('requestId'),
       });
       throw new Error('Invalid public key format');
     }

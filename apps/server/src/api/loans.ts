@@ -12,6 +12,9 @@ import { authMiddleware, requireAuth } from '../middleware/auth.js';
 import { apiRateLimit, createLoanRateLimit } from '../middleware/rateLimit.js';
 import { loanService } from '../services/loan.service.js';
 import { prisma } from '../db/client.js';
+import { getLoansSchema, createLoanSchema, solanaAddressSchema } from '../validators/index.js';
+import { sanitizeForLogging } from '../utils/inputSanitizer.js';
+import { logger } from '../utils/logger.js';
 
 const loansRouter = new Hono();
 
@@ -20,18 +23,9 @@ loansRouter.use('/*', authMiddleware);
 loansRouter.use('/*', apiRateLimit);
 
 // Get all loans (paginated)
-const getLoansSchema = z.object({
-  page: z.coerce.number().min(1).default(1),
-  pageSize: z.coerce.number().min(1).max(100).default(20),
-  status: z.enum(['active', 'repaid', 'liquidatedTime', 'liquidatedPrice']).optional(),
-  tokenMint: z.string().optional(),
-  borrower: z.string().optional(),
-  sortBy: z.enum(['createdAt', 'dueAt', 'solBorrowed']).default('createdAt'),
-  sortOrder: z.enum(['asc', 'desc']).default('desc'),
-});
-
 loansRouter.get('/', zValidator('query', getLoansSchema), async (c) => {
   const query = c.req.valid('query');
+  // query params are sanitized: addresses validated, enums checked, numbers bounded
   
   const where: any = {};
   if (query.status) where.status = query.status;
@@ -109,20 +103,24 @@ loansRouter.get('/recent', zValidator('query', getRecentLoansSchema), async (c) 
 });
 
 // Get single loan
-loansRouter.get('/:pubkey', async (c) => {
-  const pubkey = c.req.param('pubkey');
-  
-  const loan = await prisma.loan.findUnique({
-    where: { id: pubkey },
-    include: { token: true },
-  });
-  
-  if (!loan) {
-    return c.json<ApiResponse<null>>({ 
-      success: false, 
-      error: 'Loan not found' 
-    }, 404);
-  }
+loansRouter.get(
+  '/:id',
+  zValidator('param', z.object({ id: solanaAddressSchema })),
+  async (c) => {
+    const { id } = c.req.valid('param');
+    // id is sanitized as a valid Solana address
+    
+    const loan = await prisma.loan.findUnique({
+      where: { id },
+      include: { token: true },
+    });
+    
+    if (!loan) {
+      return c.json<ApiResponse<null>>({ 
+        success: false, 
+        error: 'Loan not found' 
+      }, 404);
+    }
   
   return c.json<ApiResponse<Loan>>({
     success: true,

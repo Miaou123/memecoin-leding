@@ -4,6 +4,13 @@ import { ZodError } from 'zod';
 import { securityMonitor } from '../services/security-monitor.service.js';
 import { SECURITY_EVENT_TYPES, SecuritySeverity, SecurityCategory } from '@memecoin-lending/types';
 import { getIp } from './trustedProxy.js';
+import { getRequestId } from './requestId.js';
+import { 
+  sanitizeErrorMessage, 
+  sanitizeErrorForLogging, 
+  createSafeErrorResponse,
+  mapPrismaError,
+} from '../utils/errorSanitizer.js';
 
 interface ErrorClassification {
   severity: SecuritySeverity;
@@ -21,7 +28,16 @@ function classifyError(err: Error): ErrorClassification {
     return {
       severity: 'CRITICAL',
       category: 'Database',
-      eventType: SECURITY_EVENT_TYPES.DATABASE_ERROR,
+      eventType: SECURITY_EVENT_TYPES.DATABASE_ERROR || 'DATABASE_ERROR',
+    };
+  }
+  
+  // Timeout errors - HIGH  
+  if (message.includes('timeout') || message.includes('etimedout')) {
+    return {
+      severity: 'HIGH',
+      category: 'Database',
+      eventType: 'DB_QUERY_TIMEOUT',
     };
   }
   
@@ -53,69 +69,73 @@ function classifyError(err: Error): ErrorClassification {
   }
   
   // Validation errors - LOW
-  if (err instanceof ZodError || message.includes('validation') || message.includes('required')) {
+  if (err instanceof ZodError || message.includes('validation') || message.includes('invalid')) {
     return {
       severity: 'LOW',
       category: 'Validation',
-      eventType: SECURITY_EVENT_TYPES.VALIDATION_ERROR,
+      eventType: 'VALIDATION_ERROR',
     };
   }
   
-  // Default for unclassified errors - MEDIUM
+  // Default
   return {
     severity: 'MEDIUM',
     category: 'External Services',
-    eventType: SECURITY_EVENT_TYPES.UNHANDLED_ERROR,
+    eventType: 'UNHANDLED_ERROR',
   };
 }
 
 export const errorHandler = async (err: Error, c: Context) => {
-  console.error('Error:', err);
-
   const ip = getIp(c);
+  const requestId = getRequestId(c);
+  
+  // Log full error internally (with secret redaction)
+  const sanitizedForLog = sanitizeErrorForLogging(err);
+  console.error('Error:', {
+    requestId,
+    path: c.req.path,
+    method: c.req.method,
+    ip,
+    error: sanitizedForLog,
+  });
 
-  // Don't log client errors (4xx) as security events unless they're auth related
-  const shouldLogSecurity = !(err instanceof HTTPException && err.status < 500) || 
-                           (err instanceof HTTPException && (err.status === 401 || err.status === 403));
+  // Security logging for server errors and auth failures
+  const shouldLogSecurity = 
+    !(err instanceof HTTPException && err.status < 500) || 
+    (err instanceof HTTPException && (err.status === 401 || err.status === 403));
 
   if (shouldLogSecurity) {
     const classification = classifyError(err);
-    
-    // Get request context
-    const path = c.req.path;
-    const method = c.req.method;
-    const userAgent = c.req.header('User-Agent')?.slice(0, 200);
-    const userId = (c as any).user?.wallet;
     
     await securityMonitor.log({
       severity: classification.severity,
       category: classification.category,
       eventType: classification.eventType,
-      message: `Error: ${err.message}`,
+      message: `Error: ${sanitizedForLog.message.substring(0, 200)}`,
       details: {
-        path,
-        method,
+        path: c.req.path,
+        method: c.req.method,
         errorName: err.constructor.name,
-        stack: err.stack?.slice(0, 1000),
-        userAgent,
-        httpStatus: err instanceof HTTPException ? err.status : 500,
+        requestId,
       },
       source: 'global-error-handler',
       ip,
-      userId,
+      requestId,
+      userId: (c as any).user?.wallet,
     });
   }
 
-  // Handle HTTPException
+  // Handle HTTPException (Hono's HTTP errors)
   if (err instanceof HTTPException) {
     return c.json({
       success: false,
-      error: err.message,
+      error: sanitizeErrorMessage(err.message),
+      requestId,
       statusCode: err.status,
     }, err.status);
   }
 
-  // Handle Zod validation errors
+  // Handle Zod validation errors (safe to expose details)
   if (err instanceof ZodError) {
     return c.json({
       success: false,
@@ -124,31 +144,22 @@ export const errorHandler = async (err: Error, c: Context) => {
         path: e.path.join('.'),
         message: e.message,
       })),
+      requestId,
+      statusCode: 400,
     }, 400);
   }
 
-  // Handle Prisma errors
-  if (err.constructor.name === 'PrismaClientKnownRequestError') {
-    const prismaError = err as any;
-    if (prismaError.code === 'P2002') {
-      return c.json({
-        success: false,
-        error: 'Duplicate entry',
-        field: prismaError.meta?.target,
-      }, 409);
-    }
-    if (prismaError.code === 'P2025') {
-      return c.json({
-        success: false,
-        error: 'Record not found',
-      }, 404);
-    }
+  // Handle Prisma errors - map to safe messages
+  if (err.constructor.name.includes('Prisma')) {
+    const { message, status } = mapPrismaError(err as any);
+    return c.json({
+      success: false,
+      error: message,
+      requestId,
+      statusCode: status,
+    }, status);
   }
 
-  // Default error response
-  return c.json({
-    success: false,
-    error: 'Internal Server Error',
-    message: process.env.NODE_ENV === 'development' ? err.message : undefined,
-  }, 500);
+  // Default: return sanitized error
+  return c.json(createSafeErrorResponse(err, requestId, 500), 500);
 };

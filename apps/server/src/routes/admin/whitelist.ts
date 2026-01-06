@@ -1,173 +1,110 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { validator } from 'hono/validator';
+import { zValidator } from '@hono/zod-validator';
 import { requireAdmin } from '../../middleware/auth.js';
 import { manualWhitelistService } from '../../services/manual-whitelist.service';
 import { logger } from '../../utils/logger';
-import { TokenTier } from '@memecoin-lending/types';
 import { securityMonitor } from '../../services/security-monitor.service.js';
 import { SECURITY_EVENT_TYPES } from '@memecoin-lending/types';
 import { getIp } from '../../middleware/trustedProxy.js';
+import { getRequestId } from '../../middleware/requestId.js';
+import { sanitizeForLogging } from '../../utils/inputSanitizer.js';
+import {
+  createWhitelistEntrySchema,
+  updateWhitelistEntrySchema,
+  getWhitelistEntriesSchema,
+  solanaAddressSchema,
+} from '../../validators/index.js';
 
 const app = new Hono();
 
 // Apply centralized admin authentication to all routes
 app.use('*', requireAdmin);
 
-// Validation schemas
-const createWhitelistSchema = z.object({
-  mint: z.string().min(32).max(44).regex(/^[1-9A-HJ-NP-Za-km-z]+$/),
-  symbol: z.string().optional(),
-  name: z.string().optional(),
-  tier: z.enum(['bronze', 'silver', 'gold']),
-  ltvBps: z.number().min(1000).max(9000).optional(), // 10% to 90%
-  minLoanAmount: z.string().optional(),
-  maxLoanAmount: z.string().optional(),
-  reason: z.string().optional(),
-  notes: z.string().optional(),
-  externalUrl: z.string().url().optional(),
-  logoUrl: z.string().url().optional(),
-  tags: z.array(z.string()).optional(),
-});
-
-const updateWhitelistSchema = z.object({
-  symbol: z.string().optional(),
-  name: z.string().optional(),
-  tier: z.enum(['bronze', 'silver', 'gold']).optional(),
-  ltvBps: z.number().min(1000).max(9000).optional(),
-  minLoanAmount: z.string().optional(),
-  maxLoanAmount: z.string().optional(),
-  enabled: z.boolean().optional(),
-  reason: z.string().optional(),
-  notes: z.string().optional(),
-  externalUrl: z.string().url().optional(),
-  logoUrl: z.string().url().optional(),
-  tags: z.array(z.string()).optional(),
-});
-
-const getWhitelistSchema = z.object({
-  mint: z.string().optional(),
-  tier: z.enum(['bronze', 'silver', 'gold']).optional(),
-  enabled: z.string().optional().transform(val => val === 'true' ? true : val === 'false' ? false : undefined),
-  addedBy: z.string().optional(),
-  tags: z.string().optional().transform(val => val ? val.split(',') : undefined),
-  search: z.string().optional(),
-  sortBy: z.enum(['addedAt', 'updatedAt', 'symbol', 'tier']).optional(),
-  sortOrder: z.enum(['asc', 'desc']).optional(),
-  page: z.string().optional().transform(val => val ? parseInt(val) : undefined),
-  limit: z.string().optional().transform(val => val ? parseInt(val) : undefined),
-});
-
 /**
- * POST /admin/whitelist - Add token to manual whitelist
+ * POST / - Add token to whitelist
  */
 app.post(
   '/',
-  validator('json', (value, c) => {
-    const result = createWhitelistSchema.safeParse(value);
-    if (!result.success) {
-      return c.json({
-        success: false,
-        error: 'Invalid request data',
-        details: result.error.issues,
-      }, 400);
-    }
-    return result.data;
-  }),
+  zValidator('json', createWhitelistEntrySchema),
   async (c) => {
     try {
       const adminAddress = c.user?.wallet!;
       const data = c.req.valid('json');
-
-      logger.info(`Admin ${adminAddress} adding token ${data.mint} to whitelist`);
-
-      // SECURITY: Log whitelist addition
-      await securityMonitor.log({
-        severity: 'MEDIUM',
-        category: 'Admin',
-        eventType: SECURITY_EVENT_TYPES.ADMIN_WHITELIST_ADD,
-        message: `Admin added token to whitelist: ${data.mint.substring(0, 8)}...`,
-        details: {
-          mint: data.mint,
-          symbol: data.symbol,
-          tier: data.tier,
-          ltvBps: data.ltvBps,
-          adminAddress: adminAddress.slice(0, 8) + '...',
-          reason: data.reason,
-        },
-        source: 'admin-whitelist',
-        ip: getIp(c),
-        userId: adminAddress,
+      // data is now fully sanitized by the schema
+      
+      logger.info('Admin adding token to whitelist', {
+        admin: adminAddress.substring(0, 8) + '...',
+        mint: data.mint.substring(0, 8) + '...',
+        requestId: getRequestId(c),
       });
 
       const entry = await manualWhitelistService.addToWhitelist(
-        {
-          ...data,
-          tier: data.tier as TokenTier,
-        },
+        data,
         adminAddress
       );
+
+      // Security logging
+      await securityMonitor.log({
+        severity: 'LOW',
+        category: 'Admin',
+        eventType: SECURITY_EVENT_TYPES.ADMIN_WHITELIST_ADDED,
+        message: `Token whitelisted: ${data.mint.substring(0, 8)}...`,
+        details: {
+          mint: data.mint,
+          tier: data.tier,
+          addedBy: adminAddress,
+        },
+        source: 'admin-whitelist',
+        ip: getIp(c),
+        requestId: getRequestId(c),
+        userId: adminAddress,
+      });
 
       return c.json({
         success: true,
         data: entry,
       });
-    } catch (error) {
-      logger.error('Add to whitelist error:', error);
+    } catch (error: any) {
+      logger.error('Add to whitelist error', {
+        error: sanitizeForLogging(error.message),
+        requestId: getRequestId(c),
+      });
+      
       return c.json({
         success: false,
-        error: error instanceof Error ? error.message : 'Unknown error',
-      }, 500);
+        error: error.message || 'Failed to add token to whitelist',
+      }, 400);
     }
   }
 );
 
 /**
- * GET /admin/whitelist - Get whitelist entries with filters
+ * GET / - Get whitelist entries with filters
  */
 app.get(
   '/',
-  validator('query', (value, c) => {
-    const result = getWhitelistSchema.safeParse(value);
-    if (!result.success) {
-      return c.json({
-        success: false,
-        error: 'Invalid query parameters',
-        details: result.error.issues,
-      }, 400);
-    }
-    return result.data;
-  }),
+  zValidator('query', getWhitelistEntriesSchema),
   async (c) => {
     try {
       const filters = c.req.valid('query');
-
-      logger.info(`Getting whitelist entries with filters:`, filters);
-
-      const result = await manualWhitelistService.getWhitelistEntries({
-        filters: {
-          mint: filters.mint,
-          tier: filters.tier as TokenTier,
-          enabled: filters.enabled,
-          addedBy: filters.addedBy,
-          tags: filters.tags,
-          search: filters.search,
-        },
-        sortBy: filters.sortBy,
-        sortOrder: filters.sortOrder,
-        page: filters.page,
-        limit: filters.limit,
-      });
+      // filters are sanitized (search query escaped, addresses validated, etc.)
+      
+      const entries = await manualWhitelistService.getWhitelistEntries(filters);
 
       return c.json({
         success: true,
-        data: result,
+        data: entries,
       });
-    } catch (error) {
-      logger.error('Get whitelist entries error:', error);
+    } catch (error: any) {
+      logger.error('Get whitelist error', {
+        error: sanitizeForLogging(error.message),
+        requestId: getRequestId(c),
+      });
+      
       return c.json({
         success: false,
-        error: error instanceof Error ? error.message : 'Unknown error',
+        error: 'Failed to fetch whitelist entries',
       }, 500);
     }
   }
@@ -234,29 +171,13 @@ app.get('/:mint', async (c) => {
  */
 app.put(
   '/:mint',
-  validator('json', (value, c) => {
-    const result = updateWhitelistSchema.safeParse(value);
-    if (!result.success) {
-      return c.json({
-        success: false,
-        error: 'Invalid request data',
-        details: result.error.issues,
-      }, 400);
-    }
-    return result.data;
-  }),
+  zValidator('param', z.object({ mint: solanaAddressSchema })),
+  zValidator('json', updateWhitelistEntrySchema),
   async (c) => {
     try {
-      const { mint } = c.req.param();
+      const { mint } = c.req.valid('param');
       const adminAddress = c.user?.wallet!;
       const data = c.req.valid('json');
-
-      if (!mint || !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(mint)) {
-        return c.json({
-          success: false,
-          error: 'Invalid mint address',
-        }, 400);
-      }
 
       logger.info(`Admin ${adminAddress} updating whitelist entry for ${mint}`);
 

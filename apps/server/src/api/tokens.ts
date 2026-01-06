@@ -8,6 +8,8 @@ import { tokenVerificationService } from '../services/token-verification.service
 import { prisma } from '../db/client.js';
 import { apiRateLimit } from '../middleware/rateLimit.js';
 import { logger } from '../utils/logger.js';
+import { verifyTokenSchema, batchVerifyTokensSchema, solanaAddressSchema } from '../validators/index.js';
+import { sanitizeForLogging } from '../utils/inputSanitizer.js';
 
 const tokensRouter = new Hono();
 
@@ -112,27 +114,31 @@ tokensRouter.get('/top-collateral', async (c) => {
 });
 
 // Get single token details
-tokensRouter.get('/:mint', async (c) => {
-  const mint = c.req.param('mint');
-  
-  const token = await prisma.token.findUnique({
-    where: { id: mint },
-  });
-  
-  if (!token) {
-    return c.json<ApiResponse<null>>({
-      success: false,
-      error: 'Token not found',
-    }, 404);
+tokensRouter.get(
+  '/:mint',
+  zValidator('param', z.object({ mint: solanaAddressSchema })),
+  async (c) => {
+    const { mint } = c.req.valid('param');
+    
+    const token = await prisma.token.findUnique({
+      where: { id: mint },
+    });
+    
+    if (!token) {
+      return c.json<ApiResponse<null>>({
+        success: false,
+        error: 'Token not found',
+      }, 404);
+    }
+    
+    const stats = await tokenService.getTokenStats(mint);
+    
+    return c.json<ApiResponse<TokenStats>>({
+      success: true,
+      data: stats,
+    });
   }
-  
-  const stats = await tokenService.getTokenStats(mint);
-  
-  return c.json<ApiResponse<TokenStats>>({
-    success: true,
-    data: stats,
-  });
-});
+);
 
 // Get token price
 tokensRouter.get('/:mint/price', async (c) => {
@@ -212,20 +218,6 @@ tokensRouter.get('/:mint/liquidity', async (c) => {
 
 // Token verification endpoints
 
-// Validation schemas for verification
-const verifyTokenSchema = z.object({
-  mint: z.string()
-    .min(32, 'Mint address too short')
-    .max(44, 'Mint address too long')
-    .regex(/^[1-9A-HJ-NP-Za-km-z]+$/, 'Invalid base58 format'),
-});
-
-const batchVerifySchema = z.object({
-  mints: z.array(z.string().min(32).max(44).regex(/^[1-9A-HJ-NP-Za-km-z]+$/))
-    .min(1, 'At least one mint required')
-    .max(10, 'Maximum 10 mints allowed'),
-});
-
 // POST /tokens/verify - Verify a specific token
 tokensRouter.post(
   '/verify',
@@ -234,7 +226,9 @@ tokensRouter.post(
     try {
       const { mint } = c.req.valid('json');
 
-      logger.info(`Token verification request for: ${mint}`);
+      logger.info('Token verification request', { 
+        mint: sanitizeForLogging(mint.substring(0, 8) + '...'),
+      });
 
       // Verify the token
       const result = await tokenVerificationService.verifyToken(mint);
@@ -244,11 +238,12 @@ tokensRouter.post(
         data: result,
       });
     } catch (error) {
-      logger.error('Token verification error:', error);
+      logger.error('Token verification error:', { 
+        error: sanitizeForLogging(error),
+      });
       return c.json({
         success: false,
         error: 'Internal server error',
-        message: error instanceof Error ? error.message : 'Unknown error',
       }, 500);
     }
   }
@@ -293,33 +288,27 @@ tokensRouter.get(
 // POST /tokens/batch-verify - Verify multiple tokens
 tokensRouter.post(
   '/batch-verify',
-  zValidator('json', batchVerifySchema),
+  zValidator('json', batchVerifyTokensSchema),
   async (c) => {
     try {
       const { mints } = c.req.valid('json');
 
-      logger.info(`Batch verification request for ${mints.length} tokens`);
-
-      // Verify all tokens in parallel
-      const verificationPromises = mints.map(mint => 
-        tokenVerificationService.verifyToken(mint)
+      // mints are already sanitized by the schema
+      const results = await Promise.all(
+        mints.map(mint => tokenVerificationService.verifyToken(mint))
       );
-
-      const results = await Promise.all(verificationPromises);
 
       return c.json({
         success: true,
-        data: {
-          results,
-          total: results.length,
-        },
+        data: { results },
       });
     } catch (error) {
-      logger.error('Batch verification error:', error);
+      logger.error('Batch verification error:', { 
+        error: sanitizeForLogging(error),
+      });
       return c.json({
         success: false,
         error: 'Internal server error',
-        message: error instanceof Error ? error.message : 'Unknown error',
       }, 500);
     }
   }
