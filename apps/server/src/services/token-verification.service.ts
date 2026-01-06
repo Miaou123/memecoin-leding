@@ -4,6 +4,9 @@ import { TokenTier } from '@memecoin-lending/types';
 import {
   TokenVerificationResult,
   TokenVerificationCache,
+  PoolBalanceInfo,
+  TokenRejectionCode,
+  DexScreenerResponse,
 } from '@memecoin-lending/types';
 import { getNetworkConfig, PROGRAM_ID, NetworkType, PUMPFUN_PROGRAM_ID } from '@memecoin-lending/config';
 import { manualWhitelistService } from './manual-whitelist.service';
@@ -12,6 +15,25 @@ import BN from 'bn.js';
 import fs from 'fs';
 import path from 'path';
 import { getAdminKeypair } from '../config/keys.js';
+
+// Token suffix patterns
+const PUMPFUN_SUFFIX = 'pump';
+const BONK_SUFFIX = 'bonk';
+
+// Pool balance thresholds
+const MAX_TOKEN_RATIO_PERCENT = 80;  // Max 80% of pool can be the token
+const MIN_QUOTE_RATIO_PERCENT = 20;  // Min 20% must be SOL/USD1
+const MIN_LIQUIDITY_USD = 1000;      // Minimum $1,000 liquidity
+
+// Token age requirement
+const MIN_TOKEN_AGE_HOURS = parseInt(process.env.MIN_TOKEN_AGE_HOURS || '24');  // Token must be at least 24 hours old
+
+// Valid quote tokens
+const VALID_QUOTE_TOKENS = {
+  SOL: 'So11111111111111111111111111111111111111112',
+  // TODO: Replace with actual USD1 mint on mainnet
+  USD1: process.env.USD1_MINT || 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', // Using USDC as placeholder
+};
 
 // Helper function to get PumpFun bonding curve PDA
 function getPumpFunBondingCurve(mint: PublicKey): PublicKey {
@@ -75,7 +97,7 @@ export class TokenVerificationService {
       
       // 1. Validate mint address format
       if (!this.isValidMintAddress(mint)) {
-        return this.createInvalidResult(mint, 'Invalid mint address format');
+        return this.createInvalidResult(mint, 'Invalid mint address format', 'INVALID_ADDRESS');
       }
 
       // 2. Check cache first
@@ -94,16 +116,46 @@ export class TokenVerificationService {
         return result;
       }
 
-      // 4. Must end in "pump" (PumpFun token)
-      if (!mint.toLowerCase().endsWith('pump')) {
-        const result = this.createInvalidResult(mint, 'Token must be from PumpFun (address must end in "pump")');
+      // 4. UPDATED: Check token suffix (pump OR bonk)
+      const mintLower = mint.toLowerCase();
+      const isPumpFun = mintLower.endsWith(PUMPFUN_SUFFIX);
+      const isBonk = mintLower.endsWith(BONK_SUFFIX);
+
+      if (!isPumpFun && !isBonk) {
+        const result = this.createInvalidResult(
+          mint, 
+          'Token must be from PumpFun (address ends in "pump") or Bonk/Raydium (address ends in "bonk")',
+          'NOT_SUPPORTED_DEX'
+        );
         this.cacheResult(mint, result);
         return result;
       }
 
-      console.log(`[TokenVerification] Valid PumpFun token: ${mint.substring(0, 8)}... (ends in pump)`);
+      const dexType = isPumpFun ? 'pumpfun' : 'raydium';
+      console.log(`[TokenVerification] Detected ${dexType} token: ${mint.substring(0, 8)}...`);
 
-      // 5. Check if already on-chain
+      // 5. NEW: Validate pool balance ratio
+      const poolValidation = await this.validatePoolBalance(mint, dexType);
+      
+      if (!poolValidation.isValid) {
+        const result: TokenVerificationResult = {
+          isValid: false,
+          mint,
+          reason: poolValidation.reason,
+          rejectionCode: poolValidation.rejectionCode || 'POOL_IMBALANCED',
+          poolBalance: poolValidation.poolBalance,
+          dexId: dexType,
+          liquidity: poolValidation.liquidity || 0,
+          verifiedAt: Date.now(),
+        };
+        this.cacheResult(mint, result);
+        console.log(`[TokenVerification] Pool validation failed: ${poolValidation.reason}`);
+        return result;
+      }
+
+      console.log(`[TokenVerification] Pool validated: ${poolValidation.poolBalance?.baseTokenPercent.toFixed(1)}% token / ${poolValidation.poolBalance?.quoteTokenPercent.toFixed(1)}% ${poolValidation.poolBalance?.quoteToken}`);
+
+      // 6. Check if already on-chain
       const isOnChain = await this.isTokenOnChain(mint);
       
       if (!isOnChain && this.autoWhitelistEnabled && this.adminKeypair) {
@@ -114,16 +166,21 @@ export class TokenVerificationService {
             mint,
             tier: TokenTier.Bronze,
             ltvBps: 5000,
-            dexId: 'pumpfun',
-            liquidity: 0,
+            dexId: dexType,
+            liquidity: poolValidation.liquidity || 0,
             verifiedAt: Date.now(),
             isWhitelisted: false,
+            poolBalance: poolValidation.poolBalance,
           });
           console.log(`[TokenVerification] Auto-whitelisted ${mint.substring(0, 8)}...`);
         } catch (error: any) {
           if (!error.message?.includes('already in use')) {
             console.error(`[TokenVerification] Auto-whitelist failed:`, error.message);
-            return this.createInvalidResult(mint, 'Failed to whitelist token on-chain. Please try again.');
+            return this.createInvalidResult(
+              mint, 
+              'Failed to whitelist token on-chain. Please try again.',
+              'WHITELIST_FAILED'
+            );
           } else {
             // Token was already whitelisted by another request, sync to database
             try {
@@ -178,17 +235,24 @@ export class TokenVerificationService {
         }
       }
 
-      // 6. Return success
+      // 7. Determine tier based on liquidity
+      const tier = this.determineTier(poolValidation.liquidity || 0);
+
+      // Return success
       const result: TokenVerificationResult = {
         isValid: true,
         mint,
-        tier: TokenTier.Bronze,
-        ltvBps: 5000,
-        liquidity: 0,
-        dexId: 'pumpfun',
+        symbol: poolValidation.symbol,
+        name: poolValidation.name,
+        tier,
+        ltvBps: this.getLtvForTier(tier),
+        liquidity: poolValidation.liquidity || 0,
+        dexId: dexType,
+        pairAddress: poolValidation.pairAddress,
         verifiedAt: Date.now(),
         isWhitelisted: true,
         whitelistSource: 'auto',
+        poolBalance: poolValidation.poolBalance,
       };
       
       this.cacheResult(mint, result);
@@ -263,12 +327,20 @@ export class TokenVerificationService {
     };
   }
 
-  private createInvalidResult(mint: string, reason: string): TokenVerificationResult {
+  /**
+   * Update createInvalidResult to support rejection codes
+   */
+  private createInvalidResult(
+    mint: string, 
+    reason: string,
+    rejectionCode?: TokenRejectionCode
+  ): TokenVerificationResult {
     return {
       isValid: false,
       mint,
       liquidity: 0,
       reason,
+      rejectionCode,
       verifiedAt: Date.now(),
       isWhitelisted: false,
     };
@@ -469,6 +541,226 @@ export class TokenVerificationService {
       delete this.cache[mint];
     } else {
       this.cache = {};
+    }
+  }
+
+  /**
+   * Validate pool balance ratio to ensure sufficient sell-side liquidity.
+   * Rejects if pool has >80% token and <20% SOL/USD1.
+   */
+  private async validatePoolBalance(
+    mint: string,
+    dexType: 'pumpfun' | 'raydium'
+  ): Promise<{
+    isValid: boolean;
+    reason?: string;
+    rejectionCode?: TokenRejectionCode;
+    poolBalance?: PoolBalanceInfo;
+    liquidity?: number;
+    symbol?: string;
+    name?: string;
+    pairAddress?: string;
+  }> {
+    try {
+      // Fetch pool data from DexScreener
+      const response = await fetch(
+        `https://api.dexscreener.com/latest/dex/tokens/${mint}`,
+        { signal: AbortSignal.timeout(10000) }
+      );
+
+      if (!response.ok) {
+        console.warn(`[PoolValidation] DexScreener API error: ${response.status}`);
+        // Fail open if API unavailable
+        return { isValid: true };
+      }
+
+      const data = await response.json() as DexScreenerResponse;
+
+      if (!data.pairs || data.pairs.length === 0) {
+        return {
+          isValid: false,
+          reason: 'No liquidity pool found for this token. The token must have an active trading pool.',
+          rejectionCode: 'INSUFFICIENT_LIQUIDITY',
+        };
+      }
+
+      // Filter for valid quote tokens based on DEX type
+      const validPools = data.pairs.filter(pair => {
+        const quoteAddress = pair.quoteToken.address;
+        
+        // PumpFun tokens: SOL pairs only
+        if (dexType === 'pumpfun') {
+          return quoteAddress === VALID_QUOTE_TOKENS.SOL;
+        }
+        
+        // Bonk/Raydium tokens: SOL or USD1 pairs
+        return (
+          quoteAddress === VALID_QUOTE_TOKENS.SOL ||
+          quoteAddress === VALID_QUOTE_TOKENS.USD1
+        );
+      });
+
+      if (validPools.length === 0) {
+        const acceptedQuotes = dexType === 'pumpfun' ? 'SOL' : 'SOL or USD1';
+        return {
+          isValid: false,
+          reason: `Token must be paired with ${acceptedQuotes}. Found pairs with: ${data.pairs.map(p => p.quoteToken.symbol).join(', ')}`,
+          rejectionCode: 'NOT_SUPPORTED_DEX',
+        };
+      }
+
+      // Get the pool with highest liquidity
+      const bestPool = validPools.reduce((best, current) => {
+        return (current.liquidity?.usd || 0) > (best.liquidity?.usd || 0) ? current : best;
+      });
+
+      const totalLiquidity = bestPool.liquidity?.usd || 0;
+
+      // Check minimum liquidity
+      if (totalLiquidity < MIN_LIQUIDITY_USD) {
+        return {
+          isValid: false,
+          reason: `Insufficient liquidity: $${totalLiquidity.toLocaleString()}. Minimum $${MIN_LIQUIDITY_USD.toLocaleString()} required.`,
+          rejectionCode: 'INSUFFICIENT_LIQUIDITY',
+          liquidity: totalLiquidity,
+        };
+      }
+
+      // Check token age (must be at least 24 hours old)
+      if (bestPool.pairCreatedAt) {
+        const ageMs = Date.now() - bestPool.pairCreatedAt;
+        const ageHours = ageMs / (1000 * 60 * 60);
+        
+        if (ageHours < MIN_TOKEN_AGE_HOURS) {
+          const hoursRemaining = Math.ceil(MIN_TOKEN_AGE_HOURS - ageHours);
+          const minutesOld = Math.floor(ageMs / (1000 * 60));
+          
+          let ageDisplay: string;
+          if (minutesOld < 60) {
+            ageDisplay = `${minutesOld} minutes`;
+          } else {
+            ageDisplay = `${Math.floor(ageHours)} hours`;
+          }
+          
+          return {
+            isValid: false,
+            reason: `Token is too new (${ageDisplay} old). Must be at least ${MIN_TOKEN_AGE_HOURS} hours old for safety. Try again in ~${hoursRemaining} hour${hoursRemaining > 1 ? 's' : ''}.`,
+            rejectionCode: 'TOKEN_TOO_NEW',
+            liquidity: totalLiquidity,
+            symbol: bestPool.baseToken.symbol,
+            name: bestPool.baseToken.name,
+          };
+        }
+      }
+
+      // Calculate pool balance ratio
+      const baseBalance = bestPool.liquidity?.base || 0;  // Token amount
+      const quoteBalance = bestPool.liquidity?.quote || 0; // SOL/USD1 amount
+
+      if (baseBalance > 0 && quoteBalance > 0) {
+        const tokenPriceUsd = parseFloat(bestPool.priceUsd || '0');
+        const quotePriceUsd = await this.getQuoteTokenPrice(bestPool.quoteToken.address);
+
+        const baseValueUsd = baseBalance * tokenPriceUsd;
+        const quoteValueUsd = quoteBalance * quotePriceUsd;
+        const totalValueUsd = baseValueUsd + quoteValueUsd;
+
+        if (totalValueUsd > 0) {
+          const basePercent = (baseValueUsd / totalValueUsd) * 100;
+          const quotePercent = (quoteValueUsd / totalValueUsd) * 100;
+
+          const poolBalance: PoolBalanceInfo = {
+            baseTokenBalance: baseBalance,
+            quoteTokenBalance: quoteBalance,
+            baseTokenPercent: Math.round(basePercent * 100) / 100,
+            quoteTokenPercent: Math.round(quotePercent * 100) / 100,
+            quoteToken: bestPool.quoteToken.symbol,
+            isBalanced: basePercent <= MAX_TOKEN_RATIO_PERCENT && quotePercent >= MIN_QUOTE_RATIO_PERCENT,
+          };
+
+          // Check if pool is imbalanced
+          if (!poolBalance.isBalanced) {
+            return {
+              isValid: false,
+              reason: `Pool is imbalanced: ${basePercent.toFixed(1)}% ${bestPool.baseToken.symbol} / ${quotePercent.toFixed(1)}% ${poolBalance.quoteToken}. Minimum ${MIN_QUOTE_RATIO_PERCENT}% ${poolBalance.quoteToken} required for safe liquidation.`,
+              rejectionCode: 'POOL_IMBALANCED',
+              poolBalance,
+              liquidity: totalLiquidity,
+            };
+          }
+
+          // Pool is valid!
+          return {
+            isValid: true,
+            poolBalance,
+            liquidity: totalLiquidity,
+            symbol: bestPool.baseToken.symbol,
+            name: bestPool.baseToken.name,
+            pairAddress: bestPool.pairAddress,
+          };
+        }
+      }
+
+      // Fallback: allow if we can't calculate ratio but liquidity is sufficient
+      return {
+        isValid: true,
+        liquidity: totalLiquidity,
+        symbol: bestPool.baseToken.symbol,
+        name: bestPool.baseToken.name,
+        pairAddress: bestPool.pairAddress,
+      };
+
+    } catch (error) {
+      console.error(`[PoolValidation] Error checking pool balance:`, error);
+      // Fail open - allow token if we can't verify
+      return { isValid: true };
+    }
+  }
+
+  /**
+   * Get USD price for a quote token
+   */
+  private async getQuoteTokenPrice(quoteTokenAddress: string): Promise<number> {
+    // USD1/USDC is always ~$1
+    if (quoteTokenAddress === VALID_QUOTE_TOKENS.USD1) {
+      return 1;
+    }
+
+    // For SOL, fetch current price
+    if (quoteTokenAddress === VALID_QUOTE_TOKENS.SOL) {
+      try {
+        const response = await fetch(
+          'https://api.jup.ag/price/v2?ids=So11111111111111111111111111111111111111112',
+          { signal: AbortSignal.timeout(5000) }
+        );
+        const data = await response.json();
+        return data?.data?.['So11111111111111111111111111111111111111112']?.price || 150;
+      } catch {
+        return 150; // Fallback price
+      }
+    }
+
+    return 1; // Unknown - assume $1
+  }
+
+  /**
+   * Determine tier based on liquidity
+   */
+  private determineTier(liquidityUsd: number): TokenTier {
+    if (liquidityUsd >= 300000) return TokenTier.Gold;
+    if (liquidityUsd >= 100000) return TokenTier.Silver;
+    return TokenTier.Bronze;
+  }
+
+  /**
+   * Get LTV for tier
+   */
+  private getLtvForTier(tier: TokenTier): number {
+    switch (tier) {
+      case TokenTier.Gold: return 5000;   // 50%
+      case TokenTier.Silver: return 3500; // 35%
+      case TokenTier.Bronze: return 2500; // 25%
+      default: return 2500;
     }
   }
 }
