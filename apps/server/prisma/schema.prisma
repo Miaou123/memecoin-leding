@@ -217,3 +217,21 @@ model LiquidationResult {
   @@index([lossBps])
   @@index([autoBlacklisted])
 }
+
+model VerificationRequest {
+  id                   String   @id @default(uuid())
+  mint                 String
+  requestedBy          String   // wallet address
+  status               String   @default("pending") // pending, approved, rejected, expired
+  reason               String?  // User's reason for requesting
+  adminResponse        String?  // Admin's response
+  reviewedBy           String?  // Admin identifier who reviewed
+  telegramMessageId    String?  // Telegram message ID for updating
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  reviewedAt           DateTime?
+  
+  @@index([mint])
+  @@index([requestedBy])
+  @@index([status])
+}

@@ -306,12 +306,11 @@ class StakingService {
       if (!userStakePDA.equals(expectedPDA)) {
         console.error(`[SECURITY] UserStake PDA mismatch! Config: ${userStakePDA.toString()}, Expected: ${expectedPDA.toString()}`);
         
-        // SECURITY: Log PDA derivation mismatch - potential config tampering
         await securityMonitor.log({
-          severity: 'HIGH',
+          severity: 'CRITICAL',  // Changed from HIGH to CRITICAL
           category: 'Staking',
           eventType: SECURITY_EVENT_TYPES.STAKING_PDA_MISMATCH,
-          message: 'UserStake PDA derivation mismatch detected',
+          message: 'UserStake PDA derivation mismatch detected - potential tampering',
           details: {
             userAddress: address.slice(0, 8) + '...',
             configPDA: userStakePDA.toString().slice(0, 8) + '...',
@@ -322,7 +321,8 @@ class StakingService {
           userId: address,
         });
         
-        return null;
+        // SECURITY: Hard fail on PDA mismatch - this should never happen normally
+        throw new Error('Security violation: PDA derivation mismatch');
       }
       
       // Fetch account info

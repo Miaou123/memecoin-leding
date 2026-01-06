@@ -63,56 +63,39 @@ export const authMiddleware = async (c: Context, next: Next) => {
           publicKey: publicKey.substring(0, 8) + '...',
           path: c.req.path,
           userAgent,
+          requestId: c.get('requestId'),
         },
         source: 'auth-middleware',
         ip,
-        requestId: c.get('requestId'),
       });
       throw new Error('Invalid public key format');
     }
     
-    // Check timestamp is within 5 minutes
+    // Validate timestamp is within 5 minutes
+    const MAX_TIMESTAMP_AGE_MS = 5 * 60 * 1000; // 5 minutes
+    const timestampNum = parseInt(timestamp || '0', 10);
     const now = Date.now();
-    const signatureTime = parseInt(timestamp);
     
-    if (isNaN(signatureTime)) {
+    if (!timestampNum || Math.abs(now - timestampNum) > MAX_TIMESTAMP_AGE_MS) {
       await securityMonitor.log({
         severity: 'MEDIUM',
         category: 'Authentication',
-        eventType: SECURITY_EVENT_TYPES.AUTH_SIGNATURE_INVALID,
-        message: 'Invalid timestamp format in authentication',
+        eventType: 'AUTH_TIMESTAMP_EXPIRED',
+        message: 'Request signature expired or invalid timestamp',
         details: {
-          timestamp,
-          publicKey: publicKey.substring(0, 8) + '...',
+          providedTimestamp: timestampNum,
+          serverTime: now,
+          diffMs: Math.abs(now - timestampNum),
+          maxAgeMs: MAX_TIMESTAMP_AGE_MS,
           path: c.req.path,
-          userAgent,
         },
         source: 'auth-middleware',
         ip,
-        userId: publicKey,
       });
-      throw new Error('Invalid timestamp format');
-    }
-    
-    const timeDiff = Math.abs(now - signatureTime);
-    if (timeDiff > 5 * 60 * 1000) {
-      await securityMonitor.log({
-        severity: 'MEDIUM',
-        category: 'Authentication',
-        eventType: SECURITY_EVENT_TYPES.AUTH_SIGNATURE_EXPIRED,
-        message: `Authentication signature expired by ${Math.round(timeDiff / 1000)}s`,
-        details: {
-          timeDiff: Math.round(timeDiff / 1000),
-          maxAge: 300, // 5 minutes
-          publicKey: publicKey.substring(0, 8) + '...',
-          path: c.req.path,
-          userAgent,
-        },
-        source: 'auth-middleware',
-        ip,
-        userId: publicKey,
-      });
-      throw new Error('Signature expired');
+      
+      if (c.req.path.startsWith('/api/admin') || c.req.path.includes('/loans')) {
+        throw new HTTPException(401, { message: 'Request expired' });
+      }
     }
     
     // Verify signature cryptographically

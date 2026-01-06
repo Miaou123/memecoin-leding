@@ -29,6 +29,8 @@ import adminFeesRouter, { setFeeClaimerService } from './routes/admin/fees.js';
 import { stakingRoutes } from './routes/staking.js';
 import { securityRoutes } from './routes/admin/security.routes.js';
 import { testAuthRouter } from './api/test-auth.js';
+import verificationRequestRouter from './routes/verification-request.js';
+import telegramWebhookRouter from './routes/telegram-webhook.js';
 
 // Import services
 import { initializeJobs } from './jobs/index.js';
@@ -70,6 +72,19 @@ const app = new Hono();
 // Global service instance
 let feeClaimerService: FeeClaimerService | null = null;
 
+// CORS Configuration
+const getAllowedOrigins = (): string[] => {
+  if (process.env.CORS_ORIGIN) {
+    return process.env.CORS_ORIGIN.split(',').map(o => o.trim());
+  }
+  if (process.env.NODE_ENV === 'production') {
+    console.error('❌ FATAL: CORS_ORIGIN must be set in production');
+    process.exit(1);
+  }
+  // Only allow these in development
+  return ['http://localhost:3000', 'http://localhost:3001', 'http://localhost:5173'];
+};
+
 // ============================================
 // MIDDLEWARE ORDER MATTERS - Apply in this order:
 // ============================================
@@ -91,7 +106,7 @@ app.use('*', apiSecurityHeaders);
 
 // 5. CORS
 app.use('*', cors({
-  origin: process.env.CORS_ORIGIN?.split(',') || ['http://localhost:3000', 'http://localhost:3001', 'http://localhost:5173'],
+  origin: getAllowedOrigins(),
   credentials: true,
 }));
 
@@ -123,6 +138,12 @@ app.route('/api/admin/fees', adminFeesRouter);
 // Admin routes - Signature based (wallet authentication)
 app.route('/api/admin/whitelist', adminWhitelistRouter);
 app.route('/api/admin/security', securityRoutes);
+
+// Verification requests (requires auth)
+app.route('/api/verification-request', verificationRequestRouter);
+
+// Telegram webhook
+app.route('/telegram/webhook', telegramWebhookRouter);
 
 // Health routes
 app.route('/', healthRouter);  // /health, /ready, /metrics at root
@@ -156,7 +177,21 @@ const validateEnvironment = () => {
     warnings.push('⚠️  REDIS_URL not set - background jobs may not work properly');
   }
   
-  if (!process.env.ADMIN_API_KEY) {
+  if (process.env.ADMIN_API_KEY) {
+    const key = process.env.ADMIN_API_KEY;
+    if (key.length < 32) {
+      if (process.env.NODE_ENV === 'production') {
+        errors.push('❌ ADMIN_API_KEY must be at least 32 characters in production');
+      } else {
+        warnings.push('⚠️  ADMIN_API_KEY should be at least 32 characters');
+      }
+    }
+    if (process.env.NODE_ENV === 'production' && !/[A-Z].*[0-9]|[0-9].*[A-Z]/.test(key)) {
+      warnings.push('⚠️  ADMIN_API_KEY should contain both uppercase letters and numbers');
+    }
+  } else if (process.env.NODE_ENV === 'production') {
+    errors.push('❌ ADMIN_API_KEY is required in production');
+  } else {
     warnings.push('⚠️  ADMIN_API_KEY not set - admin endpoints will not work');
   }
   

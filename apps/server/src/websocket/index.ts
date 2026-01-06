@@ -5,6 +5,7 @@ import { WebSocketEvent, WebSocketMessage, SubscriptionParams } from '@memecoin-
 import { securityMonitor } from '../services/security-monitor.service.js';
 import { SECURITY_EVENT_TYPES } from '@memecoin-lending/types';
 import { IncomingMessage } from 'http';
+import { checkWsRateLimit, clearWsRateLimit } from '../middleware/wsRateLimit.js';
 
 interface WebSocketConnection {
   ws: WebSocket;
@@ -12,6 +13,7 @@ interface WebSocketConnection {
   subscriptions: Set<string>;
   ip: string;
   connectedAt: number;
+  connectionId: string;
 }
 
 class WebSocketService {
@@ -67,6 +69,7 @@ class WebSocketService {
     
     const url = parse(request.url || '', true);
     const userId = url.query.userId as string;
+    const connectionId = `${ip}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     
     const connection: WebSocketConnection = {
       ws,
@@ -74,6 +77,7 @@ class WebSocketService {
       subscriptions: new Set(),
       ip,
       connectedAt: Date.now(),
+      connectionId,
     };
     
     this.connections.set(ws, connection);
@@ -113,8 +117,38 @@ class WebSocketService {
   
   private async handleMessage(ws: WebSocket, data: any) {
     try {
-      const message: WebSocketMessage = JSON.parse(data.toString());
       const connection = this.connections.get(ws);
+      if (!connection) return;
+      
+      // Check rate limit
+      const rateLimitResult = checkWsRateLimit(connection.connectionId);
+      if (!rateLimitResult.allowed) {
+        await securityMonitor.log({
+          severity: rateLimitResult.reason?.includes('terminated') ? 'HIGH' : 'MEDIUM',
+          category: 'WebSocket',
+          eventType: SECURITY_EVENT_TYPES.WS_CONNECTION_FLOOD,
+          message: `WebSocket rate limit exceeded: ${rateLimitResult.reason}`,
+          details: {
+            connectionId: connection.connectionId,
+            userId: connection.userId,
+            ip: connection.ip,
+            reason: rateLimitResult.reason,
+          },
+          source: 'websocket',
+          ip: connection.ip,
+          userId: connection.userId,
+        });
+        
+        if (rateLimitResult.reason?.includes('terminated')) {
+          ws.close(1008, rateLimitResult.reason);
+          return;
+        }
+        
+        // Just drop the message if not terminating
+        return;
+      }
+      
+      const message: WebSocketMessage = JSON.parse(data.toString());
       
       if (!connection) return;
       
@@ -342,6 +376,11 @@ class WebSocketService {
           this.connectionsByIp.delete(connection.ip);
         }
       }
+    }
+    
+    // Clear rate limit for this connection
+    if (connection?.connectionId) {
+      clearWsRateLimit(connection.connectionId);
     }
     
     this.connections.delete(ws);

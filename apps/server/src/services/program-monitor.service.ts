@@ -5,6 +5,7 @@ import { SECURITY_EVENT_TYPES } from '@memecoin-lending/types';
 import { prisma } from '../db/client.js';
 import { getAdminKeypair } from '../config/keys.js';
 import { MemecoinLendingClient } from '@memecoin-lending/sdk';
+import { sha256 } from '@noble/hashes/sha256';
 import fs from 'fs';
 import path from 'path';
 
@@ -20,6 +21,16 @@ interface TrackedTransaction {
   timestamp: number;
   source: 'backend' | 'unknown';
 }
+
+// Anchor instruction discriminators (first 8 bytes of sha256("global:instruction_name"))
+function getDiscriminator(instructionName: string): Buffer {
+  const hash = sha256(Buffer.from(`global:${instructionName}`));
+  return Buffer.from(hash.slice(0, 8));
+}
+
+const CREATE_LOAN_DISCRIMINATOR = getDiscriminator('create_loan');
+const REPAY_LOAN_DISCRIMINATOR = getDiscriminator('repay_loan');
+const LIQUIDATE_DISCRIMINATOR = getDiscriminator('liquidate');
 
 class ProgramMonitorService {
   private connection: Connection;
@@ -205,15 +216,10 @@ class ProgramMonitorService {
           // Try to decode the instruction
           const data = ix.data;
           
-          // Simple heuristic based on instruction discriminator
-          // You'd need to match these with your actual program's instruction discriminators
+          // Parse instruction based on discriminator
           if (data && Buffer.isBuffer(data)) {
             // Check first 8 bytes for instruction discriminator
             const discriminator = data.slice(0, 8);
-            
-            // These would be your actual discriminators
-            const CREATE_LOAN_DISCRIMINATOR = Buffer.from([/* your values */]);
-            const REPAY_LOAN_DISCRIMINATOR = Buffer.from([/* your values */]);
             
             if (discriminator.equals(CREATE_LOAN_DISCRIMINATOR)) {
               instructions.push({
@@ -223,6 +229,11 @@ class ProgramMonitorService {
             } else if (discriminator.equals(REPAY_LOAN_DISCRIMINATOR)) {
               instructions.push({
                 type: 'repayLoan',
+                data: { /* parsed data */ },
+              });
+            } else if (discriminator.equals(LIQUIDATE_DISCRIMINATOR)) {
+              instructions.push({
+                type: 'liquidate',
                 data: { /* parsed data */ },
               });
             }
