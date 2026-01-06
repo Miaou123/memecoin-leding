@@ -42,6 +42,7 @@ import { FeeClaimerService } from './services/fee-claimer.service.js';
 import { treasuryMonitor } from './services/treasury-monitor.service.js';
 import { treasuryHealthService } from './services/treasury-health.service.js';
 import { validateMainnetConfig, getNetworkConfig, isMainnet } from './config/network.js';
+import { programMonitor } from './services/program-monitor.service.js';
 import { Connection, Keypair } from '@solana/web3.js';
 import { Program, AnchorProvider, Wallet, Idl } from '@coral-xyz/anchor';
 import { PROGRAM_ID } from '@memecoin-lending/config';
@@ -353,6 +354,13 @@ const server = serve({
   } else {
     console.log('⚠️ TREASURY_PDA not set, treasury health monitoring disabled');
   }
+  
+  // Initialize program monitor for detecting direct access
+  programMonitor.startMonitoring().then(() => {
+    console.log('🔍 Program monitor started - detecting direct program access');
+  }).catch((error) => {
+    console.error('Failed to start program monitor:', error);
+  });
 });
 
 // Initialize WebSocket - pass the server, it creates WebSocketServer internally
@@ -375,6 +383,10 @@ async function gracefulShutdown(signal: string) {
     
     // Stop treasury health service
     treasuryHealthService.stop();
+    
+    // Stop program monitor
+    console.log('Stopping program monitor...');
+    programMonitor.stopMonitoring();
     
     await fastPriceMonitor.shutdown();
     wss.close();

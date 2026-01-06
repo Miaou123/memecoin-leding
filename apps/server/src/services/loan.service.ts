@@ -25,6 +25,8 @@ import { recordLiquidationResult } from './liquidation-tracker.service.js';
 import { PROGRAM_ID, getNetworkConfig, getCurrentNetwork } from '@memecoin-lending/config';
 import { getAdminKeypair } from '../config/keys.js';
 import { executeSwap } from './jupiter-swap.service.js';
+import { lpLimitsService } from './lp-limits.service.js';
+import { programMonitor } from './program-monitor.service.js';
 
 // Helper functions for manual TokenConfig deserialization
 function readPubkey(buffer: Buffer, offset: number): PublicKey {
@@ -259,6 +261,31 @@ class LoanService {
       //   throw new Error('Insufficient treasury balance');
       // }
       
+      // Check LP limits before creating loan
+      console.log('[LoanService] Checking LP limits for token:', params.tokenMint.substring(0, 8) + '...');
+      const lpCheck = await lpLimitsService.checkLPLimits(params.tokenMint, loanEstimate.solAmount);
+      
+      if (!lpCheck.allowed) {
+        await securityMonitor.log({
+          severity: 'HIGH',
+          category: 'Loans',
+          eventType: SECURITY_EVENT_TYPES.LOAN_LP_LIMIT_EXCEEDED,
+          message: 'Loan creation blocked due to LP limit',
+          details: {
+            tokenMint: params.tokenMint,
+            reason: lpCheck.reason,
+            currentUsage: lpCheck.currentUsage,
+            maxUsage: lpCheck.maxUsage,
+            lpValue: lpCheck.lpValue,
+            requestedAmount: loanEstimate.solAmount,
+            borrower: params.borrower,
+          },
+          source: 'loan-service',
+          userId: params.borrower,
+        });
+        throw new Error(lpCheck.reason || 'Loan would exceed liquidity pool limits');
+      }
+      
       // Build unsigned transaction
       const tx = await buildCreateLoanTransaction(client.program, {
         tokenMint: new PublicKey(params.tokenMint),
@@ -435,6 +462,9 @@ class LoanService {
   }
   
   async confirmRepayment(loanPubkey: string, txSignature: string): Promise<Loan> {
+    // Track this transaction as coming from our backend
+    programMonitor.trackBackendTransaction(txSignature);
+    
     // Verify the loan exists
     const existingLoan = await prisma.loan.findUnique({
       where: { id: loanPubkey },
@@ -781,6 +811,9 @@ class LoanService {
     tokenMint: string;
   }): Promise<Loan> {
     const client = await this.getClient();
+    
+    // Track this transaction as coming from our backend
+    programMonitor.trackBackendTransaction(params.txSignature);
     
     let loanPubkey = params.loanPubkey;
     

@@ -6,6 +6,7 @@ import { syncJob } from './sync.job.js';
 import { notificationJob } from './notification.job.js';
 import { distributionCrankJob } from './distribution-crank.job.js';
 import { dailySummaryJob } from './daily-summary.job.js';
+import { scheduleLPMonitoring } from './lp-monitor.job.js';
 import { securityMonitor } from '../services/security-monitor.service.js';
 import { SECURITY_EVENT_TYPES } from '@memecoin-lending/types';
 
@@ -117,6 +118,10 @@ export async function initializeJobs() {
     await setupRepeatableJobs(distributionCrankQueue, [
       { name: 'distribution-tick', data: {}, every: 30000 },
     ]);
+    
+    // Schedule LP monitoring job
+    await scheduleLPMonitoring();
+    console.log('📊 LP monitoring job scheduled');
     
     // SECURITY: Enhanced error handlers with security logging
     liquidationWorker.on('failed', async (job, err) => {

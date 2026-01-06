@@ -1011,6 +1011,49 @@ class PriceService {
     
     return Object.values(grouped).sort((a, b) => a.timestamp - b.timestamp);
   }
+
+  /**
+   * Get extended price data including liquidity info
+   */
+  async getExtendedPriceData(mint: string): Promise<{ liquidity?: { usd: number } } & PriceData> {
+    try {
+      // Try DexScreener first as it includes liquidity data
+      const response = await fetch(
+        `https://api.dexscreener.com/latest/dex/tokens/${mint}`,
+        { signal: AbortSignal.timeout(5000) }
+      );
+      
+      if (!response.ok) {
+        throw new Error(`DexScreener API error: ${response.status}`);
+      }
+      
+      const data = await response.json() as DexScreenerResponse;
+      
+      if (!data.pairs || data.pairs.length === 0) {
+        // Fallback to regular price data
+        const priceData = await this.getCurrentPrice(mint);
+        return priceData;
+      }
+      
+      // Get the pair with highest liquidity
+      const bestPair = data.pairs.reduce((best, current) => {
+        return (current.liquidity?.usd || 0) > (best.liquidity?.usd || 0) ? current : best;
+      });
+      
+      return {
+        tokenMint: mint,
+        price: bestPair.priceUsd,
+        timestamp: Date.now(),
+        source: 'dexscreener' as any,
+        liquidity: bestPair.liquidity,
+      };
+    } catch (error: any) {
+      console.error('[PriceService] Failed to get extended price data:', error);
+      // Fallback to regular price without liquidity
+      const priceData = await this.getCurrentPrice(mint);
+      return priceData;
+    }
+  }
 }
 
 export const priceService = new PriceService();
