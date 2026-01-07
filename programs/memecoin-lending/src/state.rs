@@ -89,8 +89,9 @@ pub struct ProtocolState {
     pub buyback_fee_bps: u16,
     /// Operations fee split in basis points (default 500 = 5%)
     pub operations_fee_bps: u16,
-    /// Track SOL in treasury
-    pub treasury_balance: u64,
+    /// DEPRECATED: Do not use. Always read actual balance with treasury.lamports()
+    /// Kept for account compatibility only
+    pub _deprecated_treasury_balance: u64,
     /// Deprecated field - kept for account compatibility
     pub _deprecated_liquidation_bonus: u16,
     /// Reentrancy protection guard
@@ -123,7 +124,7 @@ impl ProtocolState {
         2 + // treasury_fee_bps
         2 + // buyback_fee_bps
         2 + // operations_fee_bps
-        8 + // treasury_balance
+        8 + // _deprecated_treasury_balance
         2 + // _deprecated_liquidation_bonus
         1 + // reentrancy_guard
         32 + // pending_admin

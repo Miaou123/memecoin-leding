@@ -83,10 +83,8 @@ function getProgramIdForNetwork(network: string = 'devnet'): string {
   if (process.env.PROGRAM_ID) return process.env.PROGRAM_ID;
   if (process.env.VITE_PROGRAM_ID) return process.env.VITE_PROGRAM_ID;
   
-  // Fallback - use known devnet program ID
-  // Fallback - use known devnet program ID
-  // Silent fallback since deployment files may not be accessible from all contexts
-  return 'Ex1UJrdAUqosatT1moQSPTMepfKtnKWKfsKMTjZBeKva';
+  // No fallback - deployment must be properly configured
+  throw new Error(`Program ID not found for network: ${network}. Check deployments/${network}-latest.json`);
 }
 
 // Current network

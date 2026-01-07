@@ -2,12 +2,10 @@ use anchor_lang::prelude::*;
 use anchor_lang::system_program;
 use crate::state::*;
 use crate::error::LendingError;
-use crate::utils::*;
 
 #[derive(Accounts)]
 pub struct FundTreasury<'info> {
     #[account(
-        mut,
         seeds = [PROTOCOL_STATE_SEED],
         bump = protocol_state.bump
     )]
@@ -29,9 +27,6 @@ pub struct FundTreasury<'info> {
 pub fn fund_treasury_handler(ctx: Context<FundTreasury>, amount: u64) -> Result<()> {
     require!(amount > 0, LendingError::InvalidLoanAmount);
 
-    // Need to make protocol_state mutable
-    let protocol_state = &mut ctx.accounts.protocol_state;
-
     system_program::transfer(
         CpiContext::new(
             ctx.accounts.system_program.to_account_info(),
@@ -43,8 +38,9 @@ pub fn fund_treasury_handler(ctx: Context<FundTreasury>, amount: u64) -> Result<
         amount,
     )?;
     
-    // Track the deposit
-    protocol_state.treasury_balance = SafeMath::add(protocol_state.treasury_balance, amount)?;
+    // Note: We don't track treasury_balance in protocol_state anymore
+    // to avoid desync issues. Always use ctx.accounts.treasury.lamports()
+    // for the actual balance.
     
     Ok(())
 }

@@ -23,7 +23,11 @@ let cachedDeployment: DeploymentConfig | null = null;
 export function loadDeployment(): DeploymentConfig {
   if (cachedDeployment) return cachedDeployment;
   
-  const network = process.env.SOLANA_NETWORK || 'devnet';
+  let network = process.env.SOLANA_NETWORK || 'devnet';
+
+  if (network === 'mainnet-beta') {
+    network = 'mainnet';
+  }
   
   const possiblePaths = [
     path.join(process.cwd(), 'deployments', `${network}-latest.json`),

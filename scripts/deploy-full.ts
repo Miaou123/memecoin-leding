@@ -481,6 +481,7 @@ program
   .option('--no-fund', 'Skip treasury funding')
   .option('-k, --admin-keypair <path>', 'Path to admin keypair', './keys/admin.json')
   .option('--staking-token <mint>', 'Governance token mint for staking (optional)')
+  .option('--confirm-mainnet', 'Confirm mainnet deployment', false) 
   .action(async (options) => {
     // Safety check for mainnet
     if (options.network === 'mainnet') {

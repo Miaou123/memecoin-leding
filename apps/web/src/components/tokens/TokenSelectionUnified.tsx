@@ -2,6 +2,7 @@ import { Component, createSignal, createEffect, Show, For } from 'solid-js';
 import { WalletToken } from '@/hooks/useWalletPumpTokens';
 import { api } from '@/lib/api';
 import { formatSOL, formatNumber, formatTokenAmount, shortenAddress } from '@/lib/utils';
+import { getProtocolTokenMint } from '@/config/tokens';
 
 interface TokenWithPrice extends WalletToken {
   price?: string;
@@ -52,11 +53,11 @@ export const TokenSelectionUnified: Component<TokenSelectionUnifiedProps> = (pro
 
     setIsLoadingPrices(true);
     try {
-      const protocolTokenMint = '6KHL8uUXFie8Xdy3EBvw6EgruiU3duc9fvGrWoZ9pump';
+      const protocolTokenMint = getProtocolTokenMint();
       
-      // Always include the protocol token even if user doesn't hold it
+      // Only include protocol token if it's configured
       const tokensToProcess = [...tokens];
-      if (!tokens.some(t => t.mint === protocolTokenMint)) {
+      if (protocolTokenMint && !tokens.some(t => t.mint === protocolTokenMint)) {
         tokensToProcess.unshift({
           mint: protocolTokenMint,
           balance: '0',
@@ -99,9 +100,11 @@ export const TokenSelectionUnified: Component<TokenSelectionUnifiedProps> = (pro
 
       // Sort by USD value (highest first), but always prioritize the protocol token
       enrichedTokens.sort((a, b) => {
-        // Always show protocol token first
-        if (a.mint === protocolTokenMint) return -1;
-        if (b.mint === protocolTokenMint) return 1;
+        // Show protocol token first if it exists
+        if (protocolTokenMint) {
+          if (a.mint === protocolTokenMint) return -1;
+          if (b.mint === protocolTokenMint) return 1;
+        }
         // Then sort by USD value
         return (b.usdValue || 0) - (a.usdValue || 0);
       });
@@ -110,7 +113,8 @@ export const TokenSelectionUnified: Component<TokenSelectionUnifiedProps> = (pro
       console.error('Error fetching token prices:', error);
       // Still show tokens without prices, including protocol token
       const tokensToShow = [...tokens];
-      if (!tokens.some(t => t.mint === protocolTokenMint)) {
+      const protocolTokenMint = getProtocolTokenMint();
+      if (protocolTokenMint && !tokens.some(t => t.mint === protocolTokenMint)) {
         tokensToShow.unshift({
           mint: protocolTokenMint,
           balance: '0',

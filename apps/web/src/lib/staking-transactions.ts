@@ -2,13 +2,14 @@ import { Connection, PublicKey, TransactionInstruction, Transaction, SystemProgr
 import { TOKEN_PROGRAM_ID, getAssociatedTokenAddress } from '@solana/spl-token';
 import BN from 'bn.js';
 import { 
-  PROGRAM_ID, 
   getDeploymentConfig,
   type Network
 } from '@memecoin-lending/config';
+import { getProgramId } from '@/config/deployment';
 
 // Get network from environment
 const NETWORK = (import.meta.env.VITE_SOLANA_NETWORK || 'devnet') as Network;
+const PROGRAM_ID = getProgramId();
 
 function getStakingAddresses() {
   const config = getDeploymentConfig(NETWORK);

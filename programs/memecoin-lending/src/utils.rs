@@ -598,6 +598,36 @@ impl PdaUtils {
     }
 }
 
+/// Treasury utilities
+pub struct TreasuryUtils;
+
+impl TreasuryUtils {
+    /// Get the actual treasury balance from the account
+    /// This should always be used instead of the deprecated protocol_state.treasury_balance
+    pub fn get_treasury_balance(treasury_account: &AccountInfo) -> u64 {
+        treasury_account.lamports()
+    }
+    
+    /// Get available balance (total - reserved for active loans - rent exempt minimum)
+    /// This ensures the treasury never becomes non-rent-exempt
+    pub fn get_available_balance(
+        treasury_account: &AccountInfo,
+        total_sol_borrowed: u64,
+    ) -> Result<u64> {
+        let total_balance = Self::get_treasury_balance(treasury_account);
+        
+        // Calculate rent exempt minimum for a SystemAccount (0 data size)
+        let rent = Rent::get()?;
+        let rent_exempt_minimum = rent.minimum_balance(0);
+        
+        // Reserved amount includes both borrowed funds and rent minimum
+        let reserved = total_sol_borrowed.saturating_add(rent_exempt_minimum);
+        
+        // Use saturating_sub to safely handle edge cases
+        Ok(total_balance.saturating_sub(reserved))
+    }
+}
+
 /// Exposure calculation utilities
 pub struct ExposureCalculator;
 

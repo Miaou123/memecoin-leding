@@ -190,10 +190,6 @@ const validateEnvironment = () => {
   const warnings: string[] = [];
   const errors: string[] = [];
 
-  if (!process.env.JUPITER_API_KEY) {
-    warnings.push('⚠️  JUPITER_API_KEY not set - using public endpoints (rate limited)');
-  }
-
   if (!process.env.DATABASE_URL) {
     errors.push('❌ DATABASE_URL is required');
   }

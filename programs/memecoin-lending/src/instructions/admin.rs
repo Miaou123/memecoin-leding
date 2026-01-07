@@ -183,16 +183,17 @@ pub fn update_liquidator_handler(
 pub fn withdraw_treasury_handler(ctx: Context<WithdrawTreasury>, amount: u64) -> Result<()> {
     let protocol_state = &mut ctx.accounts.protocol_state;
     
-    // Check treasury has sufficient balance
-    let treasury_balance = ctx.accounts.treasury.lamports();
+    // Check treasury has sufficient balance using the utility function
+    let treasury_balance = TreasuryUtils::get_treasury_balance(&ctx.accounts.treasury.to_account_info());
     if treasury_balance < amount {
         return Err(LendingError::InsufficientTreasuryBalance.into());
     }
 
     // Ensure we don't withdraw funds needed for active loans
-    // In a production system, you'd track reserved funds separately
-    let reserved_for_loans = protocol_state.total_sol_borrowed;
-    let available_balance = SafeMath::sub(treasury_balance, reserved_for_loans)?;
+    let available_balance = TreasuryUtils::get_available_balance(
+        &ctx.accounts.treasury.to_account_info(),
+        protocol_state.total_sol_borrowed,
+    )?;
     
     if amount > available_balance {
         return Err(LendingError::InsufficientTreasuryBalance.into());
@@ -311,7 +312,7 @@ pub fn emergency_drain_handler(ctx: Context<EmergencyDrain>) -> Result<()> {
     protocol_state.paused = true;
     
     // Transfer all SOL from treasury to admin using CPI with PDA signer
-    let treasury_balance = ctx.accounts.treasury.lamports();
+    let treasury_balance = TreasuryUtils::get_treasury_balance(&ctx.accounts.treasury.to_account_info());
     if treasury_balance > 0 {
         let treasury_bump = ctx.bumps.treasury;
         let treasury_seeds: &[&[u8]] = &[TREASURY_SEED, &[treasury_bump]];

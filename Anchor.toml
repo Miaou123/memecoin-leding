@@ -8,17 +8,17 @@ skip-lint = false
 memecoin_lending = "CD2sN1enC22Nyw6U6s2dYcxfbtsLVq2PhbomLBkyh1z5"
 
 [programs.localnet]
-memecoin_lending = "Ex1UJrdAUqosatT1moQSPTMepfKtnKWKfsKMTjZBeKva"
+memecoin_lending = "2NVfyczy1rWMdb7Y9kGmHCZkM72wyYiN5ry8dntzBK2S"
 
 [programs.mainnet]
-memecoin_lending = "CD2sN1enC22Nyw6U6s2dYcxfbtsLVq2PhbomLBkyh1z5"
+memecoin_lending = "2NVfyczy1rWMdb7Y9kGmHCZkM72wyYiN5ry8dntzBK2S"
 
 [registry]
 url = "https://api.apr.dev"
 
 [provider]
-cluster = "localnet"
-wallet = "~/.config/solana/id.json"
+cluster = "mainnet"
+wallet = "./keys/admin.json"
 
 [scripts]
 test = "pnpm exec ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"

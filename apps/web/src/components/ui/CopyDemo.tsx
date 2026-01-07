@@ -1,4 +1,6 @@
 import { CopyButton, CopyIconButton, CopyableText } from './CopyButton';
+import { getProtocolTokenMint } from '@/config/tokens';
+import { Show } from 'solid-js';
 
 export function CopyDemo() {
   return (
@@ -6,17 +8,19 @@ export function CopyDemo() {
       <h3 class="text-lg font-bold text-text-primary">Copy Functionality Demo</h3>
       
       <div class="space-y-3">
-        {/* Copyable text example */}
-        <div>
-          <label class="text-sm text-text-dim">Token Address (click to copy):</label>
-          <div class="mt-1">
-            <CopyableText
-              text="6KHL8uUXFie8Xdy3EBvw6EgruiU3duc9fvGrWoZ9pump"
-              successMessage="Token address copied!"
-              class="bg-bg-primary border border-border p-2 rounded"
-            />
+        {/* Copyable text example - Only show if token configured */}
+        <Show when={getProtocolTokenMint()}>
+          <div>
+            <label class="text-sm text-text-dim">Token Address (click to copy):</label>
+            <div class="mt-1">
+              <CopyableText
+                text={getProtocolTokenMint()}
+                successMessage="Token address copied!"
+                class="bg-bg-primary border border-border p-2 rounded"
+              />
+            </div>
           </div>
-        </div>
+        </Show>
 
         {/* Copy button with custom text */}
         <div>

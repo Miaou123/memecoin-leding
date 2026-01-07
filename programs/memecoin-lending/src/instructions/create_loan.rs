@@ -191,7 +191,7 @@ pub fn create_loan_handler(
     }
 
     // Check treasury has sufficient SOL
-    let treasury_balance = ctx.accounts.treasury.to_account_info().lamports();
+    let treasury_balance = TreasuryUtils::get_treasury_balance(&ctx.accounts.treasury.to_account_info());
     if treasury_balance < sol_loan_amount {
         return Err(LendingError::InsufficientTreasuryBalance.into());
     }

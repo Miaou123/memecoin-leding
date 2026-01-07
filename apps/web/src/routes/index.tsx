@@ -8,6 +8,7 @@ import { api } from '@/lib/api';
 import { RecentLoanItem } from '@/components/dashboard/RecentLoanItem';
 import { ProtocolHealth } from '@/components/dashboard/ProtocolHealth';
 import { RecentLoanResponse } from '@memecoin-lending/types';
+import { getProtocolTokenMint } from '@/config/tokens';
 
 export default function Home() {
   // Protocol stats
@@ -63,16 +64,18 @@ export default function Home() {
           </A>
         </div>
         
-        {/* Protocol Token */}
-        <div class="text-center mt-8">
-          <div class="bg-bg-secondary border border-border p-3 mx-auto max-w-fit">
-            <CopyableText
-              text="6KHL8uUXFie8Xdy3EBvw6EgruiU3duc9fvGrWoZ9pump"
-              successMessage="Token address copied to clipboard!"
-              title="Click to copy token address"
-            />
+        {/* Protocol Token - Only show if configured */}
+        <Show when={getProtocolTokenMint()}>
+          <div class="text-center mt-8">
+            <div class="bg-bg-secondary border border-border p-3 mx-auto max-w-fit">
+              <CopyableText
+                text={getProtocolTokenMint()}
+                successMessage="Token address copied to clipboard!"
+                title="Click to copy token address"
+              />
+            </div>
           </div>
-        </div>
+        </Show>
       </div>
 
       {/* Horizontal Stats Bar */}
