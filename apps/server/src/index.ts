@@ -46,6 +46,7 @@ import { treasuryMonitor } from './services/treasury-monitor.service.js';
 import { treasuryHealthService } from './services/treasury-health.service.js';
 import { validateMainnetConfig, getNetworkConfig, isMainnet } from './config/network.js';
 import { programMonitor } from './services/program-monitor.service.js';
+import { jupiterClient } from './services/jupiter-client.js';
 import { Connection, Keypair } from '@solana/web3.js';
 import { Program, AnchorProvider, Wallet, Idl } from '@coral-xyz/anchor';
 import { PROGRAM_ID } from '@memecoin-lending/config';
@@ -306,17 +307,26 @@ const server = serve({
   console.log(`🚀 Server running on http://localhost:${info.port}`);
   console.log(`🔌 WebSocket server running on ws://localhost:${info.port}/ws`);
   
-  if (process.env.JUPITER_API_KEY) {
-    import('./services/price.js').then(({ priceService }) => {
-      priceService.testJupiterConnection().then((result: { working: boolean; latency: number }) => {
-        if (result.working) {
-          console.log(`✅ Jupiter price source connection successful (${result.latency}ms)`);
-        } else {
-          console.log(`❌ Jupiter price source connection failed`);
-        }
-      }).catch((error: any) => {
-        console.log('⚠️  Could not test Jupiter API connection:', error.message);
-      });
+  // Log Jupiter multi-key status
+  const jupiterHealth = jupiterClient.getHealthStatus();
+  console.log(`🔑 Jupiter API: ${jupiterHealth.healthy}/${jupiterHealth.total} endpoints ready`);
+  
+  if (jupiterHealth.total === 0) {
+    console.log('⚠️  No Jupiter API keys configured - price feeds will fail!');
+  } else if (jupiterHealth.total === 1 && !process.env.JUPITER_API_KEY1) {
+    console.log('⚠️  Using legacy single API key - consider migrating to multi-key setup');
+  }
+  
+  // Test first endpoint
+  if (jupiterHealth.endpoints.length > 0) {
+    jupiterClient.testEndpoint(jupiterHealth.endpoints[0].id).then((result) => {
+      if (result.success) {
+        console.log(`✅ Jupiter endpoint test successful (${result.latencyMs}ms)`);
+      } else {
+        console.log(`❌ Jupiter endpoint test failed: ${result.error}`);
+      }
+    }).catch((error: any) => {
+      console.log('⚠️  Could not test Jupiter endpoint:', error.message);
     });
   }
   

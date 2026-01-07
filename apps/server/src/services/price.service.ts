@@ -4,10 +4,9 @@ import { prisma } from '../db/client.js';
 import { getNetworkConfig, NetworkType } from '@memecoin-lending/config';
 import { logger } from '../utils/logger.js';
 import Redis from 'ioredis';
-import { PumpFunSDK } from 'pumpdotfun-sdk';
-import { AnchorProvider } from '@coral-xyz/anchor';
 import { securityMonitor } from './security-monitor.service.js';
 import { SECURITY_EVENT_TYPES } from '@memecoin-lending/types';
+import { jupiterClient } from './jupiter-client.js';
 
 const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
 
@@ -66,7 +65,6 @@ interface DexScreenerResponse {
 // Service status tracking
 interface ServiceStatus {
   jupiterAvailable: boolean;
-  pumpFunAvailable: boolean;
   dexScreenerAvailable: boolean;
   lastCheck: number;
   cacheSize: number;
@@ -80,10 +78,8 @@ class PriceService {
   private readonly CACHE_TTL = 3 * 1000; // 3 seconds (reduced for faster updates)
   private serviceStartTime = Date.now();
   private jupiterAvailable = true;
-  private pumpFunAvailable = true;
   private dexScreenerAvailable = true;
   private lastHealthCheck = 0;
-  private pumpFunSDK: PumpFunSDK | null = null;
   
   constructor() {
     const network = (process.env.SOLANA_NETWORK as NetworkType) || 'devnet';
@@ -158,7 +154,7 @@ class PriceService {
         severity: 'MEDIUM',
         category: 'Price Monitoring',
         eventType: SECURITY_EVENT_TYPES.JUPITER_API_ERROR,
-        message: `Jupiter API failed, falling back to other sources: ${error instanceof Error ? error.message : String(error)}`,
+        message: `Jupiter API failed, falling back to DexScreener: ${error instanceof Error ? error.message : String(error)}`,
         details: {
           tokenCount: uncachedMints.length,
           error: error instanceof Error ? error.message : String(error),
@@ -168,54 +164,7 @@ class PriceService {
       });
     }
 
-    // 2. Try PumpFun for remaining (especially pump tokens)
-    const pumpFunAttempted = [...uncachedMints];
-    const pumpFunFailed: string[] = [];
-    
-    for (const mint of pumpFunAttempted) {
-      // Try PumpFun for all remaining tokens (not just those ending in 'pump')
-      // since some valid PumpFun tokens may not follow that pattern
-      try {
-        const price = await this.fetchFromPumpFun(mint);
-        if (price) {
-          results.set(mint, price);
-          this.cache.set(mint, { data: price, timestamp: Date.now() });
-          await redis.setex(`price:${mint}`, 10, JSON.stringify(price));
-          
-          // Alert on PumpFun fallback if token was previously on Jupiter
-          if (failedSources.has('jupiter') && failedSources.get('jupiter')!.includes(mint)) {
-            await securityMonitor.log({
-              severity: 'LOW',
-              category: 'Price Monitoring',
-              eventType: 'PRICE_SOURCE_FAILOVER',
-              message: `Price source switched from Jupiter to PumpFun for ${mint}`,
-              details: {
-                tokenMint: mint,
-                previousSource: 'jupiter',
-                newSource: 'pumpfun',
-                price: price.usdPrice,
-              },
-              source: 'price-service',
-            });
-          }
-          
-          // Remove from uncached list
-          const index = uncachedMints.indexOf(mint);
-          if (index > -1) uncachedMints.splice(index, 1);
-        } else {
-          pumpFunFailed.push(mint);
-        }
-      } catch (error) {
-        logger.warn(`Failed to fetch ${mint} from PumpFun:`, { error: error instanceof Error ? error.message : String(error) });
-        pumpFunFailed.push(mint);
-      }
-    }
-    
-    if (pumpFunFailed.length > 0) {
-      failedSources.set('pumpfun', pumpFunFailed);
-    }
-
-    // 3. Try DexScreener for remaining
+    // 2. Try DexScreener for remaining
     const dexScreenerAttempted = [...uncachedMints];
     const dexScreenerFailed: string[] = [];
     
@@ -228,23 +177,15 @@ class PriceService {
           await redis.setex(`price:${mint}`, 10, JSON.stringify(price));
           
           // Alert on DexScreener fallback
-          const previousSources: string[] = [];
           if (failedSources.has('jupiter') && failedSources.get('jupiter')!.includes(mint)) {
-            previousSources.push('jupiter');
-          }
-          if (failedSources.has('pumpfun') && failedSources.get('pumpfun')!.includes(mint)) {
-            previousSources.push('pumpfun');
-          }
-          
-          if (previousSources.length > 0) {
             await securityMonitor.log({
               severity: 'MEDIUM',
               category: 'Price Monitoring',
               eventType: 'PRICE_SOURCE_FAILOVER',
-              message: `Price source switched to DexScreener after ${previousSources.join(', ')} failures for ${mint}`,
+              message: `Price source switched from Jupiter to DexScreener for ${mint}`,
               details: {
                 tokenMint: mint,
-                failedSources: previousSources,
+                previousSource: 'jupiter',
                 newSource: 'dexscreener',
                 price: price.usdPrice,
               },
@@ -279,7 +220,6 @@ class PriceService {
           totalFailed: uncachedMints.length,
           failedBySource: Object.fromEntries(failedSources),
           jupiterAvailable: this.jupiterAvailable,
-          pumpFunAvailable: this.pumpFunAvailable,
           dexScreenerAvailable: this.dexScreenerAvailable,
         },
         source: 'price-service',
@@ -309,7 +249,6 @@ class PriceService {
           tokenMint: mint,
           cacheSize: this.cache.size,
           jupiterAvailable: this.jupiterAvailable,
-          pumpFunAvailable: this.pumpFunAvailable,
           dexScreenerAvailable: this.dexScreenerAvailable,
         },
         source: 'price-service',
@@ -344,77 +283,6 @@ class PriceService {
     };
   }
 
-  /**
-   * Get or initialize PumpFun SDK
-   */
-  private async getPumpFunSDK(): Promise<PumpFunSDK> {
-    if (!this.pumpFunSDK) {
-      try {
-        // Create a read-only provider (no wallet needed for price queries)
-        const provider = new AnchorProvider(
-          this.connection,
-          {
-            publicKey: PublicKey.default,
-            signTransaction: async (tx) => tx,
-            signAllTransactions: async (txs) => txs,
-          },
-          { commitment: 'confirmed' }
-        );
-        this.pumpFunSDK = new PumpFunSDK(provider);
-      } catch (error) {
-        logger.error('Failed to initialize PumpFun SDK:', { error: error instanceof Error ? error.message : String(error) });
-        this.pumpFunAvailable = false;
-        throw error;
-      }
-    }
-    return this.pumpFunSDK;
-  }
-
-  /**
-   * Fetch price from PumpFun SDK
-   */
-  private async fetchFromPumpFun(mint: string): Promise<ExtendedPriceData | null> {
-    try {
-      const sdk = await this.getPumpFunSDK();
-      const mintPubkey = new PublicKey(mint);
-      
-      // Get bonding curve data
-      const bondingCurveAccount = await sdk.getBondingCurveAccount(mintPubkey);
-      
-      if (!bondingCurveAccount) {
-        return null;
-      }
-      
-      // Calculate price from bonding curve
-      // Price in SOL = virtualSolReserves / virtualTokenReserves
-      const virtualSolReserves = Number(bondingCurveAccount.virtualSolReserves);
-      const virtualTokenReserves = Number(bondingCurveAccount.virtualTokenReserves);
-      
-      if (virtualTokenReserves === 0) {
-        return null;
-      }
-      
-      const priceInSol = virtualSolReserves / virtualTokenReserves;
-      
-      // Get SOL price in USD to calculate USD price
-      const solUsdPrice = await this.getSolPrice();
-      const priceInUsd = priceInSol * solUsdPrice;
-      
-      logger.info(`[PumpFun] ${mint}: ${priceInSol.toFixed(10)} SOL ($${priceInUsd.toFixed(6)})`);
-      
-      return {
-        mint,
-        usdPrice: priceInUsd,
-        solPrice: priceInSol,
-        source: 'pumpfun',
-        timestamp: Date.now(),
-      };
-    } catch (error) {
-      logger.warn(`Failed to fetch ${mint} from PumpFun:`, { error: error instanceof Error ? error.message : String(error) });
-      this.pumpFunAvailable = false;
-      return null;
-    }
-  }
 
   /**
    * Get SOL price in USD
@@ -429,30 +297,20 @@ class PriceService {
     }
 
     try {
-      const response = await fetch(
-        `https://api.jup.ag/price/v3?ids=${solMint}`,
-        { 
-          signal: AbortSignal.timeout(5000),
-          headers: { 'x-api-key': process.env.JUPITER_API_KEY || '' }
-        }
-      );
+      const prices = await jupiterClient.fetchPrices([solMint]);
       
-      if (response.ok) {
-        const data = await response.json() as JupiterPriceResponse;
-        if (data[solMint]) {
-          const price = data[solMint]!.usdPrice;
-          
-          const priceData: ExtendedPriceData = {
-            mint: solMint,
-            usdPrice: price,
-            priceChange24h: data[solMint]!.priceChange24h || undefined,
-            source: 'jupiter',
-            timestamp: Date.now(),
-          };
-          
-          this.cache.set(solMint, { data: priceData, timestamp: Date.now() });
-          return price;
-        }
+      if (prices[solMint]) {
+        const price = prices[solMint].price;
+        
+        const priceData: ExtendedPriceData = {
+          mint: solMint,
+          usdPrice: price,
+          source: 'jupiter',
+          timestamp: Date.now(),
+        };
+        
+        this.cache.set(solMint, { data: priceData, timestamp: Date.now() });
+        return price;
       }
     } catch (error) {
       logger.warn('Failed to fetch SOL price from Jupiter:', { error: error instanceof Error ? error.message : String(error) });
@@ -468,36 +326,18 @@ class PriceService {
   private async fetchFromJupiter(mints: string[]): Promise<Map<string, ExtendedPriceData>> {
     const results = new Map<string, ExtendedPriceData>();
     
-    const response = await fetch(
-      `https://api.jup.ag/price/v3?ids=${mints.join(',')}`,
-      { 
-        signal: AbortSignal.timeout(10000),
-        headers: { 'x-api-key': process.env.JUPITER_API_KEY || '' }
-      }
-    );
+    const prices = await jupiterClient.fetchPrices(mints);
     
-    if (!response.ok) {
-      this.jupiterAvailable = false;
-      throw new Error(`Jupiter API error: ${response.status}`);
+    for (const [mint, data] of Object.entries(prices)) {
+      results.set(mint, {
+        mint,
+        usdPrice: data.price,
+        source: 'jupiter',
+        timestamp: Date.now(),
+      });
     }
     
     this.jupiterAvailable = true;
-    const data = await response.json() as JupiterPriceResponse;
-    
-    for (const mint of mints) {
-      const priceData = data[mint];
-      if (priceData) {
-        results.set(mint, {
-          mint,
-          usdPrice: priceData.usdPrice,
-          priceChange24h: priceData.priceChange24h || undefined,
-          decimals: priceData.decimals,
-          source: 'jupiter',
-          timestamp: Date.now(),
-        });
-      }
-    }
-    
     return results;
   }
 
@@ -628,9 +468,7 @@ class PriceService {
   getServiceStatus(): ServiceStatus {
     return {
       jupiterAvailable: this.jupiterAvailable,
-      pumpFunAvailable: this.pumpFunAvailable,
       dexScreenerAvailable: this.dexScreenerAvailable,
-      jupiterWebSocketConnected: this.wsConnected,
       lastCheck: this.lastHealthCheck,
       cacheSize: this.cache.size,
       uptime: Date.now() - this.serviceStartTime,
@@ -641,43 +479,23 @@ class PriceService {
    * Test Jupiter API connection
    */
   async testJupiterConnection(): Promise<{ working: boolean; latency: number; error?: string }> {
-    const testMint = 'So11111111111111111111111111111111111111112'; // SOL
-    const startTime = Date.now();
+    const healthStatus = jupiterClient.getHealthStatus();
+    const firstEndpoint = healthStatus.endpoints[0];
     
-    try {
-      const response = await fetch(
-        `https://api.jup.ag/price/v3?ids=${testMint}`,
-        { 
-          signal: AbortSignal.timeout(5000),
-          headers: { 'x-api-key': process.env.JUPITER_API_KEY || '' }
-        }
-      );
-      
-      const latency = Date.now() - startTime;
-      this.lastHealthCheck = Date.now();
-      
-      if (!response.ok) {
-        this.jupiterAvailable = false;
-        return { working: false, latency, error: `HTTP ${response.status}` };
-      }
-      
-      const data = await response.json() as JupiterPriceResponse;
-      
-      if (!data[testMint]) {
-        this.jupiterAvailable = false;
-        return { working: false, latency, error: 'No price data returned' };
-      }
-      
-      this.jupiterAvailable = true;
-      return { working: true, latency };
-    } catch (error: any) {
-      this.jupiterAvailable = false;
-      return { 
-        working: false, 
-        latency: Date.now() - startTime, 
-        error: error.message 
-      };
+    if (!firstEndpoint) {
+      return { working: false, latency: 0, error: 'No endpoints configured' };
     }
+    
+    const result = await jupiterClient.testEndpoint(firstEndpoint.id);
+    this.lastHealthCheck = Date.now();
+    
+    this.jupiterAvailable = result.success;
+    
+    return {
+      working: result.success,
+      latency: result.latencyMs ?? 0,
+      error: result.error,
+    };
   }
 
   /**

@@ -1,13 +1,14 @@
-import { Request, Response, Router } from 'express';
+import { Hono } from 'hono';
 import { priceService } from '../services/price.service.js';
 import { fastPriceMonitor } from '../services/fast-price-monitor.js';
+import { jupiterClient } from '../services/jupiter-client.js';
 
-const router = Router();
+const priceStatusRouter = new Hono();
 
 /**
  * Get price service status including sources and monitoring
  */
-router.get('/status', async (req: Request, res: Response) => {
+priceStatusRouter.get('/status', async (c) => {
   try {
     // Get price service status
     const priceServiceStatus = priceService.getServiceStatus();
@@ -18,7 +19,7 @@ router.get('/status', async (req: Request, res: Response) => {
     // Test Jupiter connection
     const jupiterTest = await priceService.testJupiterConnection();
     
-    res.json({
+    return c.json({
       priceService: {
         ...priceServiceStatus,
         jupiterConnection: jupiterTest,
@@ -31,9 +32,6 @@ router.get('/status', async (req: Request, res: Response) => {
           latency: jupiterTest.latency,
           error: jupiterTest.error,
         },
-        pumpfun: {
-          available: priceServiceStatus.pumpFunAvailable,
-        },
         dexscreener: {
           available: priceServiceStatus.dexScreenerAvailable,
         },
@@ -41,25 +39,25 @@ router.get('/status', async (req: Request, res: Response) => {
     });
   } catch (error) {
     console.error('Failed to get price status:', error);
-    res.status(500).json({
+    return c.json({
       error: 'Failed to get price status',
       details: error instanceof Error ? error.message : 'Unknown error',
-    });
+    }, 500);
   }
 });
 
 /**
  * Force refresh prices for specific tokens
  */
-router.post('/refresh', async (req: Request, res: Response) => {
+priceStatusRouter.post('/refresh', async (c) => {
   try {
-    const { mints } = req.body;
+    const { mints } = await c.req.json();
     
     if (!Array.isArray(mints) || mints.length === 0) {
-      return res.status(400).json({
+      return c.json({
         error: 'Invalid request',
         details: 'mints must be a non-empty array',
-      });
+      }, 400);
     }
     
     // Clear cache for specified mints
@@ -68,34 +66,96 @@ router.post('/refresh', async (req: Request, res: Response) => {
     // Fetch fresh prices
     const prices = await priceService.getPrices(mints);
     
-    res.json({
+    return c.json({
       success: true,
       refreshed: mints.length,
       prices: Object.fromEntries(prices),
     });
   } catch (error) {
     console.error('Failed to refresh prices:', error);
-    res.status(500).json({
+    return c.json({
       error: 'Failed to refresh prices',
       details: error instanceof Error ? error.message : 'Unknown error',
-    });
+    }, 500);
   }
 });
 
 /**
  * Get current cache statistics
  */
-router.get('/cache-stats', async (req: Request, res: Response) => {
+priceStatusRouter.get('/cache-stats', async (c) => {
   try {
     const stats = priceService.getCacheStats();
-    res.json(stats);
+    return c.json(stats);
   } catch (error) {
     console.error('Failed to get cache stats:', error);
-    res.status(500).json({
+    return c.json({
       error: 'Failed to get cache stats',
       details: error instanceof Error ? error.message : 'Unknown error',
-    });
+    }, 500);
   }
 });
 
-export default router;
+/**
+ * Get Jupiter API endpoints health
+ */
+priceStatusRouter.get('/jupiter-health', async (c) => {
+  try {
+    return c.json({
+      success: true,
+      data: jupiterClient.getHealthStatus(),
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    console.error('Failed to get Jupiter health:', error);
+    return c.json({
+      error: 'Failed to get Jupiter health',
+      details: error instanceof Error ? error.message : 'Unknown error',
+    }, 500);
+  }
+});
+
+/**
+ * Reset all Jupiter endpoints to healthy
+ */
+priceStatusRouter.post('/jupiter-reset', async (c) => {
+  try {
+    jupiterClient.resetAllEndpoints();
+    return c.json({
+      success: true,
+      message: 'All Jupiter endpoints reset to healthy',
+      data: jupiterClient.getHealthStatus(),
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    console.error('Failed to reset Jupiter endpoints:', error);
+    return c.json({
+      error: 'Failed to reset Jupiter endpoints',
+      details: error instanceof Error ? error.message : 'Unknown error',
+    }, 500);
+  }
+});
+
+/**
+ * Test specific Jupiter endpoint
+ */
+priceStatusRouter.get('/jupiter-test/:id', async (c) => {
+  try {
+    const id = parseInt(c.req.param('id') || '0');
+    const result = await jupiterClient.testEndpoint(id);
+    
+    return c.json({
+      success: result.success,
+      data: result,
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    console.error('Failed to test Jupiter endpoint:', error);
+    return c.json({
+      error: 'Failed to test Jupiter endpoint',
+      details: error instanceof Error ? error.message : 'Unknown error',
+    }, 500);
+  }
+});
+
+export default priceStatusRouter;

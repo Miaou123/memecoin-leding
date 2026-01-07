@@ -9,6 +9,7 @@
 import { EventEmitter } from 'events';
 import { securityMonitor } from './security-monitor.service.js';
 import { SECURITY_EVENT_TYPES } from '@memecoin-lending/types';
+import { jupiterClient } from './jupiter-client.js';
 
 const JUPITER_PRICE_API = 'https://api.jup.ag/price/v3';
 const DEXSCREENER_API = 'https://api.dexscreener.com/latest/dex/tokens';
@@ -55,7 +56,6 @@ class FastPriceMonitor extends EventEmitter {
   private isRunning = false;
   private solPrice: number = 0;
   private lastSolPriceUpdate: number = 0;
-  private apiKey: string;
   private consecutiveErrors: number = 0;
   private maxConsecutiveErrors: number = 10;
   private currentPriceSource: 'jupiter' | 'dexscreener' = 'jupiter';
@@ -64,15 +64,10 @@ class FastPriceMonitor extends EventEmitter {
   
   constructor() {
     super();
-    this.apiKey = process.env.JUPITER_API_KEY || '';
-    
-    if (!this.apiKey) {
-      console.warn('⚠️ JUPITER_API_KEY not set - rate limits will be stricter');
-    }
     
     console.log('🔌 Fast Price Monitor initialized');
     console.log(`   Poll interval: ${POLL_INTERVAL_MS}ms`);
-    console.log(`   Primary API: ${JUPITER_PRICE_API}`);
+    console.log(`   Primary API: Jupiter (via multi-key client)`);
     console.log(`   Fallback API: ${DEXSCREENER_API}`);
   }
   
@@ -125,21 +120,10 @@ class FastPriceMonitor extends EventEmitter {
     const SOL_MINT = 'So11111111111111111111111111111111111111112';
     
     try {
-      const response = await fetch(
-        `${JUPITER_PRICE_API}?ids=${SOL_MINT}`,
-        {
-          headers: this.apiKey ? { 'x-api-key': this.apiKey } : {},
-        }
-      );
+      const prices = await jupiterClient.fetchPrices([SOL_MINT]);
       
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-      
-      const data = await response.json() as Record<string, { usdPrice: number }>;
-      
-      if (data[SOL_MINT]?.usdPrice) {
-        this.solPrice = data[SOL_MINT].usdPrice;
+      if (prices[SOL_MINT]?.price) {
+        this.solPrice = prices[SOL_MINT].price;
         this.lastSolPriceUpdate = Date.now();
       }
     } catch (error: any) {
@@ -374,37 +358,20 @@ class FastPriceMonitor extends EventEmitter {
    * Fetch prices from Jupiter API
    */
   private async fetchFromJupiter(mints: string[]): Promise<Record<string, any>> {
-    const url = `${JUPITER_PRICE_API}?ids=${mints.join(',')}`;
+    const prices = await jupiterClient.fetchPrices(mints);
     
-    const response = await fetch(url, {
-      headers: this.apiKey ? { 'x-api-key': this.apiKey } : {},
-      signal: AbortSignal.timeout(5000),
-    });
-    
-    if (!response.ok) {
-      if (response.status === 429) {
-        console.warn('⚠️ Rate limited by Jupiter API');
-        
-        // SECURITY: Log rate limiting events
-        await securityMonitor.log({
-          severity: 'MEDIUM',
-          category: 'Price Monitoring',
-          eventType: SECURITY_EVENT_TYPES.PRICE_API_RATE_LIMITED,
-          message: 'Fast price monitor hit Jupiter API rate limit',
-          details: {
-            api: 'jupiter',
-            batchSize: mints.length,
-            hasApiKey: !!this.apiKey,
-          },
-          source: 'fast-price-monitor',
-        });
-        
-        await new Promise(r => setTimeout(r, 1000)); // Back off 1 second
-      }
-      throw new Error(`Jupiter API error: ${response.status}`);
+    // Transform to expected format for v3 API
+    const result: Record<string, any> = {};
+    for (const [mint, data] of Object.entries(prices)) {
+      result[mint] = {
+        id: mint,
+        usdPrice: data.price,
+        price: data.price.toString(),
+        extraInfo: data.extraInfo,
+      };
     }
     
-    return await response.json();
+    return result;
   }
   
   /**

@@ -1,7 +1,7 @@
 # Price Service Cleanup Summary
 
 ## Overview
-Cleaned up the dead Jupiter WebSocket code from the price service and implemented proper fallback with DexScreener integration and Telegram alerting for price source failovers.
+Cleaned up the dead Jupiter WebSocket code from the price service and implemented proper fallback with DexScreener integration and Telegram alerting for price source failovers. Subsequently removed PumpFun as a price source to simplify the fallback chain.
 
 ## Changes Made
 
@@ -20,7 +20,7 @@ Cleaned up the dead Jupiter WebSocket code from the price service and implemente
 
 ### 2. Enhanced Price Fallback Chain
 - Modified `getPrices()` method to track failed sources
-- Added explicit fallback chain: Jupiter → PumpFun → DexScreener
+- Added explicit fallback chain: Jupiter → DexScreener (PumpFun removed)
 - Added security event logging for source failovers
 - Track which tokens failed from each source for detailed alerting
 
@@ -61,6 +61,14 @@ PRICE_POLL_INTERVAL_MS=5000
 3. **Monitoring**: Telegram alerts for price source failovers
 4. **Transparency**: Price status API shows which sources are working
 5. **Performance**: Configurable poll interval for different environments
+
+### 7. Removed PumpFun Price Source
+- Removed PumpFun SDK import
+- Deleted `pumpFunAvailable` property from class and ServiceStatus interface
+- Removed PumpFun fallback section from `getPrices()` method
+- Deleted `fetchFromPumpFun()` and `getPumpFunSDK()` methods
+- Updated all security logging to remove PumpFun references
+- Updated price-status route to remove PumpFun from sources
 
 ## Testing
 
