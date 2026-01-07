@@ -133,6 +133,17 @@ export class TokenVerificationService {
 
       const dexType = isPumpFun ? 'pumpfun' : 'raydium';
       console.log(`[TokenVerification] Detected ${dexType} token: ${mint.substring(0, 8)}...`);
+      
+      // Reject pure PumpFun (bonding curve) tokens - they must migrate first
+      if (dexType === 'pumpfun') {
+        const result = this.createInvalidResult(
+          mint,
+          'PumpFun tokens must migrate to Raydium or PumpSwap before lending is enabled. Only migrated tokens (pumpswap, raydium) are supported.',
+          'NOT_SUPPORTED_DEX'
+        );
+        this.cacheResult(mint, result);
+        return result;
+      }
 
       // 5. NEW: Validate pool balance ratio
       const poolValidation = await this.validatePoolBalance(mint, dexType);
@@ -467,8 +478,9 @@ export class TokenVerificationService {
     const tierMap: Record<string, number> = { bronze: 0, silver: 1, gold: 2 };
     const tier = tierMap[tokenData.tier?.toLowerCase() || 'bronze'] ?? 0;
 
-    // Pool type: 2=pumpfun
-    const poolType = 2;
+    // Pool type: 3=pumpswap (migrated tokens only)
+    // Note: Pool type 2 (pumpfun) is blocked - tokens must migrate first
+    const poolType = 3;
 
     // Derive the correct bonding curve PDA for PumpFun
     const bondingCurve = getPumpFunBondingCurve(mintPubkey);

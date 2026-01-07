@@ -9,6 +9,7 @@ import { dailySummaryJob } from './daily-summary.job.js';
 import { scheduleLPMonitoring } from './lp-monitor.job.js';
 import { securityMonitor } from '../services/security-monitor.service.js';
 import { liquidatorMetrics } from '../services/liquidator-metrics.service.js';
+import { initializeRedlock } from '../utils/redlock.js';
 import { SECURITY_EVENT_TYPES } from '@memecoin-lending/types';
 
 // BullMQ requires maxRetriesPerRequest: null for blocking operations
@@ -92,12 +93,17 @@ export async function initializeJobs() {
   try {
     console.log('🔄 Initializing background jobs...');
     
+    // Initialize Redlock for distributed locking
+    initializeRedlock(redis);
+    console.log('🔒 Redlock initialized for distributed locking');
+    
     // Initialize liquidator metrics with Redis connection
     liquidatorMetrics.initialize(redis);
     
-    // Liquidation checks (5s backup)
+    // Liquidation checks (5s backup) and metrics cleanup (24h)
     await setupRepeatableJobs(liquidationQueue, [
       { name: 'check-liquidations', data: {}, every: 5000 },
+      { name: 'cleanup-metrics', data: {}, every: 86400000 }, // 24 hours
     ]);
     
     // Price monitoring (3s)
@@ -127,21 +133,20 @@ export async function initializeJobs() {
     await scheduleLPMonitoring();
     console.log('📊 LP monitoring job scheduled');
     
-    // Setup 24h cleanup for liquidator metrics
-    await setupRepeatableJobs(liquidationQueue, [
-      { name: 'check-liquidations', data: {}, every: 5000 },
-      { name: 'cleanup-metrics', data: {}, every: 86400000 }, // 24 hours
-    ]);
+    // Add completed handler for cleanup job
+    liquidationWorker.on('completed', async (job, result) => {
+      // Special handling for cleanup job
+      if (job?.name === 'cleanup-metrics') {
+        await liquidatorMetrics.cleanupOldMetrics();
+        console.log('✅ Liquidator metrics cleaned up');
+        return;
+      }
+      // Log other completed jobs if needed
+    });
     
     // SECURITY: Enhanced error handlers with security logging
     liquidationWorker.on('failed', async (job, err) => {
       console.error(`❌ Liquidation job failed:`, job?.name, err.message);
-      
-      // Special handling for cleanup job
-      if (job?.name === 'cleanup-metrics') {
-        await liquidatorMetrics.cleanupOldMetrics();
-        return;
-      }
       
       await securityMonitor.log({
         severity: 'HIGH',

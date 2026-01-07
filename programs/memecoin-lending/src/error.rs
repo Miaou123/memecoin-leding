@@ -257,4 +257,7 @@ pub enum LendingError {
 
     #[msg("Invalid stake owner")]
     InvalidStakeOwner = 6092,
+
+    #[msg("PumpFun tokens must migrate to Raydium/PumpSwap before lending is enabled")]
+    PumpfunNotMigrated = 6093,
 }

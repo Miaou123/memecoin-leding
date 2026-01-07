@@ -100,6 +100,23 @@ describe("Memecoin Lending Protocol - Enhanced Test Suite", () => {
   // ============= Helper Functions =============
   
   /**
+   * Get a fresh timestamp from the blockchain for price signatures
+   */
+  async function getFreshPriceTimestamp(): Promise<BN> {
+    try {
+      const slot = await connection.getSlot();
+      const blockTime = await connection.getBlockTime(slot);
+      if (blockTime) {
+        return new BN(blockTime);
+      }
+    } catch (e) {
+      // Fallback to system time if getBlockTime fails
+    }
+    // Use current system time as fallback
+    return new BN(Math.floor(Date.now() / 1000));
+  }
+  
+  /**
    * Create mock pool account with Raydium-like data layout for price reading
    */
   async function createMockPoolWithPrice(
@@ -288,10 +305,16 @@ describe("Memecoin Lending Protocol - Enhanced Test Suite", () => {
         .initialize(
           admin.publicKey,
           buybackWallet.publicKey,
-          operationsWallet.publicKey
+          operationsWallet.publicKey,
+          liquidator.publicKey,  // authorized_liquidator
+          admin.publicKey        // price_authority (using admin for testing)
         )
-        .accounts({
+        .accountsStrict({
+          protocolState: protocolStatePda,
+          treasury: treasuryPda,
           payer: admin.publicKey,
+          systemProgram: SystemProgram.programId,
+          rent: anchor.web3.SYSVAR_RENT_PUBKEY,
         })
         .signers([admin])
         .rpc();
@@ -304,14 +327,26 @@ describe("Memecoin Lending Protocol - Enhanced Test Suite", () => {
       expect(protocolState.buybackWallet.toString()).to.equal(buybackWallet.publicKey.toString());
       expect(protocolState.operationsWallet.toString()).to.equal(operationsWallet.publicKey.toString());
       expect(protocolState.paused).to.be.false;
-      expect(protocolState.protocolFeeBps).to.equal(200); // 2% default
+      expect(protocolState.protocolFeeBps).to.equal(100); // 1% default
     });
 
     it("should fail to initialize twice", async () => {
       try {
         await program.methods
-          .initialize(admin.publicKey, buybackWallet.publicKey, operationsWallet.publicKey)
-          .accounts({ payer: admin.publicKey })
+          .initialize(
+            admin.publicKey, 
+            buybackWallet.publicKey, 
+            operationsWallet.publicKey,
+            liquidator.publicKey,
+            admin.publicKey
+          )
+          .accountsStrict({
+            protocolState: protocolStatePda,
+            treasury: treasuryPda,
+            payer: admin.publicKey,
+            systemProgram: SystemProgram.programId,
+            rent: anchor.web3.SYSVAR_RENT_PUBKEY,
+          })
           .signers([admin])
           .rpc();
         assert.fail("Should have thrown an error");
@@ -495,15 +530,19 @@ describe("Memecoin Lending Protocol - Enhanced Test Suite", () => {
       try {
         await program.methods
           .whitelistToken(0, bronzePool.publicKey, 0, new BN(0.1 * LAMPORTS_PER_SOL), new BN(10 * LAMPORTS_PER_SOL), false)
-          .accounts({
+          .accountsStrict({
+            protocolState: protocolStatePda,
+            tokenConfig: bronzeTokenConfigPda,
             tokenMint: newMint,
             admin: borrower.publicKey,
+            systemProgram: SystemProgram.programId,
+            rent: anchor.web3.SYSVAR_RENT_PUBKEY,
           })
           .signers([borrower])
           .rpc();
         assert.fail("Should have thrown an error");
       } catch (err: any) {
-        expect(err.message).to.include("failed");
+        expect(err.message).to.include("AnchorError");
       }
     });
   });
@@ -524,7 +563,10 @@ describe("Memecoin Lending Protocol - Enhanced Test Suite", () => {
     it("should resume protocol", async () => {
       const tx = await program.methods
         .resumeProtocol()
-        .accounts({ admin: admin.publicKey })
+        .accountsStrict({
+          protocolState: protocolStatePda,
+          admin: admin.publicKey,
+        })
         .signers([admin])
         .rpc();
 
@@ -547,10 +589,13 @@ describe("Memecoin Lending Protocol - Enhanced Test Suite", () => {
       const protocolState = await program.account.protocolState.fetch(protocolStatePda);
       expect(protocolState.protocolFeeBps).to.equal(300);
 
-      // Reset to 2%
+      // Reset to 1%
       await program.methods
-        .updateFees(200, null, null, null)
-        .accounts({ admin: admin.publicKey })
+        .updateFees(100, null, null, null)
+        .accountsStrict({
+          protocolState: protocolStatePda,
+          admin: admin.publicKey,
+        })
         .signers([admin])
         .rpc();
     });
@@ -589,17 +634,27 @@ describe("Memecoin Lending Protocol - Enhanced Test Suite", () => {
       const borrowerSolBefore = await connection.getBalance(borrower.publicKey);
       const borrowerTokensBefore = await getAccount(connection, borrowerGoldTokenAccount);
 
+      // Get approved price from test oracle (in real system, this would be from backend)
+      const approvedPrice = new BN(1000); // Mock price for testing
+      const priceTimestamp = await getFreshPriceTimestamp(); // Get fresh timestamp from blockchain
+      
       const tx = await program.methods
-        .createLoan(collateralAmount, durationSeconds)
-        .accounts({
+        .createLoan(collateralAmount, durationSeconds, approvedPrice, priceTimestamp)
+        .accountsStrict({
+          protocolState: protocolStatePda,
+          tokenConfig: goldTokenConfigPda,
           loan: activeLoanPda,
+          treasury: treasuryPda,
           borrower: borrower.publicKey,
           borrowerTokenAccount: borrowerGoldTokenAccount,
           vault: activeLoanVaultPda,
           poolAccount: goldPool.publicKey,
           tokenMint: goldTokenMint,
+          priceAuthority: admin.publicKey, // Using admin as price authority for testing
+          tokenProgram: TOKEN_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
         })
-        .signers([borrower])
+        .signers([borrower, admin]) // Both borrower and price authority must sign
         .rpc();
 
       console.log(`  TX: ${tx.slice(0, 16)}...`);
@@ -626,6 +681,7 @@ describe("Memecoin Lending Protocol - Enhanced Test Suite", () => {
     it("should fail create loan with duration too short", async () => {
       const collateralAmount = new BN(1000 * 10 ** TOKEN_DECIMALS);
       const shortDuration = new BN(6 * 60 * 60); // 6 hours (min is 12)
+      const priceTimestamp = await getFreshPriceTimestamp();
 
       const protocolState = await program.account.protocolState.fetch(protocolStatePda);
       const newIndex = protocolState.totalLoansCreated;
@@ -633,16 +689,22 @@ describe("Memecoin Lending Protocol - Enhanced Test Suite", () => {
 
       try {
         await program.methods
-          .createLoan(collateralAmount, shortDuration)
-          .accounts({
+          .createLoan(collateralAmount, shortDuration, new BN(1000), priceTimestamp)
+          .accountsStrict({
+            protocolState: protocolStatePda,
+            tokenConfig: goldTokenConfigPda,
             loan: newLoanPda,
+            treasury: treasuryPda,
             borrower: borrower2.publicKey,
             borrowerTokenAccount: borrower2GoldTokenAccount,
             vault: newVaultPda,
             poolAccount: goldPool.publicKey,
             tokenMint: goldTokenMint,
+            priceAuthority: admin.publicKey,
+            tokenProgram: TOKEN_PROGRAM_ID,
+            systemProgram: SystemProgram.programId,
           })
-          .signers([borrower2])
+          .signers([borrower2, admin])
           .rpc();
         assert.fail("Should have thrown an error");
       } catch (err: any) {
@@ -653,6 +715,7 @@ describe("Memecoin Lending Protocol - Enhanced Test Suite", () => {
     it("should fail create loan with duration too long", async () => {
       const collateralAmount = new BN(1000 * 10 ** TOKEN_DECIMALS);
       const longDuration = new BN(8 * 24 * 60 * 60); // 8 days (max is 7)
+      const priceTimestamp = await getFreshPriceTimestamp();
 
       const protocolState = await program.account.protocolState.fetch(protocolStatePda);
       const newIndex = protocolState.totalLoansCreated;
@@ -660,16 +723,22 @@ describe("Memecoin Lending Protocol - Enhanced Test Suite", () => {
 
       try {
         await program.methods
-          .createLoan(collateralAmount, longDuration)
-          .accounts({
+          .createLoan(collateralAmount, longDuration, new BN(1000), priceTimestamp)
+          .accountsStrict({
+            protocolState: protocolStatePda,
+            tokenConfig: goldTokenConfigPda,
             loan: newLoanPda,
+            treasury: treasuryPda,
             borrower: borrower2.publicKey,
             borrowerTokenAccount: borrower2GoldTokenAccount,
             vault: newVaultPda,
             poolAccount: goldPool.publicKey,
             tokenMint: goldTokenMint,
+            priceAuthority: admin.publicKey,
+            tokenProgram: TOKEN_PROGRAM_ID,
+            systemProgram: SystemProgram.programId,
           })
-          .signers([borrower2])
+          .signers([borrower2, admin])
           .rpc();
         assert.fail("Should have thrown an error");
       } catch (err: any) {
@@ -683,14 +752,19 @@ describe("Memecoin Lending Protocol - Enhanced Test Suite", () => {
 
       const tx = await program.methods
         .repayLoan()
-        .accounts({
+        .accountsStrict({
+          protocolState: protocolStatePda,
+          tokenConfig: goldTokenConfigPda,
           loan: activeLoanPda,
+          treasury: treasuryPda,
           operationsWallet: protocolStateAccount.operationsWallet,
           stakingRewardVault: rewardVaultPda,
           borrower: borrower.publicKey,
           borrowerTokenAccount: borrowerGoldTokenAccount,
           vaultTokenAccount: activeLoanVaultPda,
           tokenMint: goldTokenMint,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
         })
         .signers([borrower])
         .rpc();
@@ -712,14 +786,19 @@ describe("Memecoin Lending Protocol - Enhanced Test Suite", () => {
       try {
         await program.methods
           .repayLoan()
-          .accounts({
+          .accountsStrict({
+            protocolState: protocolStatePda,
+            tokenConfig: goldTokenConfigPda,
             loan: activeLoanPda,
+            treasury: treasuryPda,
             operationsWallet: protocolStateAccount.operationsWallet,
             stakingRewardVault: rewardVaultPda,
             borrower: borrower.publicKey,
             borrowerTokenAccount: borrowerGoldTokenAccount,
             vaultTokenAccount: activeLoanVaultPda,
             tokenMint: goldTokenMint,
+            tokenProgram: TOKEN_PROGRAM_ID,
+            systemProgram: SystemProgram.programId,
           })
           .signers([borrower])
           .rpc();
@@ -731,21 +810,28 @@ describe("Memecoin Lending Protocol - Enhanced Test Suite", () => {
 
     it("should fail repay by non-borrower", async () => {
       // Create a new loan first
+      const priceTimestamp = await getFreshPriceTimestamp();
       const protocolState = await program.account.protocolState.fetch(protocolStatePda);
       const newIndex = protocolState.totalLoansCreated;
       const [newLoanPda, newVaultPda] = deriveLoanPDAs(borrower.publicKey, goldTokenMint, newIndex);
 
       await program.methods
-        .createLoan(new BN(1000 * 10 ** TOKEN_DECIMALS), new BN(24 * 60 * 60))
-        .accounts({
+        .createLoan(new BN(1000 * 10 ** TOKEN_DECIMALS), new BN(24 * 60 * 60), new BN(1000), priceTimestamp)
+        .accountsStrict({
+          protocolState: protocolStatePda,
+          tokenConfig: goldTokenConfigPda,
           loan: newLoanPda,
+          treasury: treasuryPda,
           borrower: borrower.publicKey,
           borrowerTokenAccount: borrowerGoldTokenAccount,
           vault: newVaultPda,
           poolAccount: goldPool.publicKey,
           tokenMint: goldTokenMint,
+          priceAuthority: admin.publicKey,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
         })
-        .signers([borrower])
+        .signers([borrower, admin])
         .rpc();
 
       // Try to repay as different user
@@ -754,14 +840,19 @@ describe("Memecoin Lending Protocol - Enhanced Test Suite", () => {
       try {
         await program.methods
           .repayLoan()
-          .accounts({
+          .accountsStrict({
+            protocolState: protocolStatePda,
+            tokenConfig: goldTokenConfigPda,
             loan: newLoanPda,
+            treasury: treasuryPda,
             operationsWallet: protocolStateAccount.operationsWallet,
             stakingRewardVault: rewardVaultPda,
             borrower: borrower2.publicKey, // Wrong borrower
             borrowerTokenAccount: borrower2GoldTokenAccount,
             vaultTokenAccount: newVaultPda,
             tokenMint: goldTokenMint,
+            tokenProgram: TOKEN_PROGRAM_ID,
+            systemProgram: SystemProgram.programId,
           })
           .signers([borrower2])
           .rpc();
@@ -773,14 +864,19 @@ describe("Memecoin Lending Protocol - Enhanced Test Suite", () => {
       // Cleanup: repay the loan properly
       await program.methods
         .repayLoan()
-        .accounts({
+        .accountsStrict({
+          protocolState: protocolStatePda,
+          tokenConfig: goldTokenConfigPda,
           loan: newLoanPda,
+          treasury: treasuryPda,
           operationsWallet: protocolStateAccount.operationsWallet,
           stakingRewardVault: rewardVaultPda,
           borrower: borrower.publicKey,
           borrowerTokenAccount: borrowerGoldTokenAccount,
           vaultTokenAccount: newVaultPda,
           tokenMint: goldTokenMint,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
         })
         .signers([borrower])
         .rpc();
@@ -799,17 +895,18 @@ describe("Memecoin Lending Protocol - Enhanced Test Suite", () => {
 
       const tx = await program.methods
         .initializeStaking(
-          new BN(50 * LAMPORTS_PER_SOL), // target balance
-          new BN(1000000),  // base emission rate
-          new BN(10000000), // max emission rate
-          new BN(100000),   // min emission rate
+          new BN(86400) // epoch_duration (1 day in seconds)
         )
-        .accounts({
+        .accountsStrict({
+          stakingPool: stakingPoolPda,
           stakingTokenMint: stakingTokenMint,
-          stakingVault: stakingVaultPda,
           stakingVaultAuthority: stakingVaultAuthorityPda,
+          stakingVault: stakingVaultPda,
           rewardVault: rewardVaultPda,
           authority: admin.publicKey,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          associatedTokenProgram: anchor.utils.token.ASSOCIATED_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
         })
         .signers([admin])
         .rpc();
@@ -832,13 +929,15 @@ describe("Memecoin Lending Protocol - Enhanced Test Suite", () => {
 
       const tx = await program.methods
         .stake(stakeAmount)
-        .accounts({
+        .accountsStrict({
           stakingPool: stakingPoolPda,
           userStake: userStakePda,
           stakingVault: stakingVaultPda,
           userTokenAccount: stakerStakingTokenAccount,
           rewardVault: rewardVaultPda,
           user: staker.publicKey,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
         })
         .signers([staker])
         .rpc();
@@ -857,10 +956,11 @@ describe("Memecoin Lending Protocol - Enhanced Test Suite", () => {
 
       const tx = await program.methods
         .depositRewards(rewardAmount)
-        .accounts({
+        .accountsStrict({
           stakingPool: stakingPoolPda,
           rewardVault: rewardVaultPda,
           depositor: admin.publicKey,
+          systemProgram: SystemProgram.programId,
         })
         .signers([admin])
         .rpc();
@@ -882,22 +982,13 @@ describe("Memecoin Lending Protocol - Enhanced Test Suite", () => {
 
       const stakerBalanceBefore = await connection.getBalance(staker.publicKey);
 
-      const tx = await program.methods
-        .claimRewards()
-        .accounts({
-          stakingPool: stakingPoolPda,
-          userStake: userStakePda,
-          rewardVault: rewardVaultPda,
-          user: staker.publicKey,
-        })
-        .signers([staker])
-        .rpc();
-
-      console.log(`  TX: ${tx.slice(0, 16)}...`);
-
-      // Balance should have increased (or stayed same if no rewards yet)
-      const stakerBalanceAfter = await connection.getBalance(staker.publicKey);
-      console.log(`  Rewards claimed: ${(stakerBalanceAfter - stakerBalanceBefore) / LAMPORTS_PER_SOL} SOL`);
+      // Note: In this staking system, rewards are claimed automatically during unstake
+      // This test now just verifies the user has staked tokens
+      const userStake = await program.account.userStake.fetch(userStakePda);
+      expect(userStake.stakedAmount.toNumber()).to.be.gt(0);
+      
+      console.log(`  User has ${userStake.stakedAmount.toNumber() / 10 ** 6} staked tokens`);
+      console.log(`  Rewards will be distributed when unstaking`);
     });
 
     it("should unstake tokens", async () => {
@@ -912,7 +1003,7 @@ describe("Memecoin Lending Protocol - Enhanced Test Suite", () => {
 
       const tx = await program.methods
         .unstake(unstakeAmount)
-        .accounts({
+        .accountsStrict({
           stakingPool: stakingPoolPda,
           userStake: userStakePda,
           stakingVault: stakingVaultPda,
@@ -920,6 +1011,8 @@ describe("Memecoin Lending Protocol - Enhanced Test Suite", () => {
           userTokenAccount: stakerStakingTokenAccount,
           rewardVault: rewardVaultPda,
           user: staker.publicKey,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
         })
         .signers([staker])
         .rpc();
@@ -927,7 +1020,7 @@ describe("Memecoin Lending Protocol - Enhanced Test Suite", () => {
       console.log(`  TX: ${tx.slice(0, 16)}...`);
 
       const stakerTokensAfter = await getAccount(connection, stakerStakingTokenAccount);
-      expect(stakerTokensAfter.amount).to.be.gt(stakerTokensBefore.amount);
+      expect(Number(stakerTokensAfter.amount)).to.be.gt(Number(stakerTokensBefore.amount));
     });
   });
 
@@ -937,27 +1030,37 @@ describe("Memecoin Lending Protocol - Enhanced Test Suite", () => {
       // Pause protocol
       await program.methods
         .pauseProtocol()
-        .accounts({ admin: admin.publicKey })
+        .accountsStrict({
+          protocolState: protocolStatePda,
+          admin: admin.publicKey,
+        })
         .signers([admin])
         .rpc();
 
       // Try to create loan
+      const priceTimestamp = await getFreshPriceTimestamp();
       const protocolState = await program.account.protocolState.fetch(protocolStatePda);
       const newIndex = protocolState.totalLoansCreated;
       const [newLoanPda, newVaultPda] = deriveLoanPDAs(borrower.publicKey, goldTokenMint, newIndex);
 
       try {
         await program.methods
-          .createLoan(new BN(1000 * 10 ** TOKEN_DECIMALS), new BN(24 * 60 * 60))
-          .accounts({
+          .createLoan(new BN(1000 * 10 ** TOKEN_DECIMALS), new BN(24 * 60 * 60), new BN(1000), priceTimestamp)
+          .accountsStrict({
+            protocolState: protocolStatePda,
+            tokenConfig: goldTokenConfigPda,
             loan: newLoanPda,
+            treasury: treasuryPda,
             borrower: borrower.publicKey,
             borrowerTokenAccount: borrowerGoldTokenAccount,
             vault: newVaultPda,
             poolAccount: goldPool.publicKey,
             tokenMint: goldTokenMint,
+            priceAuthority: admin.publicKey,
+            tokenProgram: TOKEN_PROGRAM_ID,
+            systemProgram: SystemProgram.programId,
           })
-          .signers([borrower])
+          .signers([borrower, admin])
           .rpc();
         assert.fail("Should have thrown ProtocolPaused error");
       } catch (err: any) {
@@ -967,29 +1070,39 @@ describe("Memecoin Lending Protocol - Enhanced Test Suite", () => {
       // Resume for other tests
       await program.methods
         .resumeProtocol()
-        .accounts({ admin: admin.publicKey })
+        .accountsStrict({
+          protocolState: protocolStatePda,
+          admin: admin.publicKey,
+        })
         .signers([admin])
         .rpc();
     });
 
     it("should validate token account ownership", async () => {
       // Create loan with wrong token account (belonging to different user)
+      const priceTimestamp = await getFreshPriceTimestamp();
       const protocolState = await program.account.protocolState.fetch(protocolStatePda);
       const newIndex = protocolState.totalLoansCreated;
       const [newLoanPda, newVaultPda] = deriveLoanPDAs(borrower.publicKey, goldTokenMint, newIndex);
 
       try {
         await program.methods
-          .createLoan(new BN(1000 * 10 ** TOKEN_DECIMALS), new BN(24 * 60 * 60))
-          .accounts({
+          .createLoan(new BN(1000 * 10 ** TOKEN_DECIMALS), new BN(24 * 60 * 60), new BN(1000), priceTimestamp)
+          .accountsStrict({
+            protocolState: protocolStatePda,
+            tokenConfig: goldTokenConfigPda,
             loan: newLoanPda,
+            treasury: treasuryPda,
             borrower: borrower.publicKey,
             borrowerTokenAccount: borrower2GoldTokenAccount, // Wrong owner
             vault: newVaultPda,
             poolAccount: goldPool.publicKey,
             tokenMint: goldTokenMint,
+            priceAuthority: admin.publicKey,
+            tokenProgram: TOKEN_PROGRAM_ID,
+            systemProgram: SystemProgram.programId,
           })
-          .signers([borrower])
+          .signers([borrower, admin])
           .rpc();
         assert.fail("Should have thrown an error");
       } catch (err: any) {

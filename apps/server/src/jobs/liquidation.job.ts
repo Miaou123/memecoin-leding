@@ -3,6 +3,7 @@ import { loanService } from '../services/loan.service.js';
 import { notificationService } from '../services/notification.service.js';
 import { securityMonitor } from '../services/security-monitor.service.js';
 import { liquidatorMetrics } from '../services/liquidator-metrics.service.js';
+import { tryWithLock, getLoanLockResource, getBorrowerLockResource } from '../utils/redlock.js';
 import { SECURITY_EVENT_TYPES } from '@memecoin-lending/types';
 
 export async function liquidationJob(job: Job) {
@@ -74,35 +75,63 @@ export async function liquidationJob(job: Job) {
     // Process liquidations
     for (const loanPubkey of liquidatableLoans) {
       try {
-        // In production, this would use a liquidator bot wallet
-        const liquidatorWallet = process.env.LIQUIDATOR_WALLET || process.env.ADMIN_WALLET;
+        // Try to acquire a lock for this specific loan
+        const lockResource = getLoanLockResource(loanPubkey);
         
-        if (!liquidatorWallet) {
-          console.error('No liquidator wallet configured');
-          errorCount++;
-          
-          // SECURITY: Alert when no liquidator wallet is configured
-          await securityMonitor.log({
-            severity: 'CRITICAL',
-            category: 'Liquidation',
-            eventType: SECURITY_EVENT_TYPES.LIQUIDATION_NO_WALLET,
-            message: 'No liquidator wallet configured - liquidations cannot proceed!',
-            details: {
-              envVars: ['LIQUIDATOR_WALLET', 'ADMIN_WALLET'],
-              liquidatableCount: liquidatableLoans.length,
-              currentLoan: loanPubkey,
-              jobId: job.id,
-            },
-            source: 'liquidation-job',
-          });
-          
+        // Use distributed lock to prevent multiple instances from liquidating the same loan
+        const liquidationResult = await tryWithLock(
+          lockResource,
+          async () => {
+            // Double-check if loan is still liquidatable (another instance might have liquidated it)
+            const isStillLiquidatable = await loanService.isLoanLiquidatable(loanPubkey);
+            if (!isStillLiquidatable) {
+              console.log(`⏭️  Loan ${loanPubkey} already liquidated by another instance`);
+              return { success: false, reason: 'already-liquidated' };
+            }
+            
+            // In production, this would use a liquidator bot wallet
+            const liquidatorWallet = process.env.LIQUIDATOR_WALLET || process.env.ADMIN_WALLET;
+            
+            if (!liquidatorWallet) {
+              console.error('No liquidator wallet configured');
+              
+              // SECURITY: Alert when no liquidator wallet is configured
+              await securityMonitor.log({
+                severity: 'CRITICAL',
+                category: 'Liquidation',
+                eventType: SECURITY_EVENT_TYPES.LIQUIDATION_NO_WALLET,
+                message: 'No liquidator wallet configured - liquidations cannot proceed!',
+                details: {
+                  envVars: ['LIQUIDATOR_WALLET', 'ADMIN_WALLET'],
+                  liquidatableCount: liquidatableLoans.length,
+                  currentLoan: loanPubkey,
+                  jobId: job.id,
+                },
+                source: 'liquidation-job',
+              });
+              
+              return { success: false, reason: 'no-wallet' };
+            }
+            
+            await loanService.liquidateLoan(loanPubkey, liquidatorWallet);
+            console.log(`✅ Liquidated loan: ${loanPubkey}`);
+            return { success: true };
+          },
+          15000 // 15 second lock TTL
+        );
+        
+        if (liquidationResult === null) {
+          // Could not acquire lock - another instance is processing this loan
+          console.log(`🔒 Loan ${loanPubkey} locked by another instance`);
           continue;
         }
         
-        await loanService.liquidateLoan(loanPubkey, liquidatorWallet);
-        successCount++;
-        
-        console.log(`✅ Liquidated loan: ${loanPubkey}`);
+        if (liquidationResult.success) {
+          successCount++;
+        } else if (liquidationResult.reason === 'no-wallet') {
+          errorCount++;
+        }
+        // If already-liquidated, we don't count it as error or success
         
         // Small delay to avoid overwhelming the RPC
         await new Promise(resolve => setTimeout(resolve, 1000));

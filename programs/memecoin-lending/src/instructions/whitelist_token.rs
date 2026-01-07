@@ -59,6 +59,13 @@ pub fn whitelist_token_handler(
         _ => return Err(LendingError::InvalidPoolType.into()),
     };
 
+    // WARNING: PumpFun pool type should not be used in production
+    // Tokens must migrate to PumpSwap/Raydium for liquidation support
+    if pool_type == PoolType::Pumpfun {
+        msg!("WARNING: PumpFun pool type - liquidation will be disabled for this token");
+        msg!("PumpFun tokens cannot be liquidated until they migrate to Raydium or PumpSwap");
+    }
+
     // Validate pool address
     if pool_address == Pubkey::default() {
         return Err(LendingError::InvalidPoolAddress.into());

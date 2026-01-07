@@ -996,6 +996,20 @@ class LoanService {
     return (BigInt(lamports) / BigInt(1e9)).toString();
   }
 
+  /**
+   * Check if a specific loan is still liquidatable
+   * Used by distributed liquidator to double-check before liquidation
+   */
+  async isLoanLiquidatable(loanPubkey: string): Promise<boolean> {
+    try {
+      const client = await this.getClient();
+      return await client.isLoanLiquidatable(new PublicKey(loanPubkey));
+    } catch (error: any) {
+      console.error(`Error checking if loan ${loanPubkey} is liquidatable:`, error);
+      return false;
+    }
+  }
+
   async checkLiquidatableLoans(): Promise<string[]> {
     // Get all active loans
     const activeLoans = await prisma.loan.findMany({

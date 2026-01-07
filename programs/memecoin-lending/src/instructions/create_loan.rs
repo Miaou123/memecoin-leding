@@ -113,6 +113,12 @@ pub fn create_loan_handler(
     // Validate loan duration
     ValidationUtils::validate_loan_duration(duration_seconds)?;
 
+    // Block loans for PumpFun tokens - they cannot be liquidated until migrated
+    require!(
+        token_config.pool_type != PoolType::Pumpfun,
+        LendingError::PumpfunNotMigrated
+    );
+
     // ============================================================
     // SECURITY: Verify backend-approved price
     // ============================================================

@@ -13,6 +13,7 @@ import { trustedProxyMiddleware } from './middleware/trustedProxy.js';
 import { apiSecurityHeaders } from './middleware/securityHeaders.js';
 import { defaultBodyLimit } from './middleware/bodyLimit.js';
 import { csrfProtection, csrfTokenEndpoint } from './middleware/csrf.js';
+import { globalRateLimitMiddleware } from './middleware/globalRateLimit.js';
 
 // Import routers
 import { loansRouter } from './api/loans.js';
@@ -87,6 +88,13 @@ const app = new Hono();
 // Global service instance
 let feeClaimerService: FeeClaimerService | null = null;
 
+// Always apply request ID middleware for logging (must be first)
+app.use('*', requestIdMiddleware);
+
+// Apply global rate limit middleware BEFORE all other middleware
+// This protects against DDoS attacks across the entire protocol
+app.use('*', globalRateLimitMiddleware);
+
 // Only register API middleware and routes if API is enabled
 if (!DISABLE_API) {
   // CORS Configuration
@@ -105,9 +113,6 @@ if (!DISABLE_API) {
   // ============================================
   // MIDDLEWARE ORDER MATTERS - Apply in this order:
   // ============================================
-
-  // 0. Request ID (must be first for logging)
-  app.use('*', requestIdMiddleware);
 
   // 1. Trusted proxy (must be first to get correct client IP)
   app.use('*', trustedProxyMiddleware);
@@ -167,18 +172,6 @@ if (!DISABLE_API) {
 
 // Always register health routes (even in liquidator-only mode)
 app.route('/', healthRouter);  // /health, /ready, /metrics at root
-
-// Minimal health endpoint for liquidator-only mode
-if (DISABLE_API) {
-  app.get('/health', (c) => {
-    return c.json({
-      status: 'ok',
-      mode: 'liquidator-only',
-      instanceId: process.env.INSTANCE_ID || 'auto-generated',
-      timestamp: new Date().toISOString()
-    });
-  });
-}
 
 // Error handler
 app.onError(errorHandler);
