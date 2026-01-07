@@ -6,6 +6,7 @@ import type {
   CreateVerificationRequestInput,
   ReviewVerificationRequestInput,
 } from '@memecoin-lending/types';
+import { SECURITY_EVENT_TYPES } from '@memecoin-lending/types';
 
 const app = new Hono();
 
@@ -49,7 +50,7 @@ app.post('/', requireAuth, async (c) => {
     await securityMonitor.log({
       severity: 'HIGH',
       category: 'API',
-      eventType: 'VERIFICATION_REQUEST_ERROR',
+      eventType: SECURITY_EVENT_TYPES.API_ERROR,
       message: 'Error creating verification request',
       details: {
         error: error instanceof Error ? error.message : 'Unknown error',

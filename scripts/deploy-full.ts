@@ -5,7 +5,7 @@ import fs from 'fs';
 import path from 'path';
 import chalk from 'chalk';
 import { Command } from 'commander';
-import { createInitialDeployment, saveDeploymentConfig, updateDeployment, getCurrentProgramId, getRpcUrl, getDeploymentStatus } from './config.js';
+import { createInitialDeployment, saveDeploymentConfig, updateDeployment, getRpcUrl, getDeploymentStatus } from './config.js';
 import { loadDeployment } from './deployment-store.js';
 
 import { fileURLToPath } from 'url';
@@ -88,7 +88,7 @@ function updateProgramId(oldId: string, newId: string) {
   }
 }
 
-function getCurrentProgramId(): string | null {
+function getExistingProgramId(): string | null {
   const keypairPath = path.join(ROOT_DIR, 'target/deploy/memecoin_lending-keypair.json');
   if (fs.existsSync(keypairPath)) {
     try {
@@ -204,7 +204,7 @@ async function syncAppConfigs(network: string, programId: string) {
   }
 }
 
-async function deploy(config: DeployConfig) {
+async function deploy(config: DeployConfig): Promise<boolean> {
   const startTime = Date.now();
   
   console.log(chalk.blue.bold('\n🚀 FULL DEPLOYMENT SCRIPT\n'));
@@ -216,8 +216,8 @@ async function deploy(config: DeployConfig) {
   console.log(chalk.gray('─'.repeat(60)));
 
   const networkUrl = {
-    devnet: process.env.SOLANA_RPC_URL || 'https://devnet.helius-rpc.com/?api-key=',
-    mainnet: process.env.SOLANA_RPC_URL || 'https://devnet.helius-rpc.com/?api-key=',
+    devnet: process.env.SOLANA_RPC_URL || 'https://api.devnet.solana.com',
+    mainnet: process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com',
     localnet: 'http://localhost:8899',
   }[config.network];
 
@@ -246,7 +246,7 @@ async function deploy(config: DeployConfig) {
   }
 
   // Step 1: Get current program ID (if exists)
-  const oldProgramId = getCurrentProgramId();
+  const oldProgramId = getExistingProgramId();
   console.log(chalk.blue(`\n📍 Current Program ID: ${oldProgramId || 'None'}\n`));
 
   // Step 2: Close existing program (optional, to recover SOL)
@@ -396,9 +396,12 @@ async function deploy(config: DeployConfig) {
 
   // Use updateDeployment to MERGE, not overwrite
   // This preserves PDAs and initialization data saved by previous steps
+  const currentDeployment = loadDeployment(config.network);
   updateDeployment(config.network, {
-    previousProgramId: oldProgramId,
-    fundAmount: config.fundAmount,
+    metadata: {
+      ...currentDeployment?.metadata,
+      deployerAddress: currentDeployment?.metadata?.deployerAddress || 'TBD',
+    },
   });
 
   console.log(chalk.green('  ✓ Deployment metadata updated (PDAs preserved)'));
@@ -461,8 +464,8 @@ async function deploy(config: DeployConfig) {
   console.log('');
   console.log(chalk.blue.bold('═'.repeat(60) + '\n'));
 
-  // Return info for programmatic use
-  return deploymentInfo;
+  // Return success
+  return true;
 }
 
 // CLI

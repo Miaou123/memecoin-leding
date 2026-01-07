@@ -3,6 +3,8 @@ import crypto from 'crypto';
 import { telegramVerificationService } from '../services/telegram-verification.service.js';
 import { verificationRequestService } from '../services/verification-request.service.js';
 import { securityMonitor } from '../services/security-monitor.service.js';
+import { SECURITY_EVENT_TYPES } from '@memecoin-lending/types';
+import { getRequestId } from '../middleware/requestId.js';
 
 const app = new Hono();
 
@@ -24,7 +26,7 @@ function verifyTelegramWebhook(token: string, receivedData: any): boolean {
 
 // Telegram webhook endpoint
 app.post('/', async (c) => {
-  const requestId = c.get('requestId');
+  const requestId = getRequestId(c);
   
   try {
     const body = await c.req.json();
@@ -33,7 +35,7 @@ app.post('/', async (c) => {
     await securityMonitor.log({
       severity: 'LOW',
       category: 'Telegram',
-      eventType: 'WEBHOOK_RECEIVED',
+      eventType: SECURITY_EVENT_TYPES.TELEGRAM_API_ERROR,
       message: 'Telegram webhook received',
       details: {
         updateType: body.message ? 'message' : body.callback_query ? 'callback_query' : 'unknown',
@@ -66,7 +68,7 @@ app.post('/', async (c) => {
             await securityMonitor.log({
               severity: 'MEDIUM',
               category: 'Telegram',
-              eventType: 'VERIFICATION_REVIEWED_VIA_TELEGRAM',
+              eventType: SECURITY_EVENT_TYPES.TOKEN_VERIFICATION_APPROVED,
               message: `Verification request ${reviewInput.action}ed via Telegram`,
               details: {
                 requestId: reviewInput.requestId,
@@ -91,7 +93,7 @@ app.post('/', async (c) => {
     await securityMonitor.log({
       severity: 'HIGH',
       category: 'Telegram',
-      eventType: 'WEBHOOK_ERROR',
+      eventType: SECURITY_EVENT_TYPES.TELEGRAM_API_ERROR,
       message: 'Error processing Telegram webhook',
       details: {
         error: error instanceof Error ? error.message : 'Unknown error',
@@ -133,13 +135,13 @@ app.post('/set-webhook', async (c) => {
       }),
     });
     
-    const result = await response.json();
+    const result = await response.json() as { ok: boolean; description?: string };
     
     if (result.ok) {
       await securityMonitor.log({
         severity: 'MEDIUM',
         category: 'Telegram',
-        eventType: 'WEBHOOK_SET',
+        eventType: SECURITY_EVENT_TYPES.TELEGRAM_API_ERROR,
         message: 'Telegram webhook URL configured',
         details: {
           webhookUrl,

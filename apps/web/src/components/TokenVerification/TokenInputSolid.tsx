@@ -1,6 +1,7 @@
 import { Show, createSignal, createMemo } from 'solid-js';
 import { TokenVerificationResult, TokenTier } from '@memecoin-lending/types';
 import { createTokenVerification } from '../../hooks/useTokenVerificationSolid';
+import TokenRejectionDisplay from './TokenRejectionDisplay';
 
 interface TokenInputProps {
   value: string;
@@ -220,17 +221,10 @@ export function TokenInputSolid(props: TokenInputProps) {
 
               if (!verificationData.isValid) {
                 return (
-                  <div class="inline-flex items-start space-x-2 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-sm">
-                    <svg class="w-4 h-4 text-red-600 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16c-.77.833.192 2.5 1.732 2.5z" />
-                    </svg>
-                    <div class="flex-1 min-w-0">
-                      <div class="text-red-800 font-medium">Invalid Token</div>
-                      <Show when={verificationData.reason}>
-                        <div class="text-red-600 text-xs mt-0.5 break-words">{verificationData.reason}</div>
-                      </Show>
-                    </div>
-                  </div>
+                  <TokenRejectionDisplay 
+                    verification={verificationData}
+                    class="animate-fadeIn"
+                  />
                 );
               }
 
@@ -313,6 +307,29 @@ export function TokenInputSolid(props: TokenInputProps) {
                         </span>
                       </div>
                     </div>
+                    
+                    {/* Pool Balance (for valid tokens) */}
+                    <Show when={verificationData.poolBalance?.isBalanced}>
+                      <div class="mt-3 pt-3 border-t border-gray-200">
+                        <div class="flex items-center justify-between text-xs text-gray-500">
+                          <span>Pool Balance:</span>
+                          <span class="font-mono">
+                            {verificationData.poolBalance!.baseTokenPercent.toFixed(1)}% Token / 
+                            {verificationData.poolBalance!.quoteTokenPercent.toFixed(1)}% {verificationData.poolBalance!.quoteToken}
+                          </span>
+                        </div>
+                        <div class="mt-1 h-2 rounded-full overflow-hidden flex bg-gray-200">
+                          <div 
+                            class="bg-blue-400"
+                            style={{ width: `${verificationData.poolBalance!.baseTokenPercent}%` }}
+                          />
+                          <div 
+                            class="bg-green-400"
+                            style={{ width: `${verificationData.poolBalance!.quoteTokenPercent}%` }}
+                          />
+                        </div>
+                      </div>
+                    </Show>
                   </div>
                 </div>
               );

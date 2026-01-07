@@ -43,6 +43,7 @@ export function getProgramId(network: string): string {
     }
   }
 
+  const deploymentPath = path.join(ROOT_DIR, 'deployments', `${network}-latest.json`);
   throw new Error(
     `❌ Program ID not found for network '${network}'\n` +
     `   Searched:\n` +

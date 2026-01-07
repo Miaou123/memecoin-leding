@@ -65,6 +65,7 @@ export const httpsUrlSchema = z.string()
  * Token symbol schema
  */
 export const tokenSymbolSchema = z.string()
+  .nullable()
   .optional()
   .transform((val) => val ? sanitizeTokenSymbol(val) : undefined);
 
@@ -72,6 +73,7 @@ export const tokenSymbolSchema = z.string()
  * Token name schema  
  */
 export const tokenNameSchema = z.string()
+  .nullable()
   .optional()
   .transform((val) => val ? sanitizeTokenName(val) : undefined);
 
@@ -98,6 +100,7 @@ export const searchQuerySchema = z.string()
  * Numeric string (for token amounts)
  */
 export const numericStringSchema = z.string()
+  .nullable()
   .optional()
   .transform((val) => val ? sanitizeNumericString(val, {
     allowNegative: false,

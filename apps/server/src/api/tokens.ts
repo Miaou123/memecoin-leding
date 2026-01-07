@@ -275,7 +275,7 @@ tokensRouter.get(
         },
       });
     } catch (error) {
-      logger.error('Get PumpFun tokens error:', error);
+      logger.error('Get PumpFun tokens error:', { error: error instanceof Error ? error.message : String(error) });
       return c.json({
         success: false,
         error: 'Internal server error',
@@ -343,7 +343,7 @@ tokensRouter.get('/:mint/can-loan', async (c) => {
       data: response,
     });
   } catch (error) {
-    logger.error('Can create loan check error:', error);
+    logger.error('Can create loan check error:', { error: error instanceof Error ? error.message : String(error) });
     return c.json({
       success: false,
       error: 'Internal server error',
@@ -382,7 +382,7 @@ tokensRouter.get('/:mint/verify', async (c) => {
       },
     });
   } catch (error) {
-    logger.error('Get token verification info error:', error);
+    logger.error('Get token verification info error:', { error: error instanceof Error ? error.message : String(error) });
     return c.json({
       success: false,
       error: 'Internal server error',

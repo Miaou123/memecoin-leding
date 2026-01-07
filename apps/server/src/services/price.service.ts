@@ -150,7 +150,7 @@ class PriceService {
           const update = JSON.parse(data) as JupiterWSPriceUpdate;
           this.handlePriceUpdate(update);
         } catch (error) {
-          logger.warn('Failed to parse WebSocket message:', error);
+          logger.warn('Failed to parse WebSocket message:', { error: error instanceof Error ? error.message : String(error) });
         }
       });
 
@@ -177,7 +177,7 @@ class PriceService {
       });
 
       this.jupiterWS.on('error', (error: Error) => {
-        logger.error('🔌 Jupiter WebSocket error:', error);
+        logger.error('🔌 Jupiter WebSocket error:', { error: error instanceof Error ? error.message : String(error) });
         this.wsConnected = false;
         
         // SECURITY: Log WebSocket errors
@@ -197,7 +197,7 @@ class PriceService {
       });
 
     } catch (error: any) {
-      logger.error('Failed to initialize Jupiter WebSocket:', error);
+      logger.error('Failed to initialize Jupiter WebSocket:', { error: error instanceof Error ? error.message : String(error) });
       
       // SECURITY: Log WebSocket initialization failure
       securityMonitor.log({
@@ -328,7 +328,7 @@ class PriceService {
         }
       }
     } catch (error: any) {
-      logger.error('Failed to check liquidation thresholds:', error);
+      logger.error('Failed to check liquidation thresholds:', { error: error instanceof Error ? error.message : String(error) });
       
       // SECURITY: Log liquidation check failures
       await securityMonitor.log({
@@ -472,7 +472,7 @@ class PriceService {
       uncachedMints.splice(0, uncachedMints.length, 
         ...uncachedMints.filter(m => !jupiterPrices.has(m)));
     } catch (error) {
-      logger.warn('Failed to fetch from Jupiter:', error);
+      logger.warn('Failed to fetch from Jupiter:', { error: error instanceof Error ? error.message : String(error) });
     }
 
     // 2. Try PumpFun for remaining (especially pump tokens)
@@ -490,7 +490,7 @@ class PriceService {
           if (index > -1) uncachedMints.splice(index, 1);
         }
       } catch (error) {
-        logger.warn(`Failed to fetch ${mint} from PumpFun:`, error);
+        logger.warn(`Failed to fetch ${mint} from PumpFun:`, { error: error instanceof Error ? error.message : String(error) });
       }
     }
 
@@ -506,7 +506,7 @@ class PriceService {
           if (index > -1) uncachedMints.splice(index, 1);
         }
       } catch (error) {
-        logger.warn(`Failed to fetch ${mint} from DexScreener:`, error);
+        logger.warn(`Failed to fetch ${mint} from DexScreener:`, { error: error instanceof Error ? error.message : String(error) });
       }
     }
 
@@ -586,7 +586,7 @@ class PriceService {
         );
         this.pumpFunSDK = new PumpFunSDK(provider);
       } catch (error) {
-        logger.error('Failed to initialize PumpFun SDK:', error);
+        logger.error('Failed to initialize PumpFun SDK:', { error: error instanceof Error ? error.message : String(error) });
         this.pumpFunAvailable = false;
         throw error;
       }
@@ -634,7 +634,7 @@ class PriceService {
         timestamp: Date.now(),
       };
     } catch (error) {
-      logger.warn(`Failed to fetch ${mint} from PumpFun:`, error);
+      logger.warn(`Failed to fetch ${mint} from PumpFun:`, { error: error instanceof Error ? error.message : String(error) });
       this.pumpFunAvailable = false;
       return null;
     }
@@ -679,7 +679,7 @@ class PriceService {
         }
       }
     } catch (error) {
-      logger.warn('Failed to fetch SOL price from Jupiter:', error);
+      logger.warn('Failed to fetch SOL price from Jupiter:', { error: error instanceof Error ? error.message : String(error) });
     }
 
     // Fallback
@@ -975,7 +975,7 @@ class PriceService {
             });
           }
         } catch (error) {
-          logger.error(`Failed to check price alert for loan ${loan.id}:`, error);
+          logger.error(`Failed to check price alert for loan ${loan.id}:`, { error: error instanceof Error ? error.message : String(error) });
         }
       }
     }

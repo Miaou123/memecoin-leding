@@ -61,6 +61,8 @@ export const getNetworkConfig = (network?: NetworkType): NetworkConfig => {
 };
 
 export const getCurrentNetwork = (): NetworkType => {
-  const env = process.env.SOLANA_NETWORK as NetworkType;
+  // Check both server and client env vars
+  const env = (process.env.SOLANA_NETWORK || process.env.VITE_SOLANA_NETWORK) as NetworkType;
+  // Default to devnet for safety - must be explicitly set to mainnet
   return env || 'devnet';
 };

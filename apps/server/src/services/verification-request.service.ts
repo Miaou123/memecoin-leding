@@ -11,6 +11,7 @@ import type {
   VerificationRequest,
   VerificationRequestStatus,
 } from '@memecoin-lending/types';
+import { TokenTier } from '@memecoin-lending/types';
 
 export class VerificationRequestService {
   // Rate limiting: 1 request per wallet per hour
@@ -96,6 +97,7 @@ export class VerificationRequestService {
         status: 'pending' as VerificationRequestStatus,
         createdAt: request.createdAt.getTime(),
         updatedAt: request.updatedAt.getTime(),
+        reviewedAt: request.reviewedAt ? request.reviewedAt.getTime() : undefined,
         tokenInfo,
       });
       
@@ -183,22 +185,21 @@ export class VerificationRequestService {
       // If approved, add to manual whitelist
       if (input.action === 'approve' && input.tier) {
         const tierConfig = {
-          bronze: { ltvBps: 6000, minLoan: '0.1', maxLoan: '5' },
-          silver: { ltvBps: 7000, minLoan: '0.1', maxLoan: '10' },
-          gold: { ltvBps: 8000, minLoan: '0.1', maxLoan: '20' },
-        }[input.tier];
+          bronze: { ltvBps: 6000, minLoan: '100000000', maxLoan: '5000000000' }, // 0.1 to 5 SOL
+          silver: { ltvBps: 7000, minLoan: '100000000', maxLoan: '10000000000' }, // 0.1 to 10 SOL
+          gold: { ltvBps: 8000, minLoan: '100000000', maxLoan: '20000000000' }, // 0.1 to 20 SOL
+        }[input.tier as 'bronze' | 'silver' | 'gold'];
         
         if (tierConfig) {
-          await manualWhitelistService.addToken({
+          await manualWhitelistService.addToWhitelist({
             mint: request.mint,
-            tier: input.tier,
+            tier: input.tier as TokenTier,
             ltvBps: tierConfig.ltvBps,
             minLoanAmount: tierConfig.minLoan,
             maxLoanAmount: tierConfig.maxLoan,
-            adminWallet: input.reviewedBy,
             reason: `Approved via verification request: ${request.reason || 'No reason provided'}`,
             notes: input.adminResponse,
-          });
+          }, input.reviewedBy);
         }
       }
       

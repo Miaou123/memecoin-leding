@@ -1,0 +1,55 @@
+# Anchor/Solana build artifacts
+.anchor
+target
+
+# Node modules (reinstalled in container)
+node_modules
+**/node_modules
+
+# Git
+.git
+.gitignore
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Logs
+*.log
+logs
+
+# Environment files (secrets)
+.env
+.env.*
+!.env.example
+
+# Test artifacts
+coverage
+.nyc_output
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Build outputs that get regenerated
+dist
+build
+.next
+.turbo
+
+# Keys (should be mounted, not baked in)
+keys/*.json
+!keys/.gitkeep
+
+# Documentation
+docs
+*.md
+!README.md
+
+# Misc
+*.dump
+*.sql
+*.sql.gz
+backups

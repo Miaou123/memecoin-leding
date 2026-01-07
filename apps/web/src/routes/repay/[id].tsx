@@ -41,7 +41,7 @@ export default function Repay() {
       const transaction = Transaction.from(transactionBuffer);
       
       // Get a fresh blockhash
-      const connection = new Connection(import.meta.env.VITE_SOLANA_RPC_URL || 'https://devnet.helius-rpc.com/?api-key=');
+      const connection = new Connection(import.meta.env.VITE_SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com');
       const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
       transaction.recentBlockhash = blockhash;
       transaction.feePayer = wallet.publicKey()!;

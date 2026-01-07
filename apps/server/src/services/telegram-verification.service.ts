@@ -5,6 +5,7 @@ import type {
   VerificationRequestStatus,
   ReviewVerificationRequestInput,
 } from '@memecoin-lending/types';
+import { SECURITY_EVENT_TYPES } from '@memecoin-lending/types';
 
 export class TelegramVerificationService {
   private bot: TelegramBot | null = null;
@@ -99,7 +100,7 @@ Request ID: <code>${request.id}</code>
       await securityMonitor.log({
         severity: 'MEDIUM',
         category: 'TokenVerification',
-        eventType: 'VERIFICATION_REQUEST_SENT',
+        eventType: SECURITY_EVENT_TYPES.TOKEN_VERIFICATION_MANUAL_REQUEST,
         message: 'Token verification request sent to Telegram',
         details: {
           requestId: request.id,
@@ -117,7 +118,7 @@ Request ID: <code>${request.id}</code>
       await securityMonitor.log({
         severity: 'HIGH',
         category: 'TokenVerification',
-        eventType: 'TELEGRAM_SEND_FAILED',
+        eventType: SECURITY_EVENT_TYPES.TELEGRAM_SEND_FAILED,
         message: 'Failed to send verification request to Telegram',
         details: {
           requestId: request.id,

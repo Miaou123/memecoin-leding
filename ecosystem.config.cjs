@@ -1,0 +1,55 @@
+module.exports = {
+  apps: [
+    {
+      name: 'memecoin-server',
+      cwd: './apps/server',
+      script: 'pnpm',
+      args: 'start',
+      interpreter: 'none',
+      env: {
+        NODE_ENV: 'production',
+        PORT: 3001,
+        DATABASE_URL: 'postgresql://memecoin:your_secure_password@localhost:5432/memecoin_lending',
+        REDIS_URL: 'redis://localhost:6379',
+        // Add other environment variables from your .env file
+      },
+      env_development: {
+        NODE_ENV: 'development',
+        PORT: 3001,
+        DATABASE_URL: 'postgresql://memecoin:your_secure_password@localhost:5432/memecoin_lending',
+        REDIS_URL: 'redis://localhost:6379',
+      },
+      instances: 1,
+      autorestart: true,
+      watch: false,
+      max_memory_restart: '1G',
+      error_file: './logs/server-error.log',
+      out_file: './logs/server-out.log',
+      log_file: './logs/server-combined.log',
+      time: true,
+    },
+    {
+      name: 'memecoin-web',
+      cwd: './apps/web',
+      script: 'pnpm',
+      args: 'preview --port 3000 --host',
+      interpreter: 'none',
+      env: {
+        NODE_ENV: 'production',
+        PORT: 3000,
+      },
+      env_development: {
+        NODE_ENV: 'development',
+        PORT: 3000,
+      },
+      instances: 1,
+      autorestart: true,
+      watch: false,
+      max_memory_restart: '512M',
+      error_file: './logs/web-error.log',
+      out_file: './logs/web-out.log',
+      log_file: './logs/web-combined.log',
+      time: true,
+    },
+  ],
+};

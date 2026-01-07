@@ -111,7 +111,7 @@ export function SuccessModal(props: SuccessModalProps) {
                       title="Copy transaction hash"
                     />
                     <a
-                      href={`https://solscan.io/tx/${props.transactionSignature}?cluster=devnet`}
+                      href={`https://solscan.io/tx/${props.transactionSignature}${import.meta.env.VITE_SOLANA_NETWORK === 'devnet' ? '?cluster=devnet' : ''}`}
                       target="_blank"
                       rel="noopener noreferrer"
                       class="p-2 bg-bg-secondary border border-border hover:border-accent-blue hover:text-accent-blue transition-colors"

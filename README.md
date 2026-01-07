@@ -178,7 +178,7 @@ DB_PASSWORD=your_secure_password
 PROGRAM_ID=your_program_id
 
 # Solana
-SOLANA_RPC_URL=https://devnet.helius-rpc.com/?api-key=YOUR_API_KEY
+SOLANA_RPC_URL=https://mainnet.helius-rpc.com/?api-key=YOUR_API_KEY
 ADMIN_WALLET=your_admin_wallet
 LIQUIDATOR_WALLET=your_liquidator_wallet
 

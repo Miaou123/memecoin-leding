@@ -70,7 +70,7 @@ const worker = new Worker(
         warnings: warnings.length,
       };
     } catch (error) {
-      logger.error('[LPMonitor] Job failed:', error);
+      logger.error('[LPMonitor] Job failed:', { error: error instanceof Error ? error.message : String(error) });
       throw error;
     }
   },

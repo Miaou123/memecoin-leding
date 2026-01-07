@@ -157,7 +157,7 @@ export const errorHandler = async (err: Error, c: Context) => {
       error: message,
       requestId,
       statusCode: status,
-    }, status);
+    }, status as any);
   }
 
   // Default: return sanitized error

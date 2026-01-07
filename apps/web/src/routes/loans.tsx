@@ -65,8 +65,10 @@ export default function Loans() {
   };
   
   const handleView = (loanId: string) => {
+    const network = import.meta.env.VITE_SOLANA_NETWORK || 'mainnet-beta';
+    const clusterParam = network === 'mainnet-beta' ? '' : `?cluster=${network}`;
     window.open(
-      `https://explorer.solana.com/address/${loanId}?cluster=devnet`,
+      `https://explorer.solana.com/address/${loanId}${clusterParam}`,
       '_blank'
     );
   };

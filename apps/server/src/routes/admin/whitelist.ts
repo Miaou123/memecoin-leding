@@ -5,7 +5,7 @@ import { requireAdmin } from '../../middleware/auth.js';
 import { manualWhitelistService } from '../../services/manual-whitelist.service';
 import { logger } from '../../utils/logger';
 import { securityMonitor } from '../../services/security-monitor.service.js';
-import { SECURITY_EVENT_TYPES } from '@memecoin-lending/types';
+import { SECURITY_EVENT_TYPES, TokenTier } from '@memecoin-lending/types';
 import { getIp } from '../../middleware/trustedProxy.js';
 import { getRequestId } from '../../middleware/requestId.js';
 import { sanitizeForLogging } from '../../utils/inputSanitizer.js';
@@ -40,7 +40,16 @@ app.post(
       });
 
       const entry = await manualWhitelistService.addToWhitelist(
-        data,
+        {
+          ...data,
+          tier: data.tier as TokenTier,
+          symbol: data.symbol || undefined,
+          name: data.name || undefined,
+          minLoanAmount: data.minLoanAmount || undefined,
+          maxLoanAmount: data.maxLoanAmount || undefined,
+          externalUrl: data.externalUrl || undefined,
+          logoUrl: data.logoUrl || undefined,
+        },
         adminAddress
       );
 
@@ -122,7 +131,7 @@ app.get('/stats', async (c) => {
       data: stats,
     });
   } catch (error) {
-    logger.error('Get whitelist stats error:', error);
+    logger.error('Get whitelist stats error:', { error: error instanceof Error ? error.message : String(error) });
     return c.json({
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error',
@@ -158,7 +167,7 @@ app.get('/:mint', async (c) => {
       data: entry,
     });
   } catch (error) {
-    logger.error('Get whitelist entry error:', error);
+    logger.error('Get whitelist entry error:', { error: error instanceof Error ? error.message : String(error) });
     return c.json({
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error',
@@ -202,6 +211,12 @@ app.put(
         {
           ...data,
           tier: data.tier as TokenTier,
+          symbol: data.symbol || undefined,
+          name: data.name || undefined,
+          minLoanAmount: data.minLoanAmount || undefined,
+          maxLoanAmount: data.maxLoanAmount || undefined,
+          externalUrl: data.externalUrl || undefined,
+          logoUrl: data.logoUrl || undefined,
         },
         adminAddress
       );
@@ -211,7 +226,7 @@ app.put(
         data: entry,
       });
     } catch (error) {
-      logger.error('Update whitelist entry error:', error);
+      logger.error('Update whitelist entry error:', { error: error instanceof Error ? error.message : String(error) });
       return c.json({
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error',
@@ -260,7 +275,7 @@ app.post('/:mint/enable', async (c) => {
       message: 'Token enabled successfully',
     });
   } catch (error) {
-    logger.error('Enable whitelist entry error:', error);
+    logger.error('Enable whitelist entry error:', { error: error instanceof Error ? error.message : String(error) });
     return c.json({
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error',
@@ -311,7 +326,7 @@ app.post('/:mint/disable', async (c) => {
       message: 'Token disabled successfully',
     });
   } catch (error) {
-    logger.error('Disable whitelist entry error:', error);
+    logger.error('Disable whitelist entry error:', { error: error instanceof Error ? error.message : String(error) });
     return c.json({
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error',
@@ -363,7 +378,7 @@ app.delete('/:mint', async (c) => {
       message: 'Token removed from whitelist successfully',
     });
   } catch (error) {
-    logger.error('Remove from whitelist error:', error);
+    logger.error('Remove from whitelist error:', { error: error instanceof Error ? error.message : String(error) });
     return c.json({
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error',
@@ -402,7 +417,7 @@ app.get('/:mint/audit-logs', async (c) => {
       data: logs,
     });
   } catch (error) {
-    logger.error('Get audit logs error:', error);
+    logger.error('Get audit logs error:', { error: error instanceof Error ? error.message : String(error) });
     return c.json({
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error',
@@ -429,7 +444,7 @@ app.get('/audit-logs/all', async (c) => {
       data: logs,
     });
   } catch (error) {
-    logger.error('Get all audit logs error:', error);
+    logger.error('Get all audit logs error:', { error: error instanceof Error ? error.message : String(error) });
     return c.json({
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error',

@@ -111,7 +111,7 @@ export default function Borrow() {
       const tokenDecimals = 6; // PumpFun tokens use 6 decimals
       const rawCollateralAmount = (parseFloat(collateralAmount() || '0') * Math.pow(10, tokenDecimals)).toString();
       
-      const connection = new Connection(import.meta.env.VITE_SOLANA_RPC_URL || 'https://devnet.helius-rpc.com/?api-key=');
+      const connection = new Connection(import.meta.env.VITE_SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com');
       
       // Use the new backend-signed transaction flow
       const result = await createLoan(

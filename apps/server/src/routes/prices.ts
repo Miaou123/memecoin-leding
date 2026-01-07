@@ -90,7 +90,7 @@ app.get(
       });
 
     } catch (error) {
-      logger.error('Price fetch error:', error);
+      logger.error('Price fetch error:', { error: error instanceof Error ? error.message : String(error) });
       return c.json({
         success: false,
         error: 'Failed to fetch prices',
@@ -143,7 +143,7 @@ app.get(
       });
 
     } catch (error) {
-      logger.error('Single price fetch error:', error);
+      logger.error('Single price fetch error:', { error: error instanceof Error ? error.message : String(error) });
       return c.json({
         success: false,
         error: 'Failed to fetch price',
@@ -179,7 +179,7 @@ app.get('/sol/usd', async (c) => {
     });
 
   } catch (error) {
-    logger.error('SOL price fetch error:', error);
+    logger.error('SOL price fetch error:', { error: error instanceof Error ? error.message : String(error) });
     return c.json({
       success: false,
       error: 'Failed to fetch SOL price',
@@ -206,7 +206,7 @@ app.post('/cache/clear', async (c) => {
     });
 
   } catch (error) {
-    logger.error('Cache clear error:', error);
+    logger.error('Cache clear error:', { error: error instanceof Error ? error.message : String(error) });
     return c.json({
       success: false,
       error: 'Failed to clear cache',
@@ -229,7 +229,7 @@ app.get('/cache/stats', async (c) => {
     });
 
   } catch (error) {
-    logger.error('Cache stats error:', error);
+    logger.error('Cache stats error:', { error: error instanceof Error ? error.message : String(error) });
     return c.json({
       success: false,
       error: 'Failed to get cache stats',
@@ -263,7 +263,7 @@ app.get('/status', async (c) => {
     });
 
   } catch (error) {
-    logger.error('Price service status error:', error);
+    logger.error('Price service status error:', { error: error instanceof Error ? error.message : String(error) });
     return c.json({
       success: false,
       error: 'Failed to get service status',
@@ -298,7 +298,7 @@ app.get('/test', async (c) => {
     }, testResult.working ? 200 : 502);
 
   } catch (error) {
-    logger.error('Jupiter API test error:', error);
+    logger.error('Jupiter API test error:', { error: error instanceof Error ? error.message : String(error) });
     return c.json({
       success: false,
       error: 'Failed to test Jupiter API',

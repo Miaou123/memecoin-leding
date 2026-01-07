@@ -15,7 +15,7 @@ const DEVNET_CONFIG: NetworkConfig = {
   programId: process.env.PROGRAM_ID || 'DWPzC5B8wCYFJFw9khPiCwSvErNJTVaBxpUzrxbTCNJk',
   treasuryPda: process.env.TREASURY_PDA,
   protocolStatePda: process.env.PROTOCOL_STATE_PDA,
-  explorerUrl: 'https://explorer.solana.com/?cluster=devnet',
+  explorerUrl: 'https://explorer.solana.com',
 };
 
 const MAINNET_CONFIG: NetworkConfig = {
@@ -46,7 +46,8 @@ export function isMainnet(): boolean {
 
 export function getExplorerUrl(txSignature: string): string {
   const config = getNetworkConfig();
-  return `${config.explorerUrl}/tx/${txSignature}`;
+  const clusterParam = config.network === 'mainnet-beta' ? '' : `?cluster=${config.network}`;
+  return `${config.explorerUrl}/tx/${txSignature}${clusterParam}`;
 }
 
 export function validateMainnetConfig(): void {

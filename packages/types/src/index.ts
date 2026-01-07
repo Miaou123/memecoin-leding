@@ -5,3 +5,4 @@ export * from './token-verification';
 export * from './manual-whitelist';
 export * from './staking';
 export * from './security';
+export * from './verification-request';

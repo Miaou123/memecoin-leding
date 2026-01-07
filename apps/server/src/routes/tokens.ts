@@ -55,7 +55,7 @@ app.post(
         data: result,
       });
     } catch (error) {
-      logger.error('Token verification error:', error);
+      logger.error('Token verification error:', { error: error instanceof Error ? error.message : String(error) });
       return c.json({
         success: false,
         error: 'Internal server error',
@@ -98,7 +98,7 @@ app.get(
         },
       });
     } catch (error) {
-      logger.error('Get PumpFun tokens error:', error);
+      logger.error('Get PumpFun tokens error:', { error: error instanceof Error ? error.message : String(error) });
       return c.json({
         success: false,
         error: 'Internal server error',
@@ -140,7 +140,7 @@ app.get(
         data: response,
       });
     } catch (error) {
-      logger.error('Can create loan check error:', error);
+      logger.error('Can create loan check error:', { error: error instanceof Error ? error.message : String(error) });
       return c.json({
         success: false,
         error: 'Internal server error',
@@ -187,7 +187,7 @@ app.post(
         },
       });
     } catch (error) {
-      logger.error('Batch verification error:', error);
+      logger.error('Batch verification error:', { error: error instanceof Error ? error.message : String(error) });
       return c.json({
         success: false,
         error: 'Internal server error',
@@ -230,7 +230,7 @@ app.get(
         },
       });
     } catch (error) {
-      logger.error('Get token info error:', error);
+      logger.error('Get token info error:', { error: error instanceof Error ? error.message : String(error) });
       return c.json({
         success: false,
         error: 'Internal server error',
@@ -257,7 +257,7 @@ app.get('/cache/stats', async (c) => {
       timestamp: Date.now(),
     });
   } catch (error) {
-    logger.error('Cache stats error:', error);
+    logger.error('Cache stats error:', { error: error instanceof Error ? error.message : String(error) });
     return c.json({
       success: false,
       error: 'Failed to get cache stats',
@@ -283,7 +283,7 @@ app.post('/cache/clear', async (c) => {
       timestamp: Date.now(),
     });
   } catch (error) {
-    logger.error('Cache clear error:', error);
+    logger.error('Cache clear error:', { error: error instanceof Error ? error.message : String(error) });
     return c.json({
       success: false,
       error: 'Failed to clear cache',

@@ -1,0 +1,123 @@
+# Docker Compose Extension for PostgreSQL Backups
+# Usage: docker compose -f docker-compose.yml -f docker-compose.backup.yml up -d
+
+services:
+  # Scheduled Backup Service
+  postgres-backup:
+    build:
+      context: ./infrastructure/backup
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      # Database connection
+      PGHOST: postgres
+      PGPORT: 5432
+      PGUSER: ${DB_USER:-memecoin}
+      PGPASSWORD: ${DB_PASSWORD}
+      PGDATABASE: memecoin_lending
+      
+      # Backup configuration
+      BACKUP_DIR: /backups
+      RETENTION_DAYS: 7
+      
+      # S3 configuration (optional - comment out if not using)
+      S3_BUCKET: ${BACKUP_S3_BUCKET:-}
+      S3_PREFIX: ${BACKUP_S3_PREFIX:-memecoin-lending/postgres}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_DEFAULT_REGION: ${AWS_REGION:-us-east-1}
+      
+      # Telegram notifications (uses same as main app)
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+    volumes:
+      - postgres_backups:/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - memecoin-lending
+    # Run backup every 6 hours using cron-like scheduling
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        echo "Starting backup scheduler..."
+        echo "Backup interval: 6 hours"
+        echo "Retention: ${RETENTION_DAYS} days"
+        echo ""
+        
+        # Run initial backup on startup
+        /usr/local/bin/backup
+        
+        # Then run every 6 hours (21600 seconds)
+        while true; do
+          echo "Next backup in 6 hours..."
+          sleep 21600
+          /usr/local/bin/backup
+        done
+    labels:
+      - "com.memecoin-lending.service=backup"
+      - "com.memecoin-lending.description=Automated PostgreSQL backups"
+
+  # One-off backup runner (for manual backups)
+  postgres-backup-now:
+    build:
+      context: ./infrastructure/backup
+      dockerfile: Dockerfile
+    profiles:
+      - tools  # Only runs when explicitly called
+    environment:
+      PGHOST: postgres
+      PGPORT: 5432
+      PGUSER: ${DB_USER:-memecoin}
+      PGPASSWORD: ${DB_PASSWORD}
+      PGDATABASE: memecoin_lending
+      BACKUP_DIR: /backups
+      S3_BUCKET: ${BACKUP_S3_BUCKET:-}
+      S3_PREFIX: ${BACKUP_S3_PREFIX:-memecoin-lending/postgres}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_DEFAULT_REGION: ${AWS_REGION:-us-east-1}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+    volumes:
+      - postgres_backups:/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - memecoin-lending
+    command: ["backup"]
+
+  # Restore tool (manual use only)
+  postgres-restore:
+    build:
+      context: ./infrastructure/backup
+      dockerfile: Dockerfile
+    profiles:
+      - tools  # Only runs when explicitly called
+    environment:
+      PGHOST: postgres
+      PGPORT: 5432
+      PGUSER: ${DB_USER:-memecoin}
+      PGPASSWORD: ${DB_PASSWORD}
+      PGDATABASE: memecoin_lending
+      BACKUP_DIR: /backups
+      S3_BUCKET: ${BACKUP_S3_BUCKET:-}
+      S3_PREFIX: ${BACKUP_S3_PREFIX:-memecoin-lending/postgres}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_DEFAULT_REGION: ${AWS_REGION:-us-east-1}
+    volumes:
+      - postgres_backups:/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - memecoin-lending
+    entrypoint: ["restore"]
+    command: ["--help"]
+
+volumes:
+  postgres_backups:
+    driver: local

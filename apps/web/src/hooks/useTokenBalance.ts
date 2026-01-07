@@ -21,7 +21,7 @@ export function useTokenBalance(tokenMint: Accessor<string | null>): UseTokenBal
 
   // Create a connection instance
   const connection = new Connection(
-    import.meta.env.VITE_SOLANA_RPC_URL || 'https://devnet.helius-rpc.com/?api-key=',
+    import.meta.env.VITE_SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com',
     'confirmed'
   );
 

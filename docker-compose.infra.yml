@@ -1,0 +1,88 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-memecoin}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-your_secure_password}
+      POSTGRES_DB: memecoin_lending
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-memecoin}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - memecoin-infra
+
+  # Redis for job queues and caching
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - memecoin-infra
+
+  # Scheduled Backup Service
+  postgres-backup:
+    build:
+      context: ./infrastructure/backup
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      # Database connection
+      PGHOST: postgres
+      PGPORT: 5432
+      PGUSER: ${DB_USER:-memecoin}
+      PGPASSWORD: ${DB_PASSWORD:-your_secure_password}
+      PGDATABASE: memecoin_lending
+      
+      # Backup configuration
+      BACKUP_DIR: /backups
+      RETENTION_DAYS: ${RETENTION_DAYS:-30}
+      
+      # S3 configuration (optional)
+      S3_BUCKET: ${BACKUP_S3_BUCKET:-}
+      S3_PREFIX: ${BACKUP_S3_PREFIX:-memecoin-lending/postgres}
+      S3_REGION: ${BACKUP_S3_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      
+      # Telegram notifications
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      
+      # Schedule (cron format)
+      BACKUP_SCHEDULE: ${BACKUP_SCHEDULE:-0 */6 * * *}
+    volumes:
+      - ./backups:/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - memecoin-infra
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  memecoin-infra:
+    driver: bridge

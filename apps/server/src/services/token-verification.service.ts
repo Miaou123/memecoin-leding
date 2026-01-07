@@ -733,7 +733,7 @@ export class TokenVerificationService {
           'https://api.jup.ag/price/v2?ids=So11111111111111111111111111111111111111112',
           { signal: AbortSignal.timeout(5000) }
         );
-        const data = await response.json();
+        const data = await response.json() as any;
         return data?.data?.['So11111111111111111111111111111111111111112']?.price || 150;
       } catch {
         return 150; // Fallback price
