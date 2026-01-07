@@ -6,7 +6,6 @@ import { logger } from '../utils/logger.js';
 import Redis from 'ioredis';
 import { PumpFunSDK } from 'pumpdotfun-sdk';
 import { AnchorProvider } from '@coral-xyz/anchor';
-import { WebSocket } from 'ws';
 import { securityMonitor } from './security-monitor.service.js';
 import { SECURITY_EVENT_TYPES } from '@memecoin-lending/types';
 
@@ -69,18 +68,11 @@ interface ServiceStatus {
   jupiterAvailable: boolean;
   pumpFunAvailable: boolean;
   dexScreenerAvailable: boolean;
-  jupiterWebSocketConnected: boolean;
   lastCheck: number;
   cacheSize: number;
   uptime: number;
 }
 
-// Jupiter WebSocket price update interface
-interface JupiterWSPriceUpdate {
-  id: string;
-  price: string;
-  timestamp: number;
-}
 
 class PriceService {
   private connection: Connection;
@@ -93,340 +85,18 @@ class PriceService {
   private lastHealthCheck = 0;
   private pumpFunSDK: PumpFunSDK | null = null;
   
-  // SECURITY: Jupiter WebSocket for real-time price streaming
-  private jupiterWS: WebSocket | null = null;
-  private wsReconnectAttempts = 0;
-  private maxReconnectAttempts = 10;
-  private trackedMints = new Set<string>();
-  private wsConnected = false;
-  
   constructor() {
     const network = (process.env.SOLANA_NETWORK as NetworkType) || 'devnet';
     const networkConfig = getNetworkConfig(network);
     this.connection = new Connection(networkConfig.rpcUrl, 'confirmed');
-    
-    // SECURITY: Initialize Jupiter WebSocket for real-time price streaming
-    this.initializeJupiterWebSocket();
   }
 
-  /**
-   * SECURITY: Initialize Jupiter WebSocket connection for real-time price streaming
-   */
-  private initializeJupiterWebSocket(): void {
-    try {
-      // Jupiter WebSocket URL (check Jupiter docs for the correct URL)
-      const wsUrl = 'wss://price.jup.ag/v4/price-stream';
-      
-      this.jupiterWS = new WebSocket(wsUrl, {
-        headers: {
-          'x-api-key': process.env.JUPITER_API_KEY || '',
-        },
-      });
 
-      this.jupiterWS.on('open', () => {
-        logger.info('🔌 Jupiter WebSocket connected');
-        this.wsConnected = true;
-        this.wsReconnectAttempts = 0;
-        
-        // SECURITY: Log successful WebSocket connection
-        securityMonitor.log({
-          severity: 'LOW',
-          category: 'Price Monitoring',
-          eventType: SECURITY_EVENT_TYPES.PRICE_WEBSOCKET_CONNECTED,
-          message: 'Jupiter WebSocket connection established',
-          details: {
-            wsUrl: 'wss://price.jup.ag/v4/price-stream',
-            reconnectAttempt: this.wsReconnectAttempts,
-          },
-          source: 'price-service',
-        });
-        
-        // Subscribe to tracked tokens
-        this.subscribeToTrackedTokens();
-      });
 
-      this.jupiterWS.on('message', (data: string) => {
-        try {
-          const update = JSON.parse(data) as JupiterWSPriceUpdate;
-          this.handlePriceUpdate(update);
-        } catch (error) {
-          logger.warn('Failed to parse WebSocket message:', { error: error instanceof Error ? error.message : String(error) });
-        }
-      });
 
-      this.jupiterWS.on('close', (code: number, reason: string) => {
-        logger.warn(`🔌 Jupiter WebSocket disconnected: ${code} ${reason}`);
-        this.wsConnected = false;
-        
-        // SECURITY: Log WebSocket disconnection
-        securityMonitor.log({
-          severity: 'MEDIUM',
-          category: 'Price Monitoring',
-          eventType: SECURITY_EVENT_TYPES.PRICE_WEBSOCKET_DISCONNECTED,
-          message: 'Jupiter WebSocket connection lost',
-          details: {
-            code,
-            reason,
-            uptime: Date.now() - this.serviceStartTime,
-            trackedTokens: this.trackedMints.size,
-          },
-          source: 'price-service',
-        });
-        
-        this.scheduleReconnect();
-      });
 
-      this.jupiterWS.on('error', (error: Error) => {
-        logger.error('🔌 Jupiter WebSocket error:', { error: error instanceof Error ? error.message : String(error) });
-        this.wsConnected = false;
-        
-        // SECURITY: Log WebSocket errors
-        securityMonitor.log({
-          severity: 'HIGH',
-          category: 'Price Monitoring',
-          eventType: SECURITY_EVENT_TYPES.PRICE_WEBSOCKET_ERROR,
-          message: `Jupiter WebSocket error: ${error.message}`,
-          details: {
-            error: error.message,
-            stack: error.stack?.slice(0, 500),
-            trackedTokens: this.trackedMints.size,
-            connectionAttempts: this.wsReconnectAttempts,
-          },
-          source: 'price-service',
-        });
-      });
 
-    } catch (error: any) {
-      logger.error('Failed to initialize Jupiter WebSocket:', { error: error instanceof Error ? error.message : String(error) });
-      
-      // SECURITY: Log WebSocket initialization failure
-      securityMonitor.log({
-        severity: 'HIGH',
-        category: 'Price Monitoring',
-        eventType: SECURITY_EVENT_TYPES.PRICE_WEBSOCKET_INIT_FAILED,
-        message: `Failed to initialize Jupiter WebSocket: ${error.message}`,
-        details: {
-          error: error.message,
-          stack: error.stack?.slice(0, 500),
-        },
-        source: 'price-service',
-      });
-    }
-  }
 
-  /**
-   * SECURITY: Handle real-time price updates from Jupiter WebSocket
-   */
-  private async handlePriceUpdate(update: JupiterWSPriceUpdate): Promise<void> {
-    try {
-      const priceValue = parseFloat(update.price);
-      
-      // SECURITY: Validate price data
-      if (isNaN(priceValue) || priceValue <= 0 || priceValue > 1000000) {
-        await securityMonitor.log({
-          severity: 'MEDIUM',
-          category: 'Price Monitoring',
-          eventType: SECURITY_EVENT_TYPES.PRICE_INVALID_DATA,
-          message: 'Invalid price data received from WebSocket',
-          details: {
-            tokenMint: update.id,
-            price: update.price,
-            timestamp: update.timestamp,
-          },
-          source: 'price-service',
-        });
-        return;
-      }
-      
-      // Check for extreme price movements
-      const cached = this.cache.get(update.id);
-      if (cached) {
-        const oldPrice = cached.data.usdPrice;
-        const priceChange = Math.abs((priceValue - oldPrice) / oldPrice);
-        
-        if (priceChange > 0.5) { // 50% price movement
-          await securityMonitor.log({
-            severity: 'HIGH',
-            category: 'Price Monitoring',
-            eventType: SECURITY_EVENT_TYPES.PRICE_EXTREME_MOVEMENT,
-            message: `Extreme price movement detected: ${(priceChange * 100).toFixed(1)}%`,
-            details: {
-              tokenMint: update.id,
-              oldPrice,
-              newPrice: priceValue,
-              changePercent: priceChange * 100,
-              timeDelta: Date.now() - cached.timestamp,
-            },
-            source: 'price-service',
-          });
-        }
-      }
-      
-      const extendedData: ExtendedPriceData = {
-        mint: update.id,
-        usdPrice: priceValue,
-        source: 'jupiter-ws',
-        timestamp: update.timestamp || Date.now(),
-      };
-
-      // Update cache with real-time data
-      this.cache.set(update.id, { data: extendedData, timestamp: Date.now() });
-      
-      // Also cache in Redis
-      redis.setex(`price:${update.id}`, 5, JSON.stringify(extendedData));
-      
-      logger.debug(`📈 Real-time price update: ${update.id} = $${update.price}`);
-      
-      // CHECK FOR LIQUIDATIONS IMMEDIATELY
-      this.checkLiquidationThresholds(update.id, priceValue);
-    } catch (error: any) {
-      await securityMonitor.log({
-        severity: 'MEDIUM',
-        category: 'Price Monitoring',
-        eventType: SECURITY_EVENT_TYPES.PRICE_UPDATE_FAILED,
-        message: `Failed to handle price update: ${error.message}`,
-        details: {
-          tokenMint: update.id,
-          price: update.price,
-          error: error.message,
-        },
-        source: 'price-service',
-      });
-    }
-  }
-
-  /**
-   * SECURITY: Check if any loans need immediate liquidation based on price update
-   */
-  private async checkLiquidationThresholds(mint: string, usdPrice: number): Promise<void> {
-    try {
-      // Get SOL price to convert USD to SOL
-      const solPrice = await this.getSolPrice();
-      const priceInSol = usdPrice / solPrice;
-      
-      // Get all active loans for this token
-      const loans = await prisma.loan.findMany({
-        where: { 
-          tokenMint: mint, 
-          status: 'active' 
-        },
-        select: {
-          id: true,
-          liquidationPrice: true,
-          borrower: true,
-        }
-      });
-      
-      for (const loan of loans) {
-        const liquidationPrice = parseFloat(loan.liquidationPrice);
-        if (priceInSol <= liquidationPrice) {
-          console.log(`🚨 URGENT: Loan ${loan.id} hit liquidation threshold!`);
-          console.log(`📊 Current: $${usdPrice} (${priceInSol} SOL) <= Threshold: ${liquidationPrice} SOL`);
-          
-          // Trigger immediate liquidation (don't wait for job)
-          this.triggerUrgentLiquidation(loan.id, priceInSol, liquidationPrice);
-        }
-      }
-    } catch (error: any) {
-      logger.error('Failed to check liquidation thresholds:', { error: error instanceof Error ? error.message : String(error) });
-      
-      // SECURITY: Log liquidation check failures
-      await securityMonitor.log({
-        severity: 'HIGH',
-        category: 'Price Monitoring',
-        eventType: SECURITY_EVENT_TYPES.PRICE_LIQUIDATION_CHECK_FAILED,
-        message: `Failed to check liquidation thresholds: ${error.message}`,
-        details: {
-          tokenMint: mint,
-          usdPrice,
-          error: error.message,
-        },
-        source: 'price-service',
-      });
-    }
-  }
-
-  /**
-   * SECURITY: Trigger urgent liquidation for critical price drops
-   */
-  private async triggerUrgentLiquidation(loanId: string, price: number, threshold: number): Promise<void> {
-    try {
-      const liquidatorWallet = process.env.LIQUIDATOR_WALLET || process.env.ADMIN_WALLET;
-      
-      if (!liquidatorWallet) {
-        console.error('❌ No liquidator wallet configured for urgent liquidation');
-        return;
-      }
-      
-      console.log(`⚡ Triggering URGENT liquidation for loan ${loanId}`);
-      
-      // Import loan service dynamically to avoid circular dependency
-      const { loanService } = await import('./loan.service.js');
-      await loanService.liquidateLoan(loanId, liquidatorWallet);
-      
-      console.log(`✅ URGENT liquidation completed for ${loanId}`);
-      
-    } catch (error) {
-      console.error(`❌ Urgent liquidation failed for ${loanId}:`, error);
-    }
-  }
-
-  /**
-   * SECURITY: Subscribe to tracked tokens for WebSocket updates
-   */
-  private subscribeToTrackedTokens(): void {
-    if (!this.jupiterWS || !this.wsConnected || this.trackedMints.size === 0) {
-      return;
-    }
-
-    const subscriptionMessage = {
-      method: 'subscribe',
-      params: {
-        ids: Array.from(this.trackedMints),
-      },
-    };
-
-    this.jupiterWS.send(JSON.stringify(subscriptionMessage));
-    logger.info(`📡 Subscribed to ${this.trackedMints.size} tokens via WebSocket`);
-  }
-
-  /**
-   * SECURITY: Add token to real-time tracking
-   */
-  public trackToken(mint: string): void {
-    this.trackedMints.add(mint);
-    
-    // If WebSocket is connected, subscribe immediately
-    if (this.wsConnected && this.jupiterWS) {
-      const subscriptionMessage = {
-        method: 'subscribe',
-        params: {
-          ids: [mint],
-        },
-      };
-      this.jupiterWS.send(JSON.stringify(subscriptionMessage));
-      logger.info(`📡 Added ${mint} to real-time tracking`);
-    }
-  }
-
-  /**
-   * SECURITY: Schedule WebSocket reconnection with exponential backoff
-   */
-  private scheduleReconnect(): void {
-    if (this.wsReconnectAttempts >= this.maxReconnectAttempts) {
-      logger.error('🔌 Max WebSocket reconnection attempts reached');
-      return;
-    }
-
-    const backoffMs = Math.min(1000 * Math.pow(2, this.wsReconnectAttempts), 30000);
-    this.wsReconnectAttempts++;
-
-    logger.info(`🔌 Reconnecting Jupiter WebSocket in ${backoffMs}ms (attempt ${this.wsReconnectAttempts})`);
-    
-    setTimeout(() => {
-      this.initializeJupiterWebSocket();
-    }, backoffMs);
-  }
 
   /**
    * Get price for a single token
@@ -437,7 +107,7 @@ class PriceService {
   }
 
   /**
-   * Get prices for multiple tokens
+   * Get prices for multiple tokens with proper fallback
    */
   async getPrices(mints: string[]): Promise<Map<string, ExtendedPriceData>> {
     const results = new Map<string, ExtendedPriceData>();
@@ -457,6 +127,9 @@ class PriceService {
       return results;
     }
 
+    // Track which tokens failed from each source
+    const failedSources: Map<string, string[]> = new Map();
+
     // 1. Try Jupiter first
     try {
       const jupiterPrices = await this.fetchFromJupiter(uncachedMints);
@@ -468,15 +141,38 @@ class PriceService {
         await redis.setex(`price:${mint}`, 10, JSON.stringify(price));
       }
       
+      // Track tokens that Jupiter couldn't find
+      const jupiterMissing = uncachedMints.filter(m => !jupiterPrices.has(m));
+      if (jupiterMissing.length > 0) {
+        failedSources.set('jupiter', jupiterMissing);
+      }
+      
       // Remove fetched mints from uncached list
-      uncachedMints.splice(0, uncachedMints.length, 
-        ...uncachedMints.filter(m => !jupiterPrices.has(m)));
+      uncachedMints.splice(0, uncachedMints.length, ...jupiterMissing);
     } catch (error) {
       logger.warn('Failed to fetch from Jupiter:', { error: error instanceof Error ? error.message : String(error) });
+      failedSources.set('jupiter', [...uncachedMints]);
+      
+      // SECURITY: Alert on Jupiter API failure
+      await securityMonitor.log({
+        severity: 'MEDIUM',
+        category: 'Price Monitoring',
+        eventType: SECURITY_EVENT_TYPES.JUPITER_API_ERROR,
+        message: `Jupiter API failed, falling back to other sources: ${error instanceof Error ? error.message : String(error)}`,
+        details: {
+          tokenCount: uncachedMints.length,
+          error: error instanceof Error ? error.message : String(error),
+          jupiterAvailable: this.jupiterAvailable,
+        },
+        source: 'price-service',
+      });
     }
 
     // 2. Try PumpFun for remaining (especially pump tokens)
-    for (const mint of [...uncachedMints]) {
+    const pumpFunAttempted = [...uncachedMints];
+    const pumpFunFailed: string[] = [];
+    
+    for (const mint of pumpFunAttempted) {
       // Try PumpFun for all remaining tokens (not just those ending in 'pump')
       // since some valid PumpFun tokens may not follow that pattern
       try {
@@ -485,29 +181,109 @@ class PriceService {
           results.set(mint, price);
           this.cache.set(mint, { data: price, timestamp: Date.now() });
           await redis.setex(`price:${mint}`, 10, JSON.stringify(price));
+          
+          // Alert on PumpFun fallback if token was previously on Jupiter
+          if (failedSources.has('jupiter') && failedSources.get('jupiter')!.includes(mint)) {
+            await securityMonitor.log({
+              severity: 'LOW',
+              category: 'Price Monitoring',
+              eventType: 'PRICE_SOURCE_FAILOVER',
+              message: `Price source switched from Jupiter to PumpFun for ${mint}`,
+              details: {
+                tokenMint: mint,
+                previousSource: 'jupiter',
+                newSource: 'pumpfun',
+                price: price.usdPrice,
+              },
+              source: 'price-service',
+            });
+          }
+          
           // Remove from uncached list
           const index = uncachedMints.indexOf(mint);
           if (index > -1) uncachedMints.splice(index, 1);
+        } else {
+          pumpFunFailed.push(mint);
         }
       } catch (error) {
         logger.warn(`Failed to fetch ${mint} from PumpFun:`, { error: error instanceof Error ? error.message : String(error) });
+        pumpFunFailed.push(mint);
       }
+    }
+    
+    if (pumpFunFailed.length > 0) {
+      failedSources.set('pumpfun', pumpFunFailed);
     }
 
     // 3. Try DexScreener for remaining
-    for (const mint of [...uncachedMints]) {
+    const dexScreenerAttempted = [...uncachedMints];
+    const dexScreenerFailed: string[] = [];
+    
+    for (const mint of dexScreenerAttempted) {
       try {
         const price = await this.fetchFromDexScreener(mint);
         if (price) {
           results.set(mint, price);
           this.cache.set(mint, { data: price, timestamp: Date.now() });
           await redis.setex(`price:${mint}`, 10, JSON.stringify(price));
+          
+          // Alert on DexScreener fallback
+          const previousSources: string[] = [];
+          if (failedSources.has('jupiter') && failedSources.get('jupiter')!.includes(mint)) {
+            previousSources.push('jupiter');
+          }
+          if (failedSources.has('pumpfun') && failedSources.get('pumpfun')!.includes(mint)) {
+            previousSources.push('pumpfun');
+          }
+          
+          if (previousSources.length > 0) {
+            await securityMonitor.log({
+              severity: 'MEDIUM',
+              category: 'Price Monitoring',
+              eventType: 'PRICE_SOURCE_FAILOVER',
+              message: `Price source switched to DexScreener after ${previousSources.join(', ')} failures for ${mint}`,
+              details: {
+                tokenMint: mint,
+                failedSources: previousSources,
+                newSource: 'dexscreener',
+                price: price.usdPrice,
+              },
+              source: 'price-service',
+            });
+          }
+          
           const index = uncachedMints.indexOf(mint);
           if (index > -1) uncachedMints.splice(index, 1);
+        } else {
+          dexScreenerFailed.push(mint);
         }
       } catch (error) {
         logger.warn(`Failed to fetch ${mint} from DexScreener:`, { error: error instanceof Error ? error.message : String(error) });
+        dexScreenerFailed.push(mint);
       }
+    }
+    
+    if (dexScreenerFailed.length > 0) {
+      failedSources.set('dexscreener', dexScreenerFailed);
+    }
+
+    // Alert if any tokens have no price data from any source
+    if (uncachedMints.length > 0) {
+      await securityMonitor.log({
+        severity: 'HIGH',
+        category: 'Price Monitoring',
+        eventType: SECURITY_EVENT_TYPES.PRICE_STALE_DATA,
+        message: `No price data available from any source for ${uncachedMints.length} tokens`,
+        details: {
+          tokens: uncachedMints.slice(0, 10), // Limit to first 10 to avoid huge logs
+          totalFailed: uncachedMints.length,
+          failedBySource: Object.fromEntries(failedSources),
+          jupiterAvailable: this.jupiterAvailable,
+          pumpFunAvailable: this.pumpFunAvailable,
+          dexScreenerAvailable: this.dexScreenerAvailable,
+        },
+        source: 'price-service',
+      });
     }
 
     // For any remaining mints without prices, we don't add fallback data
@@ -916,11 +692,6 @@ class PriceService {
     
     if (mints.length > 0) {
       await this.getPrices(mints);
-      
-      // SECURITY: Track all enabled tokens for real-time monitoring
-      for (const mint of mints) {
-        this.trackToken(mint);
-      }
     }
     
     logger.info(`Updated prices for ${mints.length} tokens`);

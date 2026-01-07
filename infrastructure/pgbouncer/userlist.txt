@@ -1,0 +1,23 @@
+;; PgBouncer userlist.txt
+;; Format: "username" "password_hash"
+;; 
+;; To generate MD5 password hash:
+;; echo -n "md5$(echo -n 'passwordusername' | md5sum | cut -d' ' -f1)"
+;;
+;; Example for user 'memecoin' with password 'your_secure_password':
+;; echo -n "md5$(echo -n 'your_secure_passwordmemecoin' | md5sum | cut -d' ' -f1)"
+
+;; Main application user
+"memecoin" "md5xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+
+;; Admin user for management
+"postgres" "md5xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+
+;; Monitoring user (read-only access to stats)
+"monitoring" "md5xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+
+;; Backup user
+"backup" "md5xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+
+;; Additional users can be added here
+;; "username" "md5hash"

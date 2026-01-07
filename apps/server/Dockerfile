@@ -1,3 +1,7 @@
+# NOTE: This Dockerfile is not used in the current PM2 deployment.
+# It's kept for reference or future Docker-based deployments.
+# Current deployment uses: pnpm pm2:start (see ecosystem.config.cjs)
+
 # ==============================================================================
 # Server Dockerfile - Using pnpm deploy to create flat node_modules
 # ==============================================================================

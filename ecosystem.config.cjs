@@ -9,13 +9,17 @@ module.exports = {
       env: {
         NODE_ENV: 'production',
         PORT: 3001,
-        DATABASE_URL: 'postgresql://memecoin:your_secure_password@localhost:5432/memecoin_lending',
+        // Use PgBouncer for application connections (port 6432)
+        DATABASE_URL: 'postgresql://memecoin:your_secure_password@localhost:6432/memecoin_lending',
+        // Direct connection for migrations (port 5432)
+        DATABASE_URL_DIRECT: 'postgresql://memecoin:your_secure_password@localhost:5432/memecoin_lending?sslmode=require',
         REDIS_URL: 'redis://localhost:6379',
         // Add other environment variables from your .env file
       },
       env_development: {
         NODE_ENV: 'development',
         PORT: 3001,
+        // Development can use direct connection or PgBouncer
         DATABASE_URL: 'postgresql://memecoin:your_secure_password@localhost:5432/memecoin_lending',
         REDIS_URL: 'redis://localhost:6379',
       },

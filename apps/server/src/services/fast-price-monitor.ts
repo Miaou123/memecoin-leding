@@ -1,10 +1,9 @@
 /**
  * Fast Price Monitor Service
  * 
- * Polls Jupiter Price API every 1 second for real-time-ish price updates.
+ * Polls price APIs with fallback chain: Jupiter → DexScreener
  * Checks liquidation thresholds and triggers immediate liquidation.
- * 
- * This replaces any fake WebSocket implementations.
+ * Sends Telegram alerts on price source failover.
  */
 
 import { EventEmitter } from 'events';
@@ -12,8 +11,10 @@ import { securityMonitor } from './security-monitor.service.js';
 import { SECURITY_EVENT_TYPES } from '@memecoin-lending/types';
 
 const JUPITER_PRICE_API = 'https://api.jup.ag/price/v3';
-const POLL_INTERVAL_MS = 5000; // 5 seconds (development mode)
+const DEXSCREENER_API = 'https://api.dexscreener.com/latest/dex/tokens';
+const POLL_INTERVAL_MS = parseInt(process.env.PRICE_POLL_INTERVAL_MS || '5000'); // 5 seconds default
 const MAX_MINTS_PER_REQUEST = 50; // Jupiter limit
+const PRICE_SOURCE_SWITCH_THRESHOLD = 3; // Switch sources after 3 consecutive failures
 
 export interface PriceData {
   mint: string;
@@ -57,6 +58,9 @@ class FastPriceMonitor extends EventEmitter {
   private apiKey: string;
   private consecutiveErrors: number = 0;
   private maxConsecutiveErrors: number = 10;
+  private currentPriceSource: 'jupiter' | 'dexscreener' = 'jupiter';
+  private sourceFailures: Map<string, number> = new Map();
+  private lastSourceAlert: number = 0;
   
   constructor() {
     super();
@@ -67,8 +71,9 @@ class FastPriceMonitor extends EventEmitter {
     }
     
     console.log('🔌 Fast Price Monitor initialized');
-    console.log(`   Poll interval: ${POLL_INTERVAL_MS}ms (development mode)`);
-    console.log(`   API: ${JUPITER_PRICE_API}`);
+    console.log(`   Poll interval: ${POLL_INTERVAL_MS}ms`);
+    console.log(`   Primary API: ${JUPITER_PRICE_API}`);
+    console.log(`   Fallback API: ${DEXSCREENER_API}`);
   }
   
   /**
@@ -231,10 +236,149 @@ class FastPriceMonitor extends EventEmitter {
    * Fetch prices for a batch of token mints
    */
   private async fetchPriceBatch(mints: string[]): Promise<void> {
+    const now = Date.now();
+    let priceData: Record<string, any> = {};
+    let sourceUsed: 'jupiter' | 'dexscreener' = this.currentPriceSource;
+    
+    // Try current source first
+    try {
+      if (this.currentPriceSource === 'jupiter') {
+        priceData = await this.fetchFromJupiter(mints);
+      } else {
+        priceData = await this.fetchFromDexScreener(mints);
+      }
+      
+      // Reset failure count on success
+      this.sourceFailures.set(sourceUsed, 0);
+      this.consecutiveErrors = 0;
+      
+    } catch (primaryError: any) {
+      console.error(`❌ ${sourceUsed} API failed:`, primaryError.message);
+      
+      // Increment failure count
+      const failures = (this.sourceFailures.get(sourceUsed) || 0) + 1;
+      this.sourceFailures.set(sourceUsed, failures);
+      
+      // Try fallback source
+      const fallbackSource = sourceUsed === 'jupiter' ? 'dexscreener' : 'jupiter';
+      
+      try {
+        console.log(`🔄 Trying fallback source: ${fallbackSource}`);
+        
+        if (fallbackSource === 'jupiter') {
+          priceData = await this.fetchFromJupiter(mints);
+        } else {
+          priceData = await this.fetchFromDexScreener(mints);
+        }
+        
+        sourceUsed = fallbackSource;
+        
+        // Switch primary source if threshold exceeded
+        if (failures >= PRICE_SOURCE_SWITCH_THRESHOLD) {
+          this.currentPriceSource = fallbackSource;
+          console.log(`🔄 Switched primary price source to ${fallbackSource}`);
+          
+          // Alert on source switch (rate limited to once per 5 minutes)
+          if (now - this.lastSourceAlert > 300000) {
+            this.lastSourceAlert = now;
+            
+            await securityMonitor.log({
+              severity: 'MEDIUM',
+              category: 'Price Monitoring',
+              eventType: SECURITY_EVENT_TYPES.PRICE_SOURCE_FAILOVER,
+              message: `Price monitor switched from ${this.currentPriceSource === 'jupiter' ? 'DexScreener' : 'Jupiter'} to ${fallbackSource} after ${failures} failures`,
+              details: {
+                previousSource: this.currentPriceSource === 'jupiter' ? 'dexscreener' : 'jupiter',
+                newSource: fallbackSource,
+                consecutiveFailures: failures,
+                monitoredTokens: this.monitors.size,
+              },
+              source: 'fast-price-monitor',
+            });
+          }
+          
+          // Reset failure count after switch
+          this.sourceFailures.set(sourceUsed, 0);
+        }
+        
+      } catch (fallbackError: any) {
+        console.error(`❌ Fallback ${fallbackSource} also failed:`, fallbackError.message);
+        
+        // Both sources failed - this is critical
+        await securityMonitor.log({
+          severity: 'CRITICAL',
+          category: 'Price Monitoring',
+          eventType: SECURITY_EVENT_TYPES.PRICE_API_ERROR,
+          message: 'All price sources failed - no price data available',
+          details: {
+            primaryError: primaryError.message,
+            fallbackError: fallbackError.message,
+            tokensAffected: mints.length,
+            monitoredTokens: this.monitors.size,
+          },
+          source: 'fast-price-monitor',
+        });
+        
+        throw fallbackError;
+      }
+    }
+    
+    // Process price data
+    for (const [mint, info] of Object.entries(priceData)) {
+      if (!info?.usdPrice) continue;
+      
+      // Calculate SOL price from USD price
+      const solPrice = this.solPrice > 0 
+        ? info.usdPrice / this.solPrice 
+        : 0;
+      
+      const priceDataEntry: PriceData = {
+        mint,
+        usdPrice: info.usdPrice,
+        solPrice,
+        timestamp: now,
+        blockId: info.blockId,
+      };
+      
+      // Update cache
+      const previousPrice = this.priceCache.get(mint);
+      this.priceCache.set(mint, priceDataEntry);
+      
+      // Update monitor
+      const monitor = this.monitors.get(mint);
+      if (monitor) {
+        monitor.lastPrice = solPrice;
+        monitor.lastUpdate = now;
+        
+        // Log significant price changes (>2%)
+        if (previousPrice && previousPrice.solPrice > 0) {
+          const change = ((solPrice - previousPrice.solPrice) / previousPrice.solPrice) * 100;
+          if (Math.abs(change) > 2) {
+            console.log(`📊 ${mint.slice(0, 8)}... ${solPrice.toExponential(4)} SOL (${change > 0 ? '+' : ''}${change.toFixed(2)}%) [${sourceUsed}]`);
+          }
+        }
+        
+        // Check liquidation thresholds
+        this.checkThresholds(mint, solPrice);
+      }
+    }
+    
+    this.emit('prices-updated', { 
+      count: Object.keys(priceData).length, 
+      timestamp: now, 
+      source: sourceUsed 
+    });
+  }
+  
+  /**
+   * Fetch prices from Jupiter API
+   */
+  private async fetchFromJupiter(mints: string[]): Promise<Record<string, any>> {
     const url = `${JUPITER_PRICE_API}?ids=${mints.join(',')}`;
     
     const response = await fetch(url, {
       headers: this.apiKey ? { 'x-api-key': this.apiKey } : {},
+      signal: AbortSignal.timeout(5000),
     });
     
     if (!response.ok) {
@@ -260,54 +404,51 @@ class FastPriceMonitor extends EventEmitter {
       throw new Error(`Jupiter API error: ${response.status}`);
     }
     
-    const data = await response.json() as Record<string, { 
-      usdPrice: number; 
-      blockId?: number;
-      decimals?: number;
-    }>;
+    return await response.json();
+  }
+  
+  /**
+   * Fetch prices from DexScreener API  
+   */
+  private async fetchFromDexScreener(mints: string[]): Promise<Record<string, any>> {
+    const results: Record<string, any> = {};
     
-    const now = Date.now();
-    
-    for (const [mint, priceInfo] of Object.entries(data)) {
-      if (!priceInfo?.usdPrice) continue;
-      
-      // Calculate SOL price from USD price
-      const solPrice = this.solPrice > 0 
-        ? priceInfo.usdPrice / this.solPrice 
-        : 0;
-      
-      const priceData: PriceData = {
-        mint,
-        usdPrice: priceInfo.usdPrice,
-        solPrice,
-        timestamp: now,
-        blockId: priceInfo.blockId,
-      };
-      
-      // Update cache
-      const previousPrice = this.priceCache.get(mint);
-      this.priceCache.set(mint, priceData);
-      
-      // Update monitor
-      const monitor = this.monitors.get(mint);
-      if (monitor) {
-        monitor.lastPrice = solPrice;
-        monitor.lastUpdate = now;
+    // DexScreener requires individual requests per token
+    for (const mint of mints) {
+      try {
+        const url = `${DEXSCREENER_API}/${mint}`;
+        const response = await fetch(url, {
+          signal: AbortSignal.timeout(3000),
+        });
         
-        // Log significant price changes (>2%)
-        if (previousPrice && previousPrice.solPrice > 0) {
-          const change = ((solPrice - previousPrice.solPrice) / previousPrice.solPrice) * 100;
-          if (Math.abs(change) > 2) {
-            console.log(`📊 ${mint.slice(0, 8)}... ${solPrice.toExponential(4)} SOL (${change > 0 ? '+' : ''}${change.toFixed(2)}%)`);
-          }
+        if (!response.ok) {
+          console.warn(`DexScreener failed for ${mint}: ${response.status}`);
+          continue;
         }
         
-        // Check liquidation thresholds
-        this.checkThresholds(mint, solPrice);
+        const data = await response.json();
+        
+        if (data.pairs && data.pairs.length > 0) {
+          // Get the pair with highest liquidity
+          const bestPair = data.pairs.reduce((best: any, current: any) => {
+            return (current.liquidity?.usd || 0) > (best.liquidity?.usd || 0) ? current : best;
+          });
+          
+          results[mint] = {
+            usdPrice: parseFloat(bestPair.priceUsd),
+            priceChange24h: bestPair.priceChange?.h24,
+          };
+        }
+      } catch (error) {
+        console.warn(`Failed to fetch ${mint} from DexScreener:`, error);
       }
     }
     
-    this.emit('prices-updated', { count: Object.keys(data).length, timestamp: now });
+    if (Object.keys(results).length === 0) {
+      throw new Error('DexScreener returned no price data');
+    }
+    
+    return results;
   }
   
   /**

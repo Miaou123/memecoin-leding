@@ -24,6 +24,7 @@ import { monitoringRouter } from './api/monitoring.js';
 import { adminRouter } from './api/admin.js';
 import { healthRouter } from './api/health.js';
 import pricesRouter from './routes/prices.js';
+import priceStatusRouter from './routes/price-status.js';
 import adminWhitelistRouter from './routes/admin/whitelist.js';
 import adminFeesRouter, { setFeeClaimerService } from './routes/admin/fees.js';
 import { stakingRoutes } from './routes/staking.js';
@@ -128,6 +129,7 @@ app.route('/api/tokens', tokensRouter);
 app.route('/api/protocol', protocolRouter);
 app.route('/api/user', userRouter);
 app.route('/api/prices', pricesRouter);
+app.route('/api/price-status', priceStatusRouter);
 app.route('/api/staking', stakingRoutes);
 app.route('/api/test-auth', testAuthRouter);
 

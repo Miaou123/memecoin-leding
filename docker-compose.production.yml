@@ -1,0 +1,128 @@
+version: '3.8'
+
+# Production overrides for PostgreSQL SSL configuration
+# Usage: docker compose -f docker-compose.yml -f docker-compose.production.yml up -d
+
+services:
+  postgres:
+    # Use custom image with WAL archiving support
+    build:
+      context: ./infrastructure/postgres
+      dockerfile: Dockerfile
+    # Production SSL configuration
+    command: >
+      postgres
+      -c config_file=/etc/postgresql/postgresql.conf
+      -c hba_file=/etc/postgresql/pg_hba.conf
+    environment:
+      # Force SSL connections
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256 --auth-local=trust"
+      # AWS credentials for WAL archiving
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      AWS_DEFAULT_REGION: ${AWS_REGION:-us-east-1}
+      BACKUP_S3_BUCKET: ${BACKUP_S3_BUCKET}
+      BACKUP_S3_PREFIX: ${BACKUP_S3_PREFIX:-memecoin-lending/postgres}
+      # Telegram alerts for WAL failures
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID}
+    volumes:
+      # Production certificates (replace with real certificates)
+      - ./infrastructure/ssl/postgres/production:/var/lib/postgresql/ssl:ro
+      # Enhanced security settings
+      - ./infrastructure/postgres/postgresql.production.conf:/etc/postgresql/postgresql.conf:ro
+      - ./infrastructure/postgres/pg_hba.production.conf:/etc/postgresql/pg_hba.conf:ro
+      # WAL archive logs
+      - postgres_wal_logs:/var/log/postgresql
+      # WAL archive tracking
+      - postgres_wal_archive:/var/lib/postgresql/wal_archive
+    # Restrict network access in production
+    ports:
+      - "127.0.0.1:5432:5432"
+    # Additional security labels (if using Docker Swarm or Kubernetes)
+    labels:
+      - "com.memecoin-lending.tier=database"
+      - "com.memecoin-lending.security=high"
+      - "com.memecoin-lending.ssl=required"
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 2G
+
+  # PgBouncer Connection Pooler
+  pgbouncer:
+    image: pgbouncer/pgbouncer:latest
+    restart: unless-stopped
+    environment:
+      # PgBouncer doesn't use these directly, but good for reference
+      DATABASES_HOST: postgres
+      DATABASES_PORT: 5432
+      DATABASES_DBNAME: memecoin_lending
+    volumes:
+      - ./infrastructure/pgbouncer/pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini:ro
+      - ./infrastructure/pgbouncer/userlist.txt:/etc/pgbouncer/userlist.txt:ro
+      - pgbouncer_log:/var/log/pgbouncer
+    ports:
+      - "127.0.0.1:6432:6432"  # Only expose on localhost in production
+    networks:
+      - memecoin-infra
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h localhost -p 6432 -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+    labels:
+      - "com.memecoin-lending.tier=database-proxy"
+      - "com.memecoin-lending.component=pgbouncer"
+
+  postgres-backup:
+    environment:
+      # Connect through PgBouncer for backup (optional)
+      # Note: For backups, direct connection might be preferred
+      PGHOST: postgres  # Direct connection for backups
+      PGPORT: 5432
+      # Force SSL for backup connections
+      PGSSLMODE: require
+      PGSSLCERT: /var/lib/postgresql/ssl/client.crt
+      PGSSLKEY: /var/lib/postgresql/ssl/client.key
+      PGSSLROOTCERT: /var/lib/postgresql/ssl/ca.crt
+    volumes:
+      # Production certificates
+      - ./infrastructure/ssl/postgres/production:/var/lib/postgresql/ssl:ro
+
+# Production volumes
+volumes:
+  pgbouncer_log:
+    driver: local
+  postgres_wal_logs:
+    driver: local
+  postgres_wal_archive:
+    driver: local
+
+# Production network configuration
+networks:
+  memecoin-infra:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.enable_icc: "false"
+      com.docker.network.bridge.enable_ip_masquerade: "true"
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

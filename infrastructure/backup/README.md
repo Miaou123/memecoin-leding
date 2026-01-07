@@ -5,6 +5,8 @@ Production-grade backup solution for Memecoin Lending Protocol PostgreSQL databa
 ## Features
 
 - **Automated backups** every 6 hours
+- **Point-in-Time Recovery (PITR)** with 5-minute precision
+- **WAL archiving** for continuous backup
 - **Local storage** with 7-day retention
 - **S3 remote storage** with 30-day retention
 - **Backup integrity verification**
@@ -51,6 +53,63 @@ docker compose -f docker-compose.yml -f docker-compose.backup.yml run --rm postg
 
 # Check backup volume
 docker volume ls | grep postgres_backups
+```
+
+## Point-in-Time Recovery (PITR)
+
+### How PITR Works
+
+PITR combines base backups with WAL (Write-Ahead Log) archives to enable recovery to any specific moment:
+
+1. **Base Backup**: Full database snapshot (every 6 hours)
+2. **WAL Archives**: Transaction logs (continuous, max 5-minute delay)
+3. **Recovery**: Restore base backup + replay WAL files to target time
+
+### List Recovery Points
+
+```bash
+# Show available recovery points
+./infrastructure/backup/pitr-restore.sh list
+
+# Example output:
+# Base Backups:
+#   2024-01-15 12:00:00 - backup-20240115-120000.sql.gz (250MB)
+#   2024-01-15 06:00:00 - backup-20240115-060000.sql.gz (248MB)
+# 
+# WAL Archive Range:
+#   Oldest: 2024-01-14 00:00:00
+#   Newest: 2024-01-15 14:25:00
+#   Total WAL files: 1,234
+```
+
+### Perform PITR
+
+```bash
+# Restore to specific timestamp
+./infrastructure/backup/pitr-restore.sh restore \
+  --timestamp "2024-01-15 14:30:00"
+
+# Dry run (see what would happen)
+./infrastructure/backup/pitr-restore.sh restore \
+  --timestamp "2024-01-15 14:30:00" \
+  --dry-run
+
+# Use specific base backup
+./infrastructure/backup/pitr-restore.sh restore \
+  --timestamp "2024-01-15 14:30:00" \
+  --backup backup-20240115-120000.sql.gz
+```
+
+### PITR Examples
+
+```bash
+# Recover from 1 hour ago
+./infrastructure/backup/pitr-restore.sh restore \
+  --timestamp "$(date -d '1 hour ago' +'%Y-%m-%d %H:%M:%S')"
+
+# Recover to just before a bad migration
+./infrastructure/backup/pitr-restore.sh restore \
+  --timestamp "2024-01-15 09:59:00"
 ```
 
 ## Manual Operations
@@ -193,10 +252,12 @@ Monitor these key metrics:
 ### Recovery Time Objective (RTO)
 - **Local restore**: ~5-10 minutes
 - **S3 restore**: ~15-30 minutes (depends on size)
+- **PITR restore**: ~30-60 minutes (includes WAL replay)
 
 ### Recovery Point Objective (RPO)
-- **Maximum data loss**: 6 hours (backup frequency)
-- **Typical data loss**: < 3 hours
+- **With WAL archiving**: 5 minutes maximum
+- **Without WAL (pg_dump only)**: 6 hours maximum
+- **Typical data loss**: < 5 minutes
 
 ### Recovery Procedures
 

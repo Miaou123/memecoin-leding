@@ -1,14 +1,28 @@
+version: '3.8'
+
 services:
   # PostgreSQL Database
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
+    command: >
+      postgres
+      -c ssl=on
+      -c ssl_cert_file=/var/lib/postgresql/ssl/server.crt
+      -c ssl_key_file=/var/lib/postgresql/ssl/server.key
+      -c ssl_ca_file=/var/lib/postgresql/ssl/ca.crt
+      -c ssl_min_protocol_version=TLSv1.2
     environment:
       POSTGRES_USER: ${DB_USER:-memecoin}
       POSTGRES_PASSWORD: ${DB_PASSWORD:-your_secure_password}
       POSTGRES_DB: memecoin_lending
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      # SSL certificates
+      - ./infrastructure/ssl/postgres:/var/lib/postgresql/ssl:ro
+      # Custom PostgreSQL configuration
+      - ./infrastructure/postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      - ./infrastructure/postgres/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
     ports:
       - "5432:5432"
     healthcheck:
@@ -17,7 +31,7 @@ services:
       timeout: 5s
       retries: 5
     networks:
-      - memecoin-lending
+      - memecoin-infra
 
   # Redis for job queues and caching
   redis:
@@ -26,7 +40,6 @@ services:
     command: redis-server --appendonly yes
     volumes:
       - redis_data:/data
-      - ./infrastructure/redis/redis.conf:/etc/redis/redis.conf:ro
     ports:
       - "6379:6379"
     healthcheck:
@@ -35,66 +48,50 @@ services:
       timeout: 5s
       retries: 5
     networks:
-      - memecoin-lending
+      - memecoin-infra
 
-  # Backend API Server
-  server:
+  # Scheduled Backup Service
+  postgres-backup:
     build:
-      context: .
-      dockerfile: apps/server/Dockerfile
+      context: ./infrastructure/backup
+      dockerfile: Dockerfile
     restart: unless-stopped
     environment:
-      - NODE_ENV=production
-      - DATABASE_URL=postgresql://${DB_USER:-memecoin}:${DB_PASSWORD:-your_secure_password}@postgres:5432/memecoin_lending
-      - REDIS_URL=redis://redis:6379
-      - SOLANA_RPC_URL=${SOLANA_RPC_URL:-https://api.mainnet-beta.solana.com}
-      - PROGRAM_ID=${PROGRAM_ID:-MCLend1111111111111111111111111111111111111}
-      - ADMIN_WALLET=${ADMIN_WALLET}
-      - LIQUIDATOR_WALLET=${LIQUIDATOR_WALLET}
-      - CORS_ORIGIN=${CORS_ORIGIN:-http://localhost:3000,https://yourdomain.com}
+      # Database connection
+      PGHOST: postgres
+      PGPORT: 5432
+      PGUSER: ${DB_USER:-memecoin}
+      PGPASSWORD: ${DB_PASSWORD:-your_secure_password}
+      PGDATABASE: memecoin_lending
+      PGSSLMODE: require
+      PGSSLROOTCERT: /var/lib/postgresql/ssl/ca.crt
+      
+      # Backup configuration
+      BACKUP_DIR: /backups
+      RETENTION_DAYS: ${RETENTION_DAYS:-30}
+      
+      # S3 configuration (optional)
+      S3_BUCKET: ${BACKUP_S3_BUCKET:-}
+      S3_PREFIX: ${BACKUP_S3_PREFIX:-memecoin-lending/postgres}
+      S3_REGION: ${BACKUP_S3_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      
+      # Telegram notifications
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      
+      # Schedule (cron format)
+      BACKUP_SCHEDULE: ${BACKUP_SCHEDULE:-0 */6 * * *}
+    volumes:
+      - ./backups:/backups
+      # SSL certificates for backup connection
+      - ./infrastructure/ssl/postgres:/var/lib/postgresql/ssl:ro
     depends_on:
       postgres:
         condition: service_healthy
-      redis:
-        condition: service_healthy
-    ports:
-      - "3001:3001"
     networks:
-      - memecoin-lending
-    volumes:
-      - ./keys:/app/keys:ro
-
-  # Frontend (SolidJS)
-  web:
-    build:
-      context: .
-      dockerfile: apps/web/Dockerfile
-    restart: unless-stopped
-    environment:
-      - VITE_API_URL=${API_URL:-https://api.yourdomain.com}
-      - VITE_WS_URL=${WS_URL:-wss://api.yourdomain.com/ws}
-      - VITE_SOLANA_RPC_URL=${SOLANA_RPC_URL:-https://api.mainnet-beta.solana.com}
-      - VITE_PROGRAM_ID=${PROGRAM_ID:-MCLend1111111111111111111111111111111111111}
-    ports:
-      - "3000:3000"
-    networks:
-      - memecoin-lending
-
-  # Nginx Reverse Proxy
-  nginx:
-    image: nginx:alpine
-    restart: unless-stopped
-    volumes:
-      - ./infrastructure/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./infrastructure/nginx/ssl:/etc/nginx/ssl:ro
-    ports:
-      - "80:80"
-      - "443:443"
-    depends_on:
-      - web
-      - server
-    networks:
-      - memecoin-lending
+      - memecoin-infra
 
 volumes:
   postgres_data:
@@ -103,5 +100,5 @@ volumes:
     driver: local
 
 networks:
-  memecoin-lending:
+  memecoin-infra:
     driver: bridge

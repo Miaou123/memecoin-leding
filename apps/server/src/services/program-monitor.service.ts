@@ -5,7 +5,7 @@ import { SECURITY_EVENT_TYPES } from '@memecoin-lending/types';
 import { prisma } from '../db/client.js';
 import { getAdminKeypair } from '../config/keys.js';
 import { MemecoinLendingClient } from '@memecoin-lending/sdk';
-import { sha256 } from '@noble/hashes/sha2';
+import { sha256 } from '@noble/hashes/sha2.js';
 import fs from 'fs';
 import path from 'path';
 
