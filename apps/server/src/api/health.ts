@@ -3,6 +3,7 @@ import { getConnection } from '../services/solana.service.js';
 import { prisma } from '../db/client.js';
 import { treasuryHealthService } from '../services/treasury-health.service.js';
 import { isCircuitBreakerTripped } from '../services/circuit-breaker.service.js';
+import { getLiquidatorHealth } from '../jobs/index.js';
 import Redis from 'ioredis';
 
 const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
@@ -87,4 +88,44 @@ healthRouter.get('/metrics', async (c) => {
       circuitBreakerTripped,
     },
   });
+});
+
+// Liquidator health endpoint
+healthRouter.get('/health/liquidator', async (c) => {
+  try {
+    const health = await getLiquidatorHealth();
+    const isHealthy = health.status === 'healthy';
+    
+    // Calculate minutes since last successful run
+    let minutesSinceLastSuccess = null;
+    if (health.currentInstance.lastSuccessfulRun) {
+      const msSinceLastRun = Date.now() - health.currentInstance.lastSuccessfulRun.getTime();
+      minutesSinceLastSuccess = Math.floor(msSinceLastRun / 60000);
+    }
+    
+    const response = {
+      status: health.status,
+      instanceId: health.currentInstance.instanceId,
+      lastSuccessfulRun: health.currentInstance.lastSuccessfulRun,
+      minutesSinceLastSuccess,
+      consecutiveFailures: health.currentInstance.consecutiveFailures,
+      totalLiquidations24h: health.globalMetrics.totalLiquidations24h,
+      allInstances: health.allInstances.map(instance => ({
+        instanceId: instance.instanceId,
+        isHealthy: instance.isHealthy,
+        lastSuccessfulRun: instance.lastSuccessfulRun,
+        consecutiveFailures: instance.consecutiveFailures,
+        avgProcessingTimeMs: instance.avgProcessingTimeMs,
+      })),
+      summary: health.summary,
+    };
+    
+    return c.json(response, isHealthy ? 200 : 503);
+  } catch (error: any) {
+    console.error('Failed to get liquidator health:', error);
+    return c.json({
+      status: 'error',
+      error: error.message,
+    }, 500);
+  }
 });

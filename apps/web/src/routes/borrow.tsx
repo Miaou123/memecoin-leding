@@ -9,7 +9,8 @@ import { api } from '@/lib/api';
 import { useTokenBalance } from '@/hooks/useTokenBalance';
 import { useWalletPumpTokens } from '@/hooks/useWalletPumpTokens';
 import { TokenSelectionUnified } from '@/components/tokens/TokenSelectionUnified';
-import { Connection, Transaction, PublicKey } from '@solana/web3.js';
+import { Transaction, PublicKey } from '@solana/web3.js';
+import { createConnection } from '../utils/rpc';
 import BN from 'bn.js';
 import { SuccessModal } from '@/components/ui/SuccessModal';
 import { createLoan } from '@/lib/loan-transactions';
@@ -111,7 +112,7 @@ export default function Borrow() {
       const tokenDecimals = 6; // PumpFun tokens use 6 decimals
       const rawCollateralAmount = (parseFloat(collateralAmount() || '0') * Math.pow(10, tokenDecimals)).toString();
       
-      const connection = new Connection(import.meta.env.VITE_SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com');
+      const connection = createConnection();
       
       // Use the new backend-signed transaction flow
       const result = await createLoan(

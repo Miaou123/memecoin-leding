@@ -2,10 +2,14 @@ import { Job } from 'bullmq';
 import { loanService } from '../services/loan.service.js';
 import { notificationService } from '../services/notification.service.js';
 import { securityMonitor } from '../services/security-monitor.service.js';
+import { liquidatorMetrics } from '../services/liquidator-metrics.service.js';
 import { SECURITY_EVENT_TYPES } from '@memecoin-lending/types';
 
 export async function liquidationJob(job: Job) {
   console.log('🔍 Checking for liquidatable loans...');
+  
+  // Record job start time for metrics
+  const startTime = await liquidatorMetrics.recordJobStart();
   
   // SECURITY: Log job start
   await securityMonitor.log({
@@ -26,6 +30,9 @@ export async function liquidationJob(job: Job) {
     
     if (liquidatableLoans.length === 0) {
       console.log('✅ No liquidatable loans found');
+      
+      // Record successful completion with no liquidations
+      await liquidatorMetrics.recordJobSuccess(startTime, 0);
       
       // SECURITY: Log successful job completion with no liquidations
       await securityMonitor.log({
@@ -130,6 +137,9 @@ export async function liquidationJob(job: Job) {
     
     console.log('🏁 Liquidation job completed:', result);
     
+    // Record successful job completion with metrics
+    await liquidatorMetrics.recordJobSuccess(startTime, successCount);
+    
     // SECURITY: Log job completion with error analysis
     if (errorCount > 0) {
       await securityMonitor.log({
@@ -164,6 +174,9 @@ export async function liquidationJob(job: Job) {
     
   } catch (error: any) {
     console.error('❌ Liquidation job failed:', error);
+    
+    // Record job failure in metrics
+    await liquidatorMetrics.recordJobFailure(error);
     
     // SECURITY: Log job-level failures
     await securityMonitor.log({

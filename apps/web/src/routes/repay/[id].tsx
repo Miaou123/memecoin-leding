@@ -6,7 +6,8 @@ import { Button } from '@/components/ui/Button';
 import { formatSOL, formatTimeRemaining, formatNumber } from '@/lib/utils';
 import { api } from '@/lib/api';
 import { LoanStatus } from '@memecoin-lending/types';
-import { Connection, Transaction } from '@solana/web3.js';
+import { Transaction } from '@solana/web3.js';
+import { createConnection } from '../../utils/rpc';
 import { SuccessModal } from '@/components/ui/SuccessModal';
 
 export default function Repay() {
@@ -41,7 +42,7 @@ export default function Repay() {
       const transaction = Transaction.from(transactionBuffer);
       
       // Get a fresh blockhash
-      const connection = new Connection(import.meta.env.VITE_SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com');
+      const connection = createConnection();
       const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
       transaction.recentBlockhash = blockhash;
       transaction.feePayer = wallet.publicKey()!;

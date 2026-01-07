@@ -1,7 +1,8 @@
 import { createSignal, createMemo, createEffect, Accessor } from 'solid-js';
 import { useWallet } from '@/components/wallet/WalletProvider';
-import { Connection, PublicKey } from '@solana/web3.js';
+import { PublicKey } from '@solana/web3.js';
 import { getAssociatedTokenAddress, getAccount } from '@solana/spl-token';
+import { createConnection } from '../utils/rpc';
 
 interface UseTokenBalanceResult {
   balance: Accessor<string | null>;
@@ -19,11 +20,8 @@ export function useTokenBalance(tokenMint: Accessor<string | null>): UseTokenBal
   const [isLoading, setIsLoading] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
 
-  // Create a connection instance
-  const connection = new Connection(
-    import.meta.env.VITE_SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com',
-    'confirmed'
-  );
+  // Create a connection instance using the proxy
+  const connection = createConnection('confirmed');
 
   const uiBalance = createMemo(() => {
     const bal = balance();

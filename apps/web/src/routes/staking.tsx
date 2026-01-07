@@ -1,6 +1,7 @@
 import { Show, createSignal, createMemo } from 'solid-js';
 import { createQuery, createMutation } from '@tanstack/solid-query';
-import { Connection, PublicKey } from '@solana/web3.js';
+import { PublicKey } from '@solana/web3.js';
+import { createConnection } from '../utils/rpc';
 import { getAssociatedTokenAddress } from '@solana/spl-token';
 import BN from 'bn.js';
 import { Button } from '@/components/ui/Button';
@@ -60,7 +61,7 @@ export default function Staking() {
     queryFn: async () => {
       if (!wallet.publicKey() || !STAKING_TOKEN_MINT) return '0';
       
-      const connection = new Connection(import.meta.env.VITE_SOLANA_RPC_URL);
+      const connection = createConnection();
       const mint = new PublicKey(STAKING_TOKEN_MINT);
       const ata = await getAssociatedTokenAddress(mint, wallet.publicKey()!);
       
@@ -100,7 +101,7 @@ export default function Staking() {
       }
       const rawAmount = new BN(Math.floor(amount * 1e6)); // 6 decimals for pumpfun
       
-      const connection = new Connection(import.meta.env.VITE_SOLANA_RPC_URL);
+      const connection = createConnection();
       
       // Build transaction
       const transaction = await buildStakeTransaction(
@@ -154,7 +155,7 @@ export default function Staking() {
       }
       const rawAmount = new BN(Math.floor(amount * 1e6)); // 6 decimals for pumpfun
       
-      const connection = new Connection(import.meta.env.VITE_SOLANA_RPC_URL);
+      const connection = createConnection();
       
       // Build transaction
       const transaction = await buildUnstakeTransaction(

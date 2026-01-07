@@ -8,6 +8,7 @@ import { distributionCrankJob } from './distribution-crank.job.js';
 import { dailySummaryJob } from './daily-summary.job.js';
 import { scheduleLPMonitoring } from './lp-monitor.job.js';
 import { securityMonitor } from '../services/security-monitor.service.js';
+import { liquidatorMetrics } from '../services/liquidator-metrics.service.js';
 import { SECURITY_EVENT_TYPES } from '@memecoin-lending/types';
 
 // BullMQ requires maxRetriesPerRequest: null for blocking operations
@@ -91,6 +92,9 @@ export async function initializeJobs() {
   try {
     console.log('🔄 Initializing background jobs...');
     
+    // Initialize liquidator metrics with Redis connection
+    liquidatorMetrics.initialize(redis);
+    
     // Liquidation checks (5s backup)
     await setupRepeatableJobs(liquidationQueue, [
       { name: 'check-liquidations', data: {}, every: 5000 },
@@ -123,9 +127,21 @@ export async function initializeJobs() {
     await scheduleLPMonitoring();
     console.log('📊 LP monitoring job scheduled');
     
+    // Setup 24h cleanup for liquidator metrics
+    await setupRepeatableJobs(liquidationQueue, [
+      { name: 'check-liquidations', data: {}, every: 5000 },
+      { name: 'cleanup-metrics', data: {}, every: 86400000 }, // 24 hours
+    ]);
+    
     // SECURITY: Enhanced error handlers with security logging
     liquidationWorker.on('failed', async (job, err) => {
       console.error(`❌ Liquidation job failed:`, job?.name, err.message);
+      
+      // Special handling for cleanup job
+      if (job?.name === 'cleanup-metrics') {
+        await liquidatorMetrics.cleanupOldMetrics();
+        return;
+      }
       
       await securityMonitor.log({
         severity: 'HIGH',
@@ -302,6 +318,9 @@ export async function initializeJobs() {
 export async function closeJobs() {
   console.log('🛑 Closing background job workers...');
   
+  // Shutdown liquidator metrics
+  liquidatorMetrics.shutdown();
+  
   await Promise.all([
     liquidationWorker.close(),
     priceMonitorWorker.close(),
@@ -321,4 +340,32 @@ export async function closeJobs() {
   await redis.quit();
   
   console.log('✅ Background jobs closed');
+}
+
+/**
+ * Get liquidator health across all instances
+ */
+export async function getLiquidatorHealth() {
+  const instanceHealth = await liquidatorMetrics.getInstanceHealth();
+  const allInstances = await liquidatorMetrics.getAllInstancesHealth();
+  const globalMetrics = await liquidatorMetrics.getGlobalMetrics();
+  
+  // Determine overall health
+  const healthyInstances = allInstances.filter(i => i.isHealthy).length;
+  const totalInstances = allInstances.length;
+  const isHealthy = healthyInstances > 0 && (healthyInstances / totalInstances) >= 0.5;
+  
+  return {
+    status: isHealthy ? 'healthy' : 'degraded',
+    currentInstance: instanceHealth,
+    allInstances,
+    globalMetrics,
+    summary: {
+      totalInstances,
+      healthyInstances,
+      degradedInstances: totalInstances - healthyInstances,
+      totalLiquidations24h: globalMetrics.totalLiquidations24h,
+      totalChecks24h: globalMetrics.totalChecks24h,
+    }
+  };
 }

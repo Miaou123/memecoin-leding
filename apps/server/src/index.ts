@@ -23,6 +23,7 @@ import { loanPrepareRouter } from './api/loan-prepare.js';
 import { monitoringRouter } from './api/monitoring.js';
 import { adminRouter } from './api/admin.js';
 import { healthRouter } from './api/health.js';
+import { rpcProxyRouter } from './api/rpc-proxy.js';
 import pricesRouter from './routes/prices.js';
 import priceStatusRouter from './routes/price-status.js';
 import adminWhitelistRouter from './routes/admin/whitelist.js';
@@ -47,6 +48,7 @@ import { treasuryHealthService } from './services/treasury-health.service.js';
 import { validateMainnetConfig, getNetworkConfig, isMainnet } from './config/network.js';
 import { programMonitor } from './services/program-monitor.service.js';
 import { jupiterClient } from './services/jupiter-client.js';
+import { liquidatorMetrics } from './services/liquidator-metrics.service.js';
 import { Connection, Keypair } from '@solana/web3.js';
 import { Program, AnchorProvider, Wallet, Idl } from '@coral-xyz/anchor';
 import { PROGRAM_ID } from '@memecoin-lending/config';
@@ -68,88 +70,115 @@ if (isMainnet()) {
   console.log('🧪 Running in DEVNET mode');
 }
 
+// Check if running in liquidator-only mode
+const DISABLE_API = process.env.DISABLE_API === 'true';
+const INSTANCE_MODE = DISABLE_API ? 'liquidator-only' : 'full-server';
+
+if (DISABLE_API) {
+  console.log('🔧 Starting in LIQUIDATOR-ONLY mode (API disabled)');
+  console.log(`📍 Instance ID: ${process.env.INSTANCE_ID || 'auto-generated'}`);
+} else {
+  console.log('🚀 Starting in FULL SERVER mode (API + liquidator)');
+}
+
 // Create Hono app
 const app = new Hono();
 
 // Global service instance
 let feeClaimerService: FeeClaimerService | null = null;
 
-// CORS Configuration
-const getAllowedOrigins = (): string[] => {
-  if (process.env.CORS_ORIGIN) {
-    return process.env.CORS_ORIGIN.split(',').map(o => o.trim());
-  }
-  if (process.env.NODE_ENV === 'production') {
-    console.error('❌ FATAL: CORS_ORIGIN must be set in production');
-    process.exit(1);
-  }
-  // Only allow these in development
-  return ['http://localhost:3000', 'http://localhost:3001', 'http://localhost:5173'];
-};
+// Only register API middleware and routes if API is enabled
+if (!DISABLE_API) {
+  // CORS Configuration
+  const getAllowedOrigins = (): string[] => {
+    if (process.env.CORS_ORIGIN) {
+      return process.env.CORS_ORIGIN.split(',').map(o => o.trim());
+    }
+    if (process.env.NODE_ENV === 'production') {
+      console.error('❌ FATAL: CORS_ORIGIN must be set in production');
+      process.exit(1);
+    }
+    // Only allow these in development
+    return ['http://localhost:3000', 'http://localhost:3001', 'http://localhost:5173'];
+  };
 
-// ============================================
-// MIDDLEWARE ORDER MATTERS - Apply in this order:
-// ============================================
+  // ============================================
+  // MIDDLEWARE ORDER MATTERS - Apply in this order:
+  // ============================================
 
-// 0. Request ID (must be first for logging)
-app.use('*', requestIdMiddleware);
+  // 0. Request ID (must be first for logging)
+  app.use('*', requestIdMiddleware);
 
-// 1. Trusted proxy (must be first to get correct client IP)
-app.use('*', trustedProxyMiddleware);
+  // 1. Trusted proxy (must be first to get correct client IP)
+  app.use('*', trustedProxyMiddleware);
 
-// 2. Request logging
-app.use('*', logger());
+  // 2. Request logging
+  app.use('*', logger());
 
-// 3. Body size limits (before parsing)
-app.use('*', defaultBodyLimit);
+  // 3. Body size limits (before parsing)
+  app.use('*', defaultBodyLimit);
 
-// 4. Security headers
-app.use('*', apiSecurityHeaders);
+  // 4. Security headers
+  app.use('*', apiSecurityHeaders);
 
-// 5. CORS
-app.use('*', cors({
-  origin: getAllowedOrigins(),
-  credentials: true,
-}));
+  // 5. CORS
+  app.use('*', cors({
+    origin: getAllowedOrigins(),
+    credentials: true,
+  }));
 
-// 6. CSRF protection (for mutation routes)
-app.use('/api/loans/*', csrfProtection);
-app.use('/api/admin/*', csrfProtection);
-app.use('/api/user/*', csrfProtection);
+  // 6. CSRF protection (for mutation routes)
+  app.use('/api/loans/*', csrfProtection);
+  app.use('/api/admin/*', csrfProtection);
+  app.use('/api/user/*', csrfProtection);
 
-// 7. CSRF token endpoint
-app.get('/api/csrf-token', csrfTokenEndpoint);
+  // 7. CSRF token endpoint
+  app.get('/api/csrf-token', csrfTokenEndpoint);
 
-// Health endpoints provided by healthRouter below
+  // Health endpoints provided by healthRouter below
 
-// API routes
-app.route('/api/loans', loansRouter);
-app.route('/api/loan', loanPrepareRouter);
-app.route('/api/monitoring', monitoringRouter);
-app.route('/api/tokens', tokensRouter);
-app.route('/api/protocol', protocolRouter);
-app.route('/api/user', userRouter);
-app.route('/api/prices', pricesRouter);
-app.route('/api/price-status', priceStatusRouter);
-app.route('/api/staking', stakingRoutes);
-app.route('/api/test-auth', testAuthRouter);
+  // API routes
+  app.route('/api/loans', loansRouter);
+  app.route('/api/loan', loanPrepareRouter);
+  app.route('/api/monitoring', monitoringRouter);
+  app.route('/api/tokens', tokensRouter);
+  app.route('/api/protocol', protocolRouter);
+  app.route('/api/user', userRouter);
+  app.route('/api/prices', pricesRouter);
+  app.route('/api/price-status', priceStatusRouter);
+  app.route('/api/staking', stakingRoutes);
+  app.route('/api/test-auth', testAuthRouter);
+  app.route('/api/rpc-proxy', rpcProxyRouter);
 
-// Admin routes - API key based
-app.route('/api/admin', adminRouter);
-app.route('/api/admin/fees', adminFeesRouter);
+  // Admin routes - API key based
+  app.route('/api/admin', adminRouter);
+  app.route('/api/admin/fees', adminFeesRouter);
 
-// Admin routes - Signature based (wallet authentication)
-app.route('/api/admin/whitelist', adminWhitelistRouter);
-app.route('/api/admin/security', securityRoutes);
+  // Admin routes - Signature based (wallet authentication)
+  app.route('/api/admin/whitelist', adminWhitelistRouter);
+  app.route('/api/admin/security', securityRoutes);
 
-// Verification requests (requires auth)
-app.route('/api/verification-request', verificationRequestRouter);
+  // Verification requests (requires auth)
+  app.route('/api/verification-request', verificationRequestRouter);
 
-// Telegram webhook
-app.route('/telegram/webhook', telegramWebhookRouter);
+  // Telegram webhook
+  app.route('/telegram/webhook', telegramWebhookRouter);
+}
 
-// Health routes
+// Always register health routes (even in liquidator-only mode)
 app.route('/', healthRouter);  // /health, /ready, /metrics at root
+
+// Minimal health endpoint for liquidator-only mode
+if (DISABLE_API) {
+  app.get('/health', (c) => {
+    return c.json({
+      status: 'ok',
+      mode: 'liquidator-only',
+      instanceId: process.env.INSTANCE_ID || 'auto-generated',
+      timestamp: new Date().toISOString()
+    });
+  });
+}
 
 // Error handler
 app.onError(errorHandler);
@@ -182,6 +211,8 @@ const validateEnvironment = () => {
   
   if (process.env.ADMIN_API_KEY) {
     const key = process.env.ADMIN_API_KEY;
+    
+    // Length validation (enforced in production)
     if (key.length < 32) {
       if (process.env.NODE_ENV === 'production') {
         errors.push('❌ ADMIN_API_KEY must be at least 32 characters in production');
@@ -189,8 +220,42 @@ const validateEnvironment = () => {
         warnings.push('⚠️  ADMIN_API_KEY should be at least 32 characters');
       }
     }
-    if (process.env.NODE_ENV === 'production' && !/[A-Z].*[0-9]|[0-9].*[A-Z]/.test(key)) {
-      warnings.push('⚠️  ADMIN_API_KEY should contain both uppercase letters and numbers');
+    
+    // Complexity validation (enforced in production)
+    if (process.env.NODE_ENV === 'production') {
+      const hasUppercase = /[A-Z]/.test(key);
+      const hasLowercase = /[a-z]/.test(key);
+      const hasNumbers = /[0-9]/.test(key);
+      const hasSpecialChars = /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(key);
+      
+      const complexityErrors: string[] = [];
+      
+      if (!hasUppercase) complexityErrors.push('uppercase letters');
+      if (!hasLowercase) complexityErrors.push('lowercase letters');
+      if (!hasNumbers) complexityErrors.push('numbers');
+      
+      // In production, require at least 3 of 4 character types (uppercase, lowercase, numbers, special)
+      const complexityScore = [hasUppercase, hasLowercase, hasNumbers, hasSpecialChars].filter(Boolean).length;
+      if (complexityScore < 3) {
+        errors.push(`❌ ADMIN_API_KEY must contain at least 3 of: uppercase, lowercase, numbers, special characters. Missing: ${complexityErrors.join(', ')}`);
+      }
+      
+      // Prevent common weak patterns
+      if (/^[0-9a-fA-F]+$/.test(key)) {
+        warnings.push('⚠️  ADMIN_API_KEY appears to be hex-only - consider adding special characters for better security');
+      }
+      if (/(.)\1{3,}/.test(key)) {
+        errors.push('❌ ADMIN_API_KEY contains repeated characters - use a cryptographically secure random generator');
+      }
+    } else {
+      // Development warnings
+      const hasUppercase = /[A-Z]/.test(key);
+      const hasLowercase = /[a-z]/.test(key);
+      const hasNumbers = /[0-9]/.test(key);
+      
+      if (!hasUppercase || !hasLowercase || !hasNumbers) {
+        warnings.push('⚠️  ADMIN_API_KEY should contain uppercase, lowercase, and numbers for production use');
+      }
     }
   } else if (process.env.NODE_ENV === 'production') {
     errors.push('❌ ADMIN_API_KEY is required in production');

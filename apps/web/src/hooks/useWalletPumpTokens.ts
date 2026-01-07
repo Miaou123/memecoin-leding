@@ -1,7 +1,8 @@
 import { createSignal, createEffect, Accessor } from 'solid-js';
 import { useWallet } from '@/components/wallet/WalletProvider';
-import { Connection, PublicKey } from '@solana/web3.js';
+import { PublicKey } from '@solana/web3.js';
 import { TOKEN_PROGRAM_ID } from '@solana/spl-token';
+import { createConnection } from '../utils/rpc';
 
 export interface WalletToken {
   mint: string;
@@ -23,11 +24,8 @@ export function useWalletPumpTokens(): UseWalletPumpTokensResult {
   const [isLoading, setIsLoading] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
 
-  // Create a connection instance
-  const connection = new Connection(
-    import.meta.env.VITE_SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com',
-    'confirmed'
-  );
+  // Create a connection instance using the proxy
+  const connection = createConnection('confirmed');
 
   const fetchTokens = async () => {
     const publicKey = wallet.publicKey();
