@@ -30,6 +30,45 @@ protocolRouter.get('/stats', async (c) => {
   }
 });
 
+// Get protocol status (for frontend banner)
+protocolRouter.get('/status', async (c) => {
+  try {
+    const config = await protocolService.getProtocolConfig();
+    const stats = await protocolService.getProtocolStats();
+    
+    return c.json<ApiResponse<{ 
+      paused: boolean; 
+      pauseReason?: string; 
+      version: string; 
+      treasury: string; 
+    }>>({
+      success: true,
+      data: {
+        paused: config?.paused ?? false,
+        pauseReason: config?.paused ? 'Protocol maintenance in progress' : undefined,
+        version: '1.0.0',
+        treasury: stats?.treasuryBalance || '0',
+      },
+    });
+  } catch (error: any) {
+    console.error('Protocol status error:', error);
+    // Default to not paused if we can't fetch status
+    return c.json<ApiResponse<{ 
+      paused: boolean; 
+      pauseReason?: string; 
+      version: string; 
+      treasury: string; 
+    }>>({
+      success: true,
+      data: {
+        paused: false,
+        version: 'unknown',
+        treasury: '0',
+      },
+    });
+  }
+});
+
 // Get treasury balance
 protocolRouter.get('/treasury', async (c) => {
   const balance = await protocolService.getTreasuryBalance();

@@ -17,6 +17,7 @@ import path from 'path';
 import { getAdminKeypair } from '../config/keys.js';
 // @ts-ignore
 import PumpSDK from '@pump-fun/pump-sdk';
+import { fetchTokenMetadata } from './token-metadata.service.js';
 
 // Token-2022 program ID for detection
 const TOKEN_2022_PROGRAM_ID = new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb');
@@ -288,18 +289,26 @@ export class TokenVerificationService {
           } else {
             // Token was already whitelisted by another request, sync to database
             try {
+              // Fetch metadata for database sync
+              const metadata = await fetchTokenMetadata(mint, this.connection!);
               await prisma.token.upsert({
                 where: { id: mint },
-                update: { enabled: true },
+                update: { 
+                  enabled: true,
+                  symbol: metadata?.symbol || 'PUMP',
+                  name: metadata?.name || 'PumpFun Token',
+                  imageUrl: metadata?.image,
+                },
                 create: {
                   id: mint,
-                  symbol: 'PUMP',
-                  name: 'PumpFun Token',
+                  symbol: metadata?.symbol || 'PUMP',
+                  name: metadata?.name || 'PumpFun Token',
                   decimals: 6,
                   tier: 'bronze',
                   poolAddress: bondingCurve?.toString() || '', // Use bonding curve from detectLaunchpad
                   poolType: 'PumpSwap',  // ADD THIS
                   enabled: true,
+                  imageUrl: metadata?.image,
                 },
               });
               console.log(`[TokenVerification] Token synced to database after concurrent whitelist: ${mint.substring(0, 8)}...`);
@@ -314,18 +323,26 @@ export class TokenVerificationService {
         console.log(`[TokenVerification] Token already on-chain`);
         // Add database upsert to ensure it exists in DB too
         try {
+          // Fetch metadata for database sync
+          const metadata = await fetchTokenMetadata(mint, this.connection!);
           await prisma.token.upsert({
             where: { id: mint },
-            update: { enabled: true },
+            update: { 
+              enabled: true,
+              symbol: metadata?.symbol || 'PUMP',
+              name: metadata?.name || 'PumpFun Token',
+              imageUrl: metadata?.image,
+            },
             create: {
               id: mint,
-              symbol: 'PUMP',
-              name: 'PumpFun Token',
+              symbol: metadata?.symbol || 'PUMP',
+              name: metadata?.name || 'PumpFun Token',
               decimals: 6,
               tier: 'bronze',
               poolAddress: bondingCurve?.toString() || '', // Use bonding curve from detectLaunchpad
               poolType: 'PumpSwap',  // ADD THIS
               enabled: true,
+              imageUrl: metadata?.image,
             },
           });
           console.log(`[TokenVerification] Token synced to database: ${mint.substring(0, 8)}...`);
@@ -338,12 +355,16 @@ export class TokenVerificationService {
       // 7. Determine tier based on liquidity
       const tier = this.determineTier(poolValidation.liquidity || 0);
 
+      // 8. Fetch on-chain metadata
+      let metadata = await fetchTokenMetadata(mint, this.connection!);
+      
       // Return success
       const result: TokenVerificationResult = {
         isValid: true,
         mint,
-        symbol: poolValidation.symbol,
-        name: poolValidation.name,
+        symbol: metadata?.symbol || poolValidation.symbol,
+        name: metadata?.name || poolValidation.name,
+        imageUrl: metadata?.image,
         tier,
         ltvBps: this.getLtvForTier(tier),
         liquidity: poolValidation.liquidity || 0,
@@ -620,6 +641,9 @@ export class TokenVerificationService {
             tier: tokenData.tier?.toLowerCase() || 'bronze',
             poolType: 'PumpSwap',  // ADD THIS
             updatedAt: new Date(),
+            symbol: tokenData.symbol,
+            name: tokenData.name,
+            imageUrl: tokenData.imageUrl,
           },
           create: {
             id: mint,
@@ -630,6 +654,7 @@ export class TokenVerificationService {
             poolAddress: bondingCurve.toString(), // Store bonding curve PDA
             poolType: 'PumpSwap',  // ADD THIS - migrated pump tokens use PumpSwap
             enabled: true,
+            imageUrl: tokenData.imageUrl,
           },
         });
         console.log(`[TokenVerification] Token added to database: ${mint.substring(0, 8)}...`);

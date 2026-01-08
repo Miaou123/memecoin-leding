@@ -17,6 +17,7 @@ model Token {
   poolType             String?  // 'raydium', 'PumpSwap', etc.
   enabled              Boolean  @default(true)
   logoUri              String?
+  imageUrl             String?
   coingeckoId          String?
   blacklisted          Boolean  @default(false)
   blacklistReason      String?

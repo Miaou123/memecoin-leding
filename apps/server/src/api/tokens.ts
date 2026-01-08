@@ -5,6 +5,9 @@ import { ApiResponse, TokenStats, PriceData } from '@memecoin-lending/types';
 import { tokenService } from '../services/token.service.js';
 import { priceService } from '../services/price.service.js';
 import { tokenVerificationService } from '../services/token-verification.service.js';
+import { fetchTokenMetadata } from '../services/token-metadata.service.js';
+import { Connection } from '@solana/web3.js';
+import { getNetworkConfig, NetworkType } from '@memecoin-lending/config';
 import { prisma } from '../db/client.js';
 import { apiRateLimit } from '../middleware/rateLimit.js';
 import { logger } from '../utils/logger.js';
@@ -387,6 +390,73 @@ tokensRouter.get('/:mint/verify', async (c) => {
       success: false,
       error: 'Internal server error',
       message: error instanceof Error ? error.message : 'Unknown error',
+    }, 500);
+  }
+});
+
+// POST /tokens/:mint/refresh-metadata - Refresh metadata for a specific token
+tokensRouter.post('/:mint/refresh-metadata', async (c) => {
+  try {
+    const mint = c.req.param('mint');
+
+    // Basic mint validation
+    if (!mint || mint.length < 32 || mint.length > 44) {
+      return c.json({
+        success: false,
+        error: 'Invalid mint address',
+      }, 400);
+    }
+
+    logger.info(`Refreshing metadata for token: ${mint.slice(0, 8)}...`);
+
+    const network = (process.env.SOLANA_NETWORK as NetworkType) || 'devnet';
+    const networkConfig = getNetworkConfig(network);
+    const connection = new Connection(networkConfig.rpcUrl, 'confirmed');
+
+    // Fetch metadata from on-chain
+    const metadata = await fetchTokenMetadata(mint, connection);
+
+    if (!metadata) {
+      return c.json({
+        success: false,
+        error: 'No on-chain metadata found for this token',
+      }, 404);
+    }
+
+    // Update database with new metadata
+    const updatedToken = await prisma.token.update({
+      where: { id: mint },
+      data: {
+        symbol: metadata.symbol,
+        name: metadata.name,
+        imageUrl: metadata.image,
+      },
+    });
+
+    return c.json({
+      success: true,
+      data: {
+        mint,
+        metadata,
+        updated: {
+          symbol: updatedToken.symbol,
+          name: updatedToken.name,
+          imageUrl: updatedToken.imageUrl,
+        },
+      },
+    });
+  } catch (error: any) {
+    if (error.code === 'P2025') {
+      return c.json({
+        success: false,
+        error: 'Token not found in database',
+      }, 404);
+    }
+
+    logger.error('Refresh metadata error:', { error: error.message });
+    return c.json({
+      success: false,
+      error: 'Internal server error',
     }, 500);
   }
 });

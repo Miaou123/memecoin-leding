@@ -398,4 +398,33 @@ loansRouter.post(
   }
 );
 
+// Sync single loan status from chain (used when detecting LoanAlreadyRepaid error)
+loansRouter.post(
+  '/:pubkey/sync-status',
+  async (c) => {
+    const pubkey = c.req.param('pubkey');
+    
+    try {
+      const loan = await loanService.syncLoanStatusFromChain(pubkey);
+      
+      if (!loan) {
+        return c.json<ApiResponse<null>>({
+          success: false,
+          error: 'Loan not found',
+        }, 404);
+      }
+      
+      return c.json<ApiResponse<Loan>>({
+        success: true,
+        data: loan,
+      });
+    } catch (error: any) {
+      return c.json<ApiResponse<null>>({
+        success: false,
+        error: error.message,
+      }, 400);
+    }
+  }
+);
+
 export { loansRouter };

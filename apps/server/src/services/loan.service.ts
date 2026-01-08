@@ -34,7 +34,6 @@ import { recordLoanExposure, recordRepayment } from './exposure-monitor.service.
 import { recordLiquidationResult } from './liquidation-tracker.service.js';
 import { PROGRAM_ID, getNetworkConfig, getCurrentNetwork } from '@memecoin-lending/config';
 import { getAdminKeypair } from '../config/keys.js';
-// import { executeSwap } from './jupiter-swap.service.js'; // Removed - liquidation swaps happen on-chain via CPI
 import { lpLimitsService } from './lp-limits.service.js';
 import { programMonitor } from './program-monitor.service.js';
 import { recordSuccessfulLoan } from './wallet-rate-limit.service.js';
@@ -120,7 +119,8 @@ class LoanService {
       createdAt: Math.floor(loan.createdAt.getTime() / 1000),
       dueAt: Math.floor(loan.dueAt.getTime() / 1000),
       status: loan.status as LoanStatus,
-      index: 0, // TODO: Store index in DB
+      index: 0,
+      token: loan.token,
     };
   }
   
@@ -1239,6 +1239,148 @@ class LoanService {
     } catch (error: any) {
       console.error('[LoanService] Failed to sync loans from chain:', error);
       throw new Error(`Failed to sync loans: ${error.message}`);
+    }
+  }
+
+  /**
+   * Sync loan status from on-chain state.
+   * Used when we detect a mismatch (e.g., LoanAlreadyRepaid error from program)
+   */
+  async syncLoanStatusFromChain(loanPubkey: string): Promise<Loan | null> {
+    console.log(`[LoanService] Syncing loan status from chain: ${loanPubkey.substring(0, 8)}...`);
+    
+    const client = await this.getClient();
+    
+    // Get current DB state
+    const dbLoan = await prisma.loan.findUnique({
+      where: { id: loanPubkey },
+      include: { token: true },
+    });
+    
+    if (!dbLoan) {
+      console.warn(`[LoanService] Loan ${loanPubkey} not found in database`);
+      return null;
+    }
+    
+    // If already not active in DB, nothing to sync
+    if (dbLoan.status !== 'active') {
+      console.log(`[LoanService] Loan ${loanPubkey} already marked as ${dbLoan.status}`);
+      return this.formatLoan(dbLoan);
+    }
+    
+    try {
+      // Try to fetch loan from chain
+      const loanAccount = await (client.program.account as any).loan.fetch(
+        new PublicKey(loanPubkey)
+      );
+      
+      if (!loanAccount) {
+        // Account doesn't exist - might have been closed after liquidation
+        console.log(`[LoanService] Loan account ${loanPubkey} not found on-chain, marking as repaid`);
+        
+        const updatedLoan = await prisma.loan.update({
+          where: { id: loanPubkey },
+          data: {
+            status: LoanStatus.Repaid,
+            repaidAt: new Date(),
+          },
+          include: { token: true },
+        });
+        
+        // Clean up monitoring
+        try {
+          fastPriceMonitor.removeLiquidationThreshold(dbLoan.tokenMint, loanPubkey);
+        } catch (e) {
+          // Ignore
+        }
+        
+        return this.formatLoan(updatedLoan);
+      }
+      
+      // Check on-chain status
+      const onChainStatus = loanAccount.status;
+      let newStatus: string | null = null;
+      
+      if (onChainStatus.repaid) {
+        newStatus = LoanStatus.Repaid;
+      } else if (onChainStatus.liquidatedTime) {
+        newStatus = LoanStatus.LiquidatedTime;
+      } else if (onChainStatus.liquidatedPrice) {
+        newStatus = LoanStatus.LiquidatedPrice;
+      }
+      
+      if (newStatus && newStatus !== dbLoan.status) {
+        console.log(`[LoanService] Syncing loan ${loanPubkey}: ${dbLoan.status} -> ${newStatus}`);
+        
+        const updateData: any = {
+          status: newStatus,
+        };
+        
+        if (newStatus === LoanStatus.Repaid) {
+          updateData.repaidAt = new Date();
+        } else if (newStatus === LoanStatus.LiquidatedTime || newStatus === LoanStatus.LiquidatedPrice) {
+          updateData.liquidatedAt = new Date();
+          updateData.liquidationReason = newStatus === LoanStatus.LiquidatedTime ? 'time' : 'price';
+        }
+        
+        const updatedLoan = await prisma.loan.update({
+          where: { id: loanPubkey },
+          data: updateData,
+          include: { token: true },
+        });
+        
+        // Clean up monitoring
+        try {
+          fastPriceMonitor.removeLiquidationThreshold(dbLoan.tokenMint, loanPubkey);
+        } catch (e) {
+          // Ignore
+        }
+        
+        // Reduce exposure tracking
+        try {
+          recordRepayment(
+            dbLoan.tokenMint,
+            BigInt(dbLoan.collateralAmount),
+            BigInt(dbLoan.solBorrowed)
+          );
+        } catch (e) {
+          // Ignore
+        }
+        
+        console.log(`[LoanService] Loan ${loanPubkey} status synced to ${newStatus}`);
+        return this.formatLoan(updatedLoan);
+      }
+      
+      // No change needed
+      return this.formatLoan(dbLoan);
+      
+    } catch (error: any) {
+      // If we can't fetch the loan, it might not exist anymore (account closed)
+      if (error.message?.includes('Account does not exist') || 
+          error.message?.includes('could not find account')) {
+        console.log(`[LoanService] Loan account ${loanPubkey} closed on-chain, marking as repaid`);
+        
+        const updatedLoan = await prisma.loan.update({
+          where: { id: loanPubkey },
+          data: {
+            status: LoanStatus.Repaid,
+            repaidAt: new Date(),
+          },
+          include: { token: true },
+        });
+        
+        // Clean up
+        try {
+          fastPriceMonitor.removeLiquidationThreshold(dbLoan.tokenMint, loanPubkey);
+        } catch (e) {
+          // Ignore
+        }
+        
+        return this.formatLoan(updatedLoan);
+      }
+      
+      console.error(`[LoanService] Failed to sync loan ${loanPubkey}:`, error.message);
+      throw error;
     }
   }
 }
