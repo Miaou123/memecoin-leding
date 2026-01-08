@@ -1,5 +1,6 @@
 use anchor_lang::prelude::*;
-use anchor_spl::token::{self, Token, TokenAccount, CloseAccount};
+use anchor_spl::token::{self, CloseAccount};
+use anchor_spl::token_interface::{TokenAccount, Mint, TokenInterface};
 use anchor_spl::associated_token::AssociatedToken;
 use crate::state::*;
 use crate::error::LendingError;
@@ -64,7 +65,7 @@ pub struct Liquidate<'info> {
         associated_token::mint = token_mint,
         associated_token::authority = vault_authority
     )]
-    pub vault_token_account: Account<'info, TokenAccount>,
+    pub vault_token_account: InterfaceAccount<'info, TokenAccount>,
 
     /// Vault authority PDA
     #[account(
@@ -76,11 +77,19 @@ pub struct Liquidate<'info> {
 
     /// Token mint
     #[account(constraint = token_mint.key() == loan.token_mint)]
-    pub token_mint: Account<'info, anchor_spl::token::Mint>,
+    pub token_mint: InterfaceAccount<'info, Mint>,
 
     /// CHECK: Pool account for price verification
     #[account(constraint = pool_account.key() == token_config.pool_address @ LendingError::InvalidPoolAddress)]
-    pub pool_account: AccountInfo<'info>,
+    pub pool_account: UncheckedAccount<'info>,
+
+    /// PumpSwap base token vault - required when pool_type is PumpSwap
+    /// CHECK: Validated in handler against pool data
+    pub pumpswap_base_vault: Option<UncheckedAccount<'info>>,
+
+    /// PumpSwap quote token vault (WSOL) - required when pool_type is PumpSwap
+    /// CHECK: Validated in handler against pool data  
+    pub pumpswap_quote_vault: Option<UncheckedAccount<'info>>,
 
 
 
@@ -94,7 +103,7 @@ pub struct Liquidate<'info> {
     )]
     pub payer: Signer<'info>,
 
-    pub token_program: Program<'info, Token>,
+    pub token_program: Interface<'info, TokenInterface>,
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
     
@@ -121,11 +130,49 @@ pub fn liquidate_handler<'info>(
 
     // === Step 1: Verify loan is liquidatable ===
     
-    let current_price = PriceFeedUtils::read_price_from_pool(
-        &ctx.accounts.pool_account,
-        token_config.pool_type,
-        &token_mint_key,
-    )?;
+    let pool_data = ctx.accounts.pool_account.try_borrow_data()?;
+
+    let current_price = match token_config.pool_type {
+        PoolType::PumpSwap => {
+            // PumpSwap requires vault accounts to read balances
+            let base_vault_info = ctx.accounts.pumpswap_base_vault
+                .as_ref()
+                .ok_or(LendingError::MissingPumpSwapVaults)?;
+            let quote_vault_info = ctx.accounts.pumpswap_quote_vault
+                .as_ref()
+                .ok_or(LendingError::MissingPumpSwapVaults)?;
+            
+            // Parse vault accounts as token accounts to get balances
+            let base_vault_data = base_vault_info.try_borrow_data()?;
+            let quote_vault_data = quote_vault_info.try_borrow_data()?;
+            
+            // Token account amount is at offset 64 (after mint, owner, amount)
+            let base_amount = u64::from_le_bytes(
+                base_vault_data[64..72].try_into().map_err(|_| LendingError::InvalidPriceFeed)?
+            );
+            let quote_amount = u64::from_le_bytes(
+                quote_vault_data[64..72].try_into().map_err(|_| LendingError::InvalidPriceFeed)?
+            );
+            
+            PriceFeedUtils::read_pumpswap_price(
+                &pool_data,
+                base_amount,
+                quote_amount,
+                base_vault_info.key,
+                quote_vault_info.key,
+            )?
+        },
+        _ => {
+            // For Raydium/Orca/PumpFun, read directly from pool
+            PriceFeedUtils::read_price_from_pool(
+                &ctx.accounts.pool_account,
+                token_config.pool_type,
+                &token_mint_key,
+            )?
+        }
+    };
+
+    drop(pool_data); // Release borrow before continuing
 
     let liquidatable_by_time = ValidationUtils::is_loan_liquidatable_by_time(loan, clock.unix_timestamp);
     let liquidatable_by_price = ValidationUtils::is_loan_liquidatable_by_price(loan, current_price);

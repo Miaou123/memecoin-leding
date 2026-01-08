@@ -1,6 +1,7 @@
 use anchor_lang::prelude::*;
 use anchor_lang::system_program;
-use anchor_spl::token::{self, Token, TokenAccount, Transfer};
+use anchor_spl::token::{self, Transfer};
+use anchor_spl::token_interface::{TokenAccount, Mint, TokenInterface};
 use crate::state::*;
 use crate::error::LendingError;
 use crate::utils::*;
@@ -59,7 +60,7 @@ pub struct CreateLoan<'info> {
         constraint = borrower_token_account.mint == token_mint.key(),
         constraint = borrower_token_account.amount >= collateral_amount @ LendingError::InsufficientTokenBalance
     )]
-    pub borrower_token_account: Account<'info, TokenAccount>,
+    pub borrower_token_account: InterfaceAccount<'info, TokenAccount>,
 
     /// Vault token account for THIS loan's collateral
     #[account(
@@ -67,10 +68,11 @@ pub struct CreateLoan<'info> {
         payer = borrower,
         token::mint = token_mint,
         token::authority = loan, // Loan PDA is the authority
+        token::token_program = token_program,
         seeds = [b"vault", loan.key().as_ref()],
         bump
     )]
-    pub vault: Account<'info, TokenAccount>,
+    pub vault: InterfaceAccount<'info, TokenAccount>,
 
     /// Pool account for price reading
     /// CHECK: Validated by token_config.pool_address constraint
@@ -79,7 +81,15 @@ pub struct CreateLoan<'info> {
     )]
     pub pool_account: UncheckedAccount<'info>,
 
-    pub token_mint: Account<'info, anchor_spl::token::Mint>,
+    /// PumpSwap base token vault - required when pool_type is PumpSwap
+    /// CHECK: Validated in handler against pool data
+    pub pumpswap_base_vault: Option<UncheckedAccount<'info>>,
+
+    /// PumpSwap quote token vault (WSOL) - required when pool_type is PumpSwap  
+    /// CHECK: Validated in handler against pool data
+    pub pumpswap_quote_vault: Option<UncheckedAccount<'info>>,
+
+    pub token_mint: InterfaceAccount<'info, Mint>,
 
     /// Price authority must co-sign to approve this loan
     /// This proves the backend approved the price - SIMPLE AND SECURE
@@ -88,7 +98,7 @@ pub struct CreateLoan<'info> {
     )]
     pub price_authority: Signer<'info>,
 
-    pub token_program: Program<'info, Token>,
+    pub token_program: Interface<'info, TokenInterface>,
     pub system_program: Program<'info, System>,
 }
 
@@ -139,11 +149,49 @@ pub fn create_loan_handler(
     require!(current_price > 0, LendingError::ZeroPrice);
     
     // Sanity check: compare against pool price (catches bugs/misconfigs)
-    let pool_price = PriceFeedUtils::read_price_from_pool(
-        &ctx.accounts.pool_account,
-        token_config.pool_type,
-        &token_config.mint,
-    )?;
+    let pool_data = ctx.accounts.pool_account.try_borrow_data()?;
+
+    let pool_price = match token_config.pool_type {
+        PoolType::PumpSwap => {
+            // PumpSwap requires vault accounts to read balances
+            let base_vault_info = ctx.accounts.pumpswap_base_vault
+                .as_ref()
+                .ok_or(LendingError::MissingPumpSwapVaults)?;
+            let quote_vault_info = ctx.accounts.pumpswap_quote_vault
+                .as_ref()
+                .ok_or(LendingError::MissingPumpSwapVaults)?;
+            
+            // Parse vault accounts as token accounts to get balances
+            let base_vault_data = base_vault_info.try_borrow_data()?;
+            let quote_vault_data = quote_vault_info.try_borrow_data()?;
+            
+            // Token account amount is at offset 64 (after mint, owner, amount)
+            let base_amount = u64::from_le_bytes(
+                base_vault_data[64..72].try_into().map_err(|_| LendingError::InvalidPriceFeed)?
+            );
+            let quote_amount = u64::from_le_bytes(
+                quote_vault_data[64..72].try_into().map_err(|_| LendingError::InvalidPriceFeed)?
+            );
+            
+            PriceFeedUtils::read_pumpswap_price(
+                &pool_data,
+                base_amount,
+                quote_amount,
+                base_vault_info.key,
+                quote_vault_info.key,
+            )?
+        },
+        _ => {
+            // For Raydium/Orca/PumpFun, read directly from pool
+            PriceFeedUtils::read_price_from_pool(
+                &ctx.accounts.pool_account,
+                token_config.pool_type,
+                &token_config.mint,
+            )?
+        }
+    };
+
+    drop(pool_data); // Release borrow before continuing
     
     // 20% = 2000 bps - if larger, something is wrong
     let deviation = if approved_price > pool_price {
@@ -251,6 +299,7 @@ pub fn create_loan_handler(
     )?;
 
     // Transfer collateral tokens to loan's vault
+    // Use transfer for both SPL Token and Token-2022
     let transfer_ctx = CpiContext::new(
         ctx.accounts.token_program.to_account_info(),
         Transfer {

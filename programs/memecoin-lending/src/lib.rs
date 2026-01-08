@@ -8,6 +8,8 @@ pub mod swap;
 
 use instructions::*;
 use instructions::admin::{UpdateLiquidator, BlacklistToken, UpdatePriceAuthority};
+use state::PoolType;
+use error::LendingError;
 
 declare_id!("2NVfyczy1rWMdb7Y9kGmHCZkM72wyYiN5ry8dntzBK2S");
 
@@ -52,8 +54,27 @@ pub mod memecoin_lending {
         ctx: Context<UpdateTokenConfig>,
         enabled: Option<bool>,
         ltv_bps: Option<u16>,
+        pool_address: Option<Pubkey>,
+        pool_type: Option<u8>,
     ) -> Result<()> {
-        instructions::update_token_config::update_token_config_handler(ctx, enabled, ltv_bps)
+        let pool_type_enum = match pool_type {
+            Some(pt) => match pt {
+                0 => Some(PoolType::Raydium),
+                1 => Some(PoolType::Orca),
+                2 => Some(PoolType::Pumpfun),
+                3 => Some(PoolType::PumpSwap),
+                _ => return Err(LendingError::InvalidPoolType.into()),
+            },
+            None => None,
+        };
+        
+        instructions::update_token_config::update_token_config_handler(
+            ctx, 
+            enabled, 
+            ltv_bps,
+            pool_address,
+            pool_type_enum,
+        )
     }
 
     /// Create a new collateralized loan

@@ -18,12 +18,20 @@ import { getConnection, getProgram } from './solana.service.js';
 import { assertCircuitBreakerOk } from './circuit-breaker.service.js';
 import { checkWalletRateLimit } from './wallet-rate-limit.service.js';
 
+// Token-2022 Program ID
+const TOKEN_2022_PROGRAM_ID = new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb');
+
 // Constants matching on-chain program
 const PROTOCOL_STATE_SEED = Buffer.from('protocol_state');
 const TREASURY_SEED = Buffer.from('treasury');
 const TOKEN_CONFIG_SEED = Buffer.from('token_config');
 const LOAN_SEED = Buffer.from('loan');
 const VAULT_SEED = Buffer.from('vault');
+
+// PumpSwap Pool Layout offsets
+const PUMPSWAP_POOL_BASE_VAULT_OFFSET = 139;
+const PUMPSWAP_POOL_QUOTE_VAULT_OFFSET = 171;
+const PUMPSWAP_POOL_MIN_LEN = 211;
 
 // Price signature validity (30 seconds)
 const PRICE_VALIDITY_SECONDS = 30;
@@ -43,6 +51,52 @@ export interface PrepareLoanResponse {
   expiresAt: number;
   estimatedSolAmount: string; // Estimated SOL to receive
   loanPda: string;
+}
+
+// Helper function to detect Token-2022
+async function getTokenProgramForMint(
+  connection: Connection, 
+  mint: PublicKey
+): Promise<PublicKey> {
+  const mintInfo = await connection.getAccountInfo(mint);
+  if (!mintInfo) {
+    throw new Error(`Mint account not found: ${mint.toString()}`);
+  }
+  
+  if (mintInfo.owner.equals(TOKEN_2022_PROGRAM_ID)) {
+    console.log(`[PrepareLoan] Using Token-2022 for ${mint.toString().slice(0,8)}...`);
+    return TOKEN_2022_PROGRAM_ID;
+  }
+  
+  return TOKEN_PROGRAM_ID;
+}
+
+// Helper function to fetch PumpSwap vaults
+async function getPumpSwapVaults(
+  connection: Connection,
+  poolAddress: PublicKey
+): Promise<{ baseVault: PublicKey; quoteVault: PublicKey } | null> {
+  try {
+    const poolAccount = await connection.getAccountInfo(poolAddress);
+    if (!poolAccount || poolAccount.data.length < PUMPSWAP_POOL_MIN_LEN) {
+      console.warn('[PrepareLoan] PumpSwap pool account not found or too small');
+      return null;
+    }
+    
+    const baseVault = new PublicKey(
+      poolAccount.data.slice(PUMPSWAP_POOL_BASE_VAULT_OFFSET, PUMPSWAP_POOL_BASE_VAULT_OFFSET + 32)
+    );
+    const quoteVault = new PublicKey(
+      poolAccount.data.slice(PUMPSWAP_POOL_QUOTE_VAULT_OFFSET, PUMPSWAP_POOL_QUOTE_VAULT_OFFSET + 32)
+    );
+    
+    console.log(`[PrepareLoan] PumpSwap vaults - base: ${baseVault.toString().slice(0,8)}..., quote: ${quoteVault.toString().slice(0,8)}...`);
+    
+    return { baseVault, quoteVault };
+  } catch (error) {
+    console.error('[PrepareLoan] Failed to fetch PumpSwap vaults:', error);
+    return null;
+  }
 }
 
 export async function prepareLoanTransaction(
@@ -111,11 +165,44 @@ export async function prepareLoanTransaction(
   const tokenConfig = await (program.account as any).tokenConfig.fetch(tokenConfigPda);
   const poolAddress = tokenConfig.poolAddress;
 
-  // Get borrower's token account
+  // Detect token program (SPL Token vs Token-2022)
+  const tokenProgramId = await getTokenProgramForMint(connection, tokenMint);
+
+  // Get borrower's token account (with appropriate token program)
   const borrowerTokenAccount = await getAssociatedTokenAddress(
     tokenMint,
-    borrower
+    borrower,
+    false, // allowOwnerOffCurve
+    tokenProgramId
   );
+
+  // Check if PumpSwap and fetch vaults
+  // Debug: log the actual poolType format
+  console.log('[PrepareLoan] Token config poolType:', JSON.stringify(tokenConfig.poolType), typeof tokenConfig.poolType);
+
+  // Handle both Anchor enum object format and numeric format
+  let isPumpSwap = false;
+  if (typeof tokenConfig.poolType === 'object' && tokenConfig.poolType !== null) {
+    const poolTypeKey = Object.keys(tokenConfig.poolType)[0];
+    isPumpSwap = poolTypeKey === 'pumpSwap';
+    console.log('[PrepareLoan] Pool type key:', poolTypeKey, 'isPumpSwap:', isPumpSwap);
+  } else {
+    isPumpSwap = tokenConfig.poolType === 3;
+    console.log('[PrepareLoan] Pool type numeric:', tokenConfig.poolType, 'isPumpSwap:', isPumpSwap);
+  }
+  
+  let pumpswapBaseVault: PublicKey | null = null;
+  let pumpswapQuoteVault: PublicKey | null = null;
+
+  if (isPumpSwap) {
+    const vaults = await getPumpSwapVaults(connection, poolAddress);
+    if (!vaults) {
+      throw new Error('Failed to fetch PumpSwap vault accounts - required for PumpSwap tokens');
+    }
+    pumpswapBaseVault = vaults.baseVault;
+    pumpswapQuoteVault = vaults.quoteVault;
+    console.log('[PrepareLoan] PumpSwap token detected, vaults fetched');
+  }
 
   // 3. Build the transaction
   console.log(`[PrepareLoan] Building transaction...`);
@@ -136,9 +223,11 @@ export async function prepareLoanTransaction(
       borrowerTokenAccount: borrowerTokenAccount,
       vault: vaultPda,
       poolAccount: poolAddress,
+      pumpswapBaseVault: pumpswapBaseVault,  // null if not PumpSwap
+      pumpswapQuoteVault: pumpswapQuoteVault, // null if not PumpSwap
       tokenMint: tokenMint,
       priceAuthority: priceAuthority.publicKey,
-      tokenProgram: TOKEN_PROGRAM_ID,
+      tokenProgram: tokenProgramId,  // Use detected program (Token or Token-2022)
       systemProgram: SystemProgram.programId,
     })
     .transaction();

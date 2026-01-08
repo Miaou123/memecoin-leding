@@ -1,4 +1,5 @@
 use anchor_lang::prelude::*;
+use anchor_spl::token_interface::Mint;
 use crate::state::*;
 use crate::error::LendingError;
 
@@ -22,7 +23,7 @@ pub struct WhitelistToken<'info> {
     )]
     pub token_config: Account<'info, TokenConfig>,
 
-    pub token_mint: Account<'info, anchor_spl::token::Mint>,
+    pub token_mint: InterfaceAccount<'info, Mint>,
 
     #[account(mut)]
     pub admin: Signer<'info>,

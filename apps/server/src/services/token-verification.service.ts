@@ -15,10 +15,11 @@ import BN from 'bn.js';
 import fs from 'fs';
 import path from 'path';
 import { getAdminKeypair } from '../config/keys.js';
+// @ts-ignore
+import PumpSDK from '@pump-fun/pump-sdk';
 
-// Token suffix patterns
-const PUMPFUN_SUFFIX = 'pump';
-const BONK_SUFFIX = 'bonk';
+// Token-2022 program ID for detection
+const TOKEN_2022_PROGRAM_ID = new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb');
 
 // Pool balance thresholds
 const MAX_TOKEN_RATIO_PERCENT = 80;  // Max 80% of pool can be the token
@@ -31,8 +32,7 @@ const MIN_TOKEN_AGE_HOURS = parseInt(process.env.MIN_TOKEN_AGE_HOURS || '24');  
 // Valid quote tokens
 const VALID_QUOTE_TOKENS = {
   SOL: 'So11111111111111111111111111111111111111112',
-  // TODO: Replace with actual USD1 mint on mainnet
-  USD1: process.env.USD1_MINT || 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', // Using USDC as placeholder
+  USD1: process.env.USD1_MINT || 'USD1ttGY1N17NEEHLmELoaybftRBUSErhqYiQzvEmuB',
 };
 
 // Helper function to get PumpFun bonding curve PDA
@@ -82,6 +82,9 @@ export class TokenVerificationService {
   private program: Program | null = null;
   private connection: Connection | null = null;
   private whitelistingLocks = new Map<string, Promise<boolean>>();
+  private pumpSdk: any = null;
+  private pdaCache: Map<string, { launchpad: string; bondingCurve?: PublicKey; timestamp: number }> = new Map();
+  private readonly PDA_CACHE_TTL = 60 * 60 * 1000; // 1 hour - launchpad origin never changes
 
   constructor() {
     this.cacheTimeout = parseInt(process.env.TOKEN_CACHE_TTL_MS || '300000'); // 5 minutes
@@ -89,6 +92,81 @@ export class TokenVerificationService {
     this.autoWhitelistEnabled = process.env.AUTO_WHITELIST_ENABLED === 'true';
     
     this.initializeAnchorProgram();
+  }
+
+  /**
+   * DEPRECATED: Use detectLaunchpad() instead
+   * This method is kept for backward compatibility
+   */
+  async isPumpFunToken(mint: string): Promise<boolean> {
+    const { launchpad } = await this.detectLaunchpad(mint);
+    return launchpad === 'pumpfun';
+  }
+
+  /**
+   * Detect which launchpad a token was created on by checking PDAs
+   */
+  private async detectLaunchpad(mint: string): Promise<{
+    launchpad: 'pumpfun' | 'bonkfun' | 'unknown';
+    bondingCurve?: PublicKey;
+  }> {
+    // Check cache first
+    const cached = this.pdaCache.get(mint);
+    if (cached && Date.now() - cached.timestamp < this.PDA_CACHE_TTL) {
+      console.log(`[TokenVerification] PDA cache hit for ${mint.substring(0, 8)}...`);
+      return { launchpad: cached.launchpad as any, bondingCurve: cached.bondingCurve };
+    }
+
+    const mintPubkey = new PublicKey(mint);
+    
+    // Check PumpFun - derive bonding curve PDA and check if account exists
+    const [pumpfunCurve] = PublicKey.findProgramAddressSync(
+      [Buffer.from('bonding-curve'), mintPubkey.toBuffer()],
+      PUMPFUN_PROGRAM_ID
+    );
+    
+    try {
+      const accountInfo = await this.connection!.getAccountInfo(pumpfunCurve);
+      if (accountInfo !== null) {
+        // Cache the result
+        this.pdaCache.set(mint, { 
+          launchpad: 'pumpfun', 
+          bondingCurve: pumpfunCurve,
+          timestamp: Date.now() 
+        });
+        console.log(`[TokenVerification] PDA check for ${mint.substring(0, 8)}...: PumpFun token`);
+        return { launchpad: 'pumpfun', bondingCurve: pumpfunCurve };
+      }
+    } catch (error) {
+      console.warn(`[TokenVerification] PumpFun PDA check failed for ${mint.substring(0, 8)}...:`, error);
+    }
+    
+    // TODO: Add BonkFun detection when we have their program ID
+    // const BONKFUN_PROGRAM_ID = new PublicKey('...');
+    // const [bonkfunCurve] = PublicKey.findProgramAddressSync(
+    //   [Buffer.from('bonding-curve'), mintPubkey.toBuffer()], // seeds may differ
+    //   BONKFUN_PROGRAM_ID
+    // );
+    // const bonkInfo = await this.connection!.getAccountInfo(bonkfunCurve);
+    // if (bonkInfo) return { launchpad: 'bonkfun', bondingCurve: bonkfunCurve };
+
+    console.log(`[TokenVerification] PDA check for ${mint.substring(0, 8)}...: Unknown launchpad`);
+    return { launchpad: 'unknown' };
+  }
+
+  /**
+   * Detect if a token uses Token-2022 program (for logging only, not rejection)
+   */
+  private async getTokenProgram(mint: string): Promise<'spl-token' | 'token-2022'> {
+    try {
+      const mintPubkey = new PublicKey(mint);
+      const accountInfo = await this.connection!.getAccountInfo(mintPubkey);
+      if (!accountInfo) return 'spl-token';
+      
+      return accountInfo.owner.equals(TOKEN_2022_PROGRAM_ID) ? 'token-2022' : 'spl-token';
+    } catch {
+      return 'spl-token';
+    }
   }
 
   async verifyToken(mint: string): Promise<TokenVerificationResult> {
@@ -116,33 +194,45 @@ export class TokenVerificationService {
         return result;
       }
 
-      // 4. UPDATED: Check token suffix (pump OR bonk)
-      const mintLower = mint.toLowerCase();
-      const isPumpFun = mintLower.endsWith(PUMPFUN_SUFFIX);
-      const isBonk = mintLower.endsWith(BONK_SUFFIX);
+      // 4. Detect launchpad via PDA (secure - cannot be spoofed)
+      const { launchpad, bondingCurve } = await this.detectLaunchpad(mint);
 
-      if (!isPumpFun && !isBonk) {
+      if (launchpad === 'unknown') {
         const result = this.createInvalidResult(
-          mint, 
-          'Token must be from PumpFun (address ends in "pump") or Bonk/Raydium (address ends in "bonk")',
+          mint,
+          'Token was not deployed via a supported launchpad. Only tokens created through PumpFun are currently eligible for loans.',
           'NOT_SUPPORTED_DEX'
         );
         this.cacheResult(mint, result);
         return result;
       }
 
-      const dexType = isPumpFun ? 'pumpfun' : 'raydium';
-      console.log(`[TokenVerification] Detected ${dexType} token: ${mint.substring(0, 8)}...`);
+      // Log token program for debugging (accept both)
+      const tokenProgram = await this.getTokenProgram(mint);
+      console.log(`[TokenVerification] Token ${mint.substring(0, 8)}... uses ${tokenProgram}`);
+
+      let dexType: 'pumpfun' | 'pumpswap' | 'raydium' = launchpad === 'bonkfun' ? 'raydium' : 'pumpfun';
       
-      // Reject pure PumpFun (bonding curve) tokens - they must migrate first
-      if (dexType === 'pumpfun') {
-        const result = this.createInvalidResult(
-          mint,
-          'PumpFun tokens must migrate to Raydium or PumpSwap before lending is enabled. Only migrated tokens (pumpswap, raydium) are supported.',
-          'NOT_SUPPORTED_DEX'
-        );
-        this.cacheResult(mint, result);
-        return result;
+      if (launchpad === 'pumpfun') {
+        console.log(`[TokenVerification] Checking graduation status for ${mint.substring(0, 8)}...`);
+        const graduation = await this.checkPumpFunGraduation(mint);
+        
+        if (!graduation.isGraduated) {
+          // NOT graduated - reject
+          const result = this.createInvalidResult(
+            mint,
+            'PumpFun tokens must migrate to Raydium or PumpSwap before lending is enabled. This token is still on the bonding curve.',
+            'NOT_SUPPORTED_DEX'
+          );
+          this.cacheResult(mint, result);
+          return result;
+        }
+        
+        // HAS graduated - allow it
+        dexType = graduation.dexType;
+        console.log(`[TokenVerification] ✅ Token ${mint.substring(0, 8)}... graduated to ${dexType}`);
+      } else {
+        console.log(`[TokenVerification] Detected ${dexType} token: ${mint.substring(0, 8)}...`);
       }
 
       // 5. NEW: Validate pool balance ratio
@@ -172,11 +262,14 @@ export class TokenVerificationService {
       if (!isOnChain && this.autoWhitelistEnabled && this.adminKeypair) {
         console.log(`[TokenVerification] Not on-chain, auto-whitelisting...`);
         try {
+          // Determine tier based on liquidity
+          const tier = this.determineTier(poolValidation.liquidity || 0);
+          
           await this.autoWhitelistWithLock(mint, {
             isValid: true,
             mint,
-            tier: TokenTier.Bronze,
-            ltvBps: 5000,
+            tier,
+            ltvBps: this.getLtvForTier(tier),
             dexId: dexType,
             liquidity: poolValidation.liquidity || 0,
             verifiedAt: Date.now(),
@@ -195,9 +288,6 @@ export class TokenVerificationService {
           } else {
             // Token was already whitelisted by another request, sync to database
             try {
-              const mintPubkey = new PublicKey(mint);
-              const bondingCurve = getPumpFunBondingCurve(mintPubkey);
-              
               await prisma.token.upsert({
                 where: { id: mint },
                 update: { enabled: true },
@@ -207,7 +297,7 @@ export class TokenVerificationService {
                   name: 'PumpFun Token',
                   decimals: 6,
                   tier: 'bronze',
-                  poolAddress: bondingCurve.toString(), // Store bonding curve PDA
+                  poolAddress: bondingCurve?.toString() || '', // Use bonding curve from detectLaunchpad
                   enabled: true,
                 },
               });
@@ -223,9 +313,6 @@ export class TokenVerificationService {
         console.log(`[TokenVerification] Token already on-chain`);
         // Add database upsert to ensure it exists in DB too
         try {
-          const mintPubkey = new PublicKey(mint);
-          const bondingCurve = getPumpFunBondingCurve(mintPubkey);
-          
           await prisma.token.upsert({
             where: { id: mint },
             update: { enabled: true },
@@ -235,7 +322,7 @@ export class TokenVerificationService {
               name: 'PumpFun Token',
               decimals: 6,
               tier: 'bronze',
-              poolAddress: bondingCurve.toString(), // Store bonding curve PDA
+              poolAddress: bondingCurve?.toString() || '', // Use bonding curve from detectLaunchpad
               enabled: true,
             },
           });
@@ -374,6 +461,16 @@ export class TokenVerificationService {
       const network = (process.env.SOLANA_NETWORK as NetworkType) || 'devnet';
       const networkConfig = getNetworkConfig(network);
       this.connection = new Connection(networkConfig.rpcUrl, 'confirmed');
+      
+      // Initialize PumpFun SDK
+      if (this.connection) {
+        try {
+          this.pumpSdk = new PumpSDK.OnlinePumpSdk(this.connection);
+          console.log('[TokenVerification] PumpFun SDK initialized');
+        } catch (error) {
+          console.warn('[TokenVerification] Failed to initialize PumpFun SDK:', error);
+        }
+      }
 
       const possibleIdlPaths = [
         path.resolve('../../target/idl/memecoin_lending.json'),
@@ -551,8 +648,92 @@ export class TokenVerificationService {
   clearCache(mint?: string): void {
     if (mint) {
       delete this.cache[mint];
+      this.pdaCache.delete(mint);
     } else {
       this.cache = {};
+      this.pdaCache.clear();
+    }
+  }
+
+  /**
+   * Check if a PumpFun token has graduated (completed bonding curve)
+   */
+  private async checkPumpFunGraduation(mint: string): Promise<{ isGraduated: boolean; dexType: 'pumpfun' | 'pumpswap' | 'raydium' }> {
+    try {
+      if (!this.pumpSdk) {
+        console.warn('[TokenVerification] PumpFun SDK not initialized, falling back to DexScreener');
+        const dexType = await this.detectMigratedDex(mint);
+        return { isGraduated: dexType !== 'pumpfun', dexType };
+      }
+
+      const mintPubkey = new PublicKey(mint);
+      
+      // Check bonding curve account
+      try {
+        const bondingCurveAccount = await this.pumpSdk.getBondingCurveAccount(mintPubkey);
+        
+        if (bondingCurveAccount && bondingCurveAccount.complete === true) {
+          console.log(`[TokenVerification] Token ${mint.substring(0, 8)}... has graduated from bonding curve`);
+          // Check which DEX it migrated to
+          const dexType = await this.detectMigratedDex(mint);
+          return { isGraduated: true, dexType };
+        } else {
+          console.log(`[TokenVerification] Token ${mint.substring(0, 8)}... still on bonding curve`);
+          return { isGraduated: false, dexType: 'pumpfun' };
+        }
+      } catch (error: any) {
+        console.warn(`[TokenVerification] Failed to get bonding curve for ${mint.substring(0, 8)}...:`, error.message);
+        // Fall back to DexScreener check
+        const dexType = await this.detectMigratedDex(mint);
+        return { isGraduated: dexType !== 'pumpfun', dexType };
+      }
+    } catch (error) {
+      console.error(`[TokenVerification] Error checking graduation for ${mint.substring(0, 8)}...:`, error);
+      return { isGraduated: false, dexType: 'pumpfun' };
+    }
+  }
+
+  /**
+   * Detect which DEX a graduated PumpFun token migrated to
+   */
+  private async detectMigratedDex(mint: string): Promise<'pumpfun' | 'pumpswap' | 'raydium'> {
+    try {
+      const response = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${mint}`, {
+        headers: { 'Accept': 'application/json' },
+        signal: AbortSignal.timeout(5000)
+      });
+
+      if (!response.ok) {
+        console.warn(`[TokenVerification] DexScreener API error for ${mint.substring(0, 8)}...`);
+        return 'pumpfun';
+      }
+
+      const data: DexScreenerResponse = await response.json();
+      
+      if (data.pairs && data.pairs.length > 0) {
+        // Check for Raydium pools
+        const hasRaydium = data.pairs.some(pair => 
+          pair.dexId === 'raydium' && pair.liquidity?.usd && pair.liquidity.usd > 100
+        );
+        if (hasRaydium) {
+          console.log(`[TokenVerification] Found Raydium pool for ${mint.substring(0, 8)}...`);
+          return 'raydium';
+        }
+
+        // Check for PumpSwap pools
+        const hasPumpSwap = data.pairs.some(pair => 
+          pair.dexId === 'pumpswap' && pair.liquidity?.usd && pair.liquidity.usd > 100
+        );
+        if (hasPumpSwap) {
+          console.log(`[TokenVerification] Found PumpSwap pool for ${mint.substring(0, 8)}...`);
+          return 'pumpswap';
+        }
+      }
+
+      return 'pumpfun'; // Still on bonding curve
+    } catch (error) {
+      console.error(`[TokenVerification] Error detecting DEX for ${mint.substring(0, 8)}...:`, error);
+      return 'pumpfun';
     }
   }
 
@@ -562,7 +743,7 @@ export class TokenVerificationService {
    */
   private async validatePoolBalance(
     mint: string,
-    dexType: 'pumpfun' | 'raydium'
+    dexType: 'pumpfun' | 'pumpswap' | 'raydium'
   ): Promise<{
     isValid: boolean;
     reason?: string;
@@ -586,7 +767,7 @@ export class TokenVerificationService {
         return { isValid: true };
       }
 
-      const data = await response.json() as DexScreenerResponse;
+      const data = await response.json() as any as DexScreenerResponse;
 
       if (!data.pairs || data.pairs.length === 0) {
         return {
@@ -625,6 +806,14 @@ export class TokenVerificationService {
       const bestPool = validPools.reduce((best, current) => {
         return (current.liquidity?.usd || 0) > (best.liquidity?.usd || 0) ? current : best;
       });
+
+      // Debug logging for pool selection
+      console.log(`[PoolValidation] Selected pool for ${mint.substring(0, 8)}...:`);
+      console.log(`  - DEX: ${bestPool.dexId}`);
+      console.log(`  - Pair: ${bestPool.pairAddress}`);
+      console.log(`  - Liquidity: $${(bestPool.liquidity?.usd || 0).toLocaleString()}`);
+      console.log(`  - Quote token: ${bestPool.quoteToken.symbol} (${bestPool.quoteToken.address})`);
+      console.log(`  - Total valid pools found: ${validPools.length}`);
 
       const totalLiquidity = bestPool.liquidity?.usd || 0;
 

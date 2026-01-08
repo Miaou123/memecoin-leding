@@ -26,18 +26,13 @@ export async function checkWalletRateLimit(walletAddress: string): Promise<RateL
   
   try {
     // Check hourly rate limit
-    const loansInWindow = await redis.incr(redisKey);
+    const loansInWindowStr = await redis.get(redisKey);
+    const loansInWindow = parseInt(loansInWindowStr || '0', 10);
     
-    if (loansInWindow === 1) {
-      // First loan in window, set expiry
-      await redis.expire(redisKey, RATE_LIMIT_WINDOW_SECONDS);
-    }
-    
-    if (loansInWindow > MAX_LOANS_PER_HOUR) {
-      // Decrement since we're rejecting
-      await redis.decr(redisKey);
+    if (loansInWindow >= MAX_LOANS_PER_HOUR) {
       
       const ttl = await redis.ttl(redisKey);
+      const minutes = Math.ceil(ttl / 60);
       
       await securityMonitor.log({
         severity: 'MEDIUM',
@@ -57,7 +52,7 @@ export async function checkWalletRateLimit(walletAddress: string): Promise<RateL
       
       return {
         allowed: false,
-        reason: `Rate limit exceeded. Max ${MAX_LOANS_PER_HOUR} loans per hour.`,
+        reason: `You can only create ${MAX_LOANS_PER_HOUR} loans per hour. Please wait ${minutes} minute${minutes !== 1 ? 's' : ''} before creating another loan.`,
         loansInWindow,
         retryAfterSeconds: ttl > 0 ? ttl : RATE_LIMIT_WINDOW_SECONDS,
       };
@@ -72,8 +67,6 @@ export async function checkWalletRateLimit(walletAddress: string): Promise<RateL
     });
     
     if (activeLoans >= MAX_ACTIVE_LOANS) {
-      // Decrement since we're rejecting
-      await redis.decr(redisKey);
       
       await securityMonitor.log({
         severity: 'MEDIUM',
@@ -91,7 +84,7 @@ export async function checkWalletRateLimit(walletAddress: string): Promise<RateL
       
       return {
         allowed: false,
-        reason: `Max active loans exceeded. You have ${activeLoans}/${MAX_ACTIVE_LOANS} active loans.`,
+        reason: `You have reached the maximum of ${MAX_ACTIVE_LOANS} active loans. Please repay an existing loan before creating a new one.`,
         activeLoans,
       };
     }
@@ -152,4 +145,16 @@ export async function getWalletRateLimitStatus(walletAddress: string): Promise<{
 export async function resetWalletRateLimit(walletAddress: string): Promise<void> {
   const redisKey = `loan_rate:${walletAddress}`;
   await redis.del(redisKey);
+}
+
+/**
+ * Record a successful loan creation (call ONLY after loan is confirmed on-chain)
+ */
+export async function recordSuccessfulLoan(walletAddress: string): Promise<void> {
+  const redisKey = `loan_rate:${walletAddress}`;
+  const count = await redis.incr(redisKey);
+  if (count === 1) {
+    await redis.expire(redisKey, RATE_LIMIT_WINDOW_SECONDS);
+  }
+  console.log(`[WalletRateLimit] Recorded successful loan for ${walletAddress.slice(0, 8)}..., count: ${count}/${MAX_LOANS_PER_HOUR}`);
 }

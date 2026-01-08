@@ -83,6 +83,22 @@ pub const PUMPFUN_VIRTUAL_TOKEN_OFFSET: usize = 8;
 pub const PUMPFUN_VIRTUAL_SOL_OFFSET: usize = 16;
 pub const PUMPFUN_MIN_DATA_LEN: usize = 24;
 
+// === POOL DATA OFFSETS (PumpSwap) ===
+// PumpSwap Pool Layout (from IDL)
+// Discriminator: 8 bytes
+// pool_bump: u8 (offset 8)
+// index: u16 (offset 9)
+// creator: Pubkey (offset 11)
+// base_mint: Pubkey (offset 43)
+// quote_mint: Pubkey (offset 75)
+// lp_mint: Pubkey (offset 107)
+// pool_base_token_account: Pubkey (offset 139)
+// pool_quote_token_account: Pubkey (offset 171)
+// lp_supply: u64 (offset 203)
+pub const PUMPSWAP_POOL_BASE_VAULT_OFFSET: usize = 139;
+pub const PUMPSWAP_POOL_QUOTE_VAULT_OFFSET: usize = 171;
+pub const PUMPSWAP_POOL_MIN_LEN: usize = 211;
+
 /// TWAP configuration
 pub const TWAP_WINDOW_SECONDS: i64 = 300; // 5 minute window
 pub const MIN_TWAP_SAMPLES: u8 = 3;
@@ -394,6 +410,50 @@ impl PriceFeedUtils {
             .checked_mul(PRICE_SCALE)
             .ok_or(LendingError::MathOverflow)?
             .checked_div(virtual_token as u128)
+            .ok_or(LendingError::DivisionByZero)?;
+        
+        require!(price <= u64::MAX as u128, LendingError::MathOverflow);
+        require!(price > 0, LendingError::ZeroPrice);
+        
+        Ok(price as u64)
+    }
+
+    /// Read price from PumpSwap pool using vault account balances
+    pub fn read_pumpswap_price(
+        pool_data: &[u8],
+        base_vault_amount: u64,
+        quote_vault_amount: u64,
+        expected_base_vault: &Pubkey,
+        expected_quote_vault: &Pubkey,
+    ) -> Result<u64> {
+        // Validate pool data length
+        require!(pool_data.len() >= PUMPSWAP_POOL_MIN_LEN, LendingError::InvalidPriceFeed);
+        
+        // Extract vault addresses from pool data
+        let stored_base_vault = Pubkey::try_from(
+            &pool_data[PUMPSWAP_POOL_BASE_VAULT_OFFSET..PUMPSWAP_POOL_BASE_VAULT_OFFSET + 32]
+        ).map_err(|_| LendingError::InvalidPriceFeed)?;
+        
+        let stored_quote_vault = Pubkey::try_from(
+            &pool_data[PUMPSWAP_POOL_QUOTE_VAULT_OFFSET..PUMPSWAP_POOL_QUOTE_VAULT_OFFSET + 32]
+        ).map_err(|_| LendingError::InvalidPriceFeed)?;
+        
+        // Validate passed vault accounts match pool's stored vaults
+        require!(expected_base_vault == &stored_base_vault, LendingError::InvalidPumpSwapVault);
+        require!(expected_quote_vault == &stored_quote_vault, LendingError::InvalidPumpSwapVault);
+        
+        // Validate reserves are non-zero
+        require!(base_vault_amount > 0 && quote_vault_amount > 0, LendingError::InvalidPriceFeed);
+        
+        // Calculate price: quote_amount * PRICE_SCALE / base_amount / 1000
+        // quote is SOL (WSOL with 9 decimals), base is the memecoin (6 decimals)
+        // Need to divide by 1000 to normalize the decimal difference (9 - 6 = 3)
+        let price = (quote_vault_amount as u128)
+            .checked_mul(PRICE_SCALE)
+            .ok_or(LendingError::MathOverflow)?
+            .checked_div(base_vault_amount as u128)
+            .ok_or(LendingError::DivisionByZero)?
+            .checked_div(1000) // Normalize for decimal difference between WSOL (9) and token (6)
             .ok_or(LendingError::DivisionByZero)?;
         
         require!(price <= u64::MAX as u128, LendingError::MathOverflow);

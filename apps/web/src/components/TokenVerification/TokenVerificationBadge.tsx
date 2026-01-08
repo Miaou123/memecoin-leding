@@ -67,13 +67,23 @@ function formatLiquidity(liquidity: number): string {
 function getLTVForTier(tier: TokenTier): string {
   switch (tier) {
     case TokenTier.Gold:
-      return '70%';
+      return '50%';
     case TokenTier.Silver:
-      return '60%';
+      return '35%';
     case TokenTier.Bronze:
-      return '50%';
+      return '25%';
     default:
-      return '50%';
+      return '25%';
+  }
+}
+
+function getDexDisplayName(dexId?: string): string {
+  switch (dexId?.toLowerCase()) {
+    case 'raydium': return 'Raydium';
+    case 'pumpswap': return 'PumpSwap';
+    case 'pumpfun': return 'PumpFun';
+    case 'orca': return 'Orca';
+    default: return 'Verified';
   }
 }
 
@@ -149,8 +159,8 @@ export function TokenVerificationBadge({
             {verification.isWhitelisted 
               ? verification.whitelistSource === 'manual' 
                 ? 'Manually Whitelisted' 
-                : 'Valid PumpFun Token'
-              : 'Valid PumpFun Token'
+                : `Valid ${getDexDisplayName(verification.dexId)} Token`
+              : `Valid ${getDexDisplayName(verification.dexId)} Token`
             }
           </span>
           
@@ -208,8 +218,8 @@ export function TokenVerificationBadge({
               <span className="text-gray-600">Source:</span>
               <span className="font-medium capitalize">
                 {verification.isWhitelisted 
-                  ? verification.whitelistSource === 'manual' ? 'Admin Whitelist' : 'PumpFun Auto'
-                  : 'PumpFun'
+                  ? verification.whitelistSource === 'manual' ? 'Admin Whitelist' : `${getDexDisplayName(verification.dexId)} Auto`
+                  : getDexDisplayName(verification.dexId)
                 }
               </span>
             </div>

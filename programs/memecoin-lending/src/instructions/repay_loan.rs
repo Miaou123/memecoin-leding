@@ -1,6 +1,7 @@
 use anchor_lang::prelude::*;
 use anchor_lang::system_program;
-use anchor_spl::token::{self, Token, TokenAccount, Transfer};
+use anchor_spl::token::{self, Transfer};
+use anchor_spl::token_interface::{TokenAccount, Mint, TokenInterface};
 use crate::state::*;
 use crate::error::LendingError;
 use crate::utils::*;
@@ -13,14 +14,14 @@ pub struct RepayLoan<'info> {
         bump = protocol_state.bump,
         constraint = !protocol_state.paused @ LendingError::ProtocolPaused
     )]
-    pub protocol_state: Account<'info, ProtocolState>,
+    pub protocol_state: Box<Account<'info, ProtocolState>>,
 
     #[account(
         mut,
         seeds = [TOKEN_CONFIG_SEED, loan.token_mint.as_ref()],
         bump = token_config.bump
     )]
-    pub token_config: Account<'info, TokenConfig>,
+    pub token_config: Box<Account<'info, TokenConfig>>,
 
     #[account(
         mut,
@@ -34,7 +35,7 @@ pub struct RepayLoan<'info> {
         constraint = loan.status == LoanStatus::Active @ LendingError::LoanAlreadyRepaid,
         constraint = loan.borrower == borrower.key() @ LendingError::Unauthorized
     )]
-    pub loan: Account<'info, Loan>,
+    pub loan: Box<Account<'info, Loan>>,
 
     #[account(
         mut,
@@ -68,7 +69,7 @@ pub struct RepayLoan<'info> {
         constraint = borrower_token_account.owner == borrower.key() @ LendingError::InvalidTokenAccountOwner,
         constraint = borrower_token_account.mint == loan.token_mint
     )]
-    pub borrower_token_account: Account<'info, TokenAccount>,
+    pub borrower_token_account: InterfaceAccount<'info, TokenAccount>,
 
     #[account(
         mut,
@@ -77,15 +78,15 @@ pub struct RepayLoan<'info> {
         seeds = [b"vault", loan.key().as_ref()],
         bump
     )]
-    pub vault_token_account: Account<'info, TokenAccount>,
+    pub vault_token_account: InterfaceAccount<'info, TokenAccount>,
 
     #[account(
         constraint = token_mint.key() == loan.token_mint
     )]
-    pub token_mint: Account<'info, anchor_spl::token::Mint>,
+    pub token_mint: InterfaceAccount<'info, Mint>,
 
 
-    pub token_program: Program<'info, Token>,
+    pub token_program: Interface<'info, TokenInterface>,
     pub system_program: Program<'info, System>,
 }
 

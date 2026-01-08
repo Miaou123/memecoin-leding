@@ -50,16 +50,14 @@ export function calculateLoanTerms(params: LoanTermsParams): LoanTerms {
   // Total owed
   const totalOwed = solAmount.add(protocolFee);
 
-  // Calculate liquidation price using effective LTV
-  // Liquidation happens when collateral value falls below totalOwed / (LTV + buffer)
-  const liquidationLtv = new BN(effectiveLtvBps + 500); // Add 5% buffer
+  // Calculate liquidation price
+  // Liquidation happens when: collateral_amount × liquidation_price = total_owed
+  // Therefore: liquidation_price = total_owed / collateral_amount (adjusted for decimals)
   const liquidationPrice = collateralBN.isZero() 
     ? new BN(0)
     : totalOwed
         .mul(DECIMALS_DIVISOR)
-        .mul(new BN(BPS_DIVISOR))
-        .div(collateralBN)
-        .div(liquidationLtv);
+        .div(collateralBN);
 
   return {
     solAmount: solAmount.toString(),

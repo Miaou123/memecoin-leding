@@ -1,35 +1,19 @@
 import { PublicKey } from '@solana/web3.js';
 
-const JUPITER_PRICE_API = 'https://api.jup.ag/price/v2';
+const JUPITER_PRICE_API = 'https://api.jup.ag/price/v3';
 const NATIVE_SOL_MINT = 'So11111111111111111111111111111111111111112';
 
-export interface JupiterPriceResponse {
-  data: {
-    [mint: string]: {
-      id: string;
-      type: string;
-      price: string;
-      extraInfo?: {
-        lastSwappedPrice?: {
-          lastJupiterSellAt: number;
-          lastJupiterSellPrice: string;
-          lastJupiterBuyAt: number;
-          lastJupiterBuyPrice: string;
-        };
-        quotedPrice?: {
-          buyPrice: string;
-          buyAt: number;
-          sellPrice: string;
-          sellAt: number;
-        };
-      };
-    };
+export interface JupiterPriceResponseV3 {
+  [mint: string]: {
+    blockId: number | null;
+    decimals: number;
+    usdPrice: number;
+    priceChange24h: number | null;
   };
-  timeTaken: number;
 }
 
 /**
- * Fetch token price from Jupiter Price API v2
+ * Fetch token price from Jupiter Price API v3
  * Returns price in SOL (not USD)
  */
 export async function getJupiterPrice(tokenMint: string): Promise<{
@@ -42,9 +26,11 @@ export async function getJupiterPrice(tokenMint: string): Promise<{
     // Fetch both token price and SOL price
     const url = `${JUPITER_PRICE_API}?ids=${tokenMint},${NATIVE_SOL_MINT}`;
     
+    const apiKey = process.env.JUPITER_API_KEY1 || process.env.JUPITER_API_KEY || '';
     const response = await fetch(url, {
       headers: {
         'Accept': 'application/json',
+        ...(apiKey && { 'x-api-key': apiKey }),
       },
     });
 
@@ -52,34 +38,34 @@ export async function getJupiterPrice(tokenMint: string): Promise<{
       throw new Error(`Jupiter API error: ${response.status} ${response.statusText}`);
     }
 
-    const data = await response.json() as JupiterPriceResponse;
-    
-    const tokenData = data.data[tokenMint];
-    const solData = data.data[NATIVE_SOL_MINT];
-    
+    const data = await response.json() as JupiterPriceResponseV3;
+
+    const tokenData = data[tokenMint];
+    const solData = data[NATIVE_SOL_MINT];
+
     if (!tokenData) {
       throw new Error(`Token not found in Jupiter: ${tokenMint}`);
     }
-    
+
     if (!solData) {
       throw new Error('SOL price not available from Jupiter');
     }
 
-    const tokenPriceUsd = parseFloat(tokenData.price);
-    const solPriceUsd = parseFloat(solData.price);
-    
+    // v3 returns usdPrice directly as a number
+    const tokenPriceUsd = tokenData.usdPrice;
+    const solPriceUsd = solData.usdPrice;
+
     if (tokenPriceUsd <= 0 || solPriceUsd <= 0) {
       throw new Error('Invalid price from Jupiter (zero or negative)');
     }
 
     // Calculate token price in SOL
     const priceInSol = tokenPriceUsd / solPriceUsd;
-    
+
     // Convert to lamports per token (with 6 decimal precision for price)
-    // Price scale used on-chain is 1_000_000 (10^6)
     const PRICE_SCALE = 1_000_000;
     const priceInLamports = BigInt(Math.floor(priceInSol * PRICE_SCALE));
-    
+
     console.log(`[Jupiter] ${tokenMint.slice(0, 8)}... price: ${priceInSol.toExponential(4)} SOL (${priceInLamports} scaled)`);
 
     return {

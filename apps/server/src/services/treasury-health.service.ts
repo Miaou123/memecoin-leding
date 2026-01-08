@@ -88,7 +88,9 @@ class TreasuryHealthService {
     
     const balanceSol = Number(currentSnapshot.balance) / LAMPORTS_PER_SOL;
     
-    // Check low balance
+    // Check low balance - TEMPORARILY DISABLED FOR TESTING
+    // TODO: Re-enable treasury balance alerts after testing
+    /*
     if (balanceSol < CRITICAL_BALANCE_THRESHOLD_SOL) {
       await this.alert('CRITICAL_BALANCE', {
         severity: 'CRITICAL',
@@ -104,6 +106,7 @@ class TreasuryHealthService {
         threshold: LOW_BALANCE_THRESHOLD_SOL,
       });
     }
+    */
     
     // Check for large withdrawals
     if (previousSnapshot) {

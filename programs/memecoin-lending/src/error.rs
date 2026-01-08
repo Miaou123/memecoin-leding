@@ -260,4 +260,13 @@ pub enum LendingError {
 
     #[msg("PumpFun tokens must migrate to Raydium/PumpSwap before lending is enabled")]
     PumpfunNotMigrated = 6093,
+    
+    #[msg("Invalid token program - must be SPL Token or Token-2022")]
+    InvalidTokenProgram = 6094,
+    
+    #[msg("Missing PumpSwap vault accounts")]
+    MissingPumpSwapVaults = 6095,
+
+    #[msg("Invalid PumpSwap vault address")]
+    InvalidPumpSwapVault = 6096,
 }

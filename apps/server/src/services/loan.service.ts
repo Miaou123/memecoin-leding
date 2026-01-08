@@ -27,6 +27,7 @@ import { getAdminKeypair } from '../config/keys.js';
 import { executeSwap } from './jupiter-swap.service.js';
 import { lpLimitsService } from './lp-limits.service.js';
 import { programMonitor } from './program-monitor.service.js';
+import { recordSuccessfulLoan } from './wallet-rate-limit.service.js';
 
 // Helper functions for manual TokenConfig deserialization
 function readPubkey(buffer: Buffer, offset: number): PublicKey {
@@ -141,9 +142,9 @@ class LoanService {
     // Use database token info (already fetched above as `token`)
     // Map tier to LTV basis points based on tier
     const tierToLtv: Record<string, number> = {
-      'bronze': 5000,  // 50%
-      'silver': 6000,  // 60%
-      'gold': 7000,    // 70%
+      'bronze': 2500, 
+      'silver': 3500, 
+      'gold': 5000,      
     };
 
     const tokenConfig: TokenConfig = {
@@ -195,11 +196,16 @@ class LoanService {
       tokenDecimals: token.decimals || 6, // Use decimals from DB token record
     });
     
+    // Convert liquidation price from lamports per whole token to USD
+    const liquidationPriceLamports = parseFloat(loanTerms.liquidationPrice);
+    const liquidationPriceSol = liquidationPriceLamports / 1e9;
+    const liquidationPriceUsd = liquidationPriceSol * solUsdPrice;
+    
     return {
       solAmount: loanTerms.solAmount,
       protocolFeeBps: 200, // 2% flat fee
       totalOwed: loanTerms.totalOwed,
-      liquidationPrice: loanTerms.liquidationPrice,
+      liquidationPrice: liquidationPriceUsd.toFixed(6), // Now in USD
       ltv: loanTerms.ltv,
       fees: {
         protocolFee: (parseFloat(loanTerms.solAmount) * 0.02).toString(),
@@ -987,6 +993,15 @@ class LoanService {
       loan: this.formatLoan(dbLoan),
       txSignature: params.txSignature,
     });
+    
+    // Record successful loan for rate limiting (only after all is confirmed)
+    try {
+      await recordSuccessfulLoan(params.borrower);
+      console.log(`[LoanService] Recorded successful loan for rate limiting: ${params.borrower}`);
+    } catch (error: any) {
+      console.error(`[LoanService] Failed to record successful loan for rate limiting:`, error.message);
+      // Non-blocking - don't fail the loan tracking
+    }
     
     return this.formatLoan(dbLoan);
   }

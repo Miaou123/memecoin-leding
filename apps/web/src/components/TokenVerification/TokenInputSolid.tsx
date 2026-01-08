@@ -30,13 +30,23 @@ function formatLiquidity(liquidity: number): string {
 function getLTVForTier(tier: TokenTier): string {
   switch (tier) {
     case TokenTier.Gold:
-      return '70%';
+      return '50%';
     case TokenTier.Silver:
-      return '60%';
+      return '35%';
     case TokenTier.Bronze:
-      return '50%';
+      return '25%';
     default:
-      return '50%';
+      return '25%';
+  }
+}
+
+function getDexDisplayName(dexId?: string): string {
+  switch (dexId?.toLowerCase()) {
+    case 'raydium': return 'Raydium';
+    case 'pumpswap': return 'PumpSwap';
+    case 'pumpfun': return 'PumpFun';
+    case 'orca': return 'Orca';
+    default: return 'Verified';
   }
 }
 
@@ -243,8 +253,8 @@ export function TokenInputSolid(props: TokenInputProps) {
                         {verificationData.isWhitelisted 
                           ? verificationData.whitelistSource === 'manual' 
                             ? 'Manually Whitelisted' 
-                            : 'Valid PumpFun Token'
-                          : 'Valid PumpFun Token'
+                            : `Valid ${getDexDisplayName(verificationData.dexId)} Token`
+                          : `Valid ${getDexDisplayName(verificationData.dexId)} Token`
                         }
                       </span>
                       
@@ -301,8 +311,8 @@ export function TokenInputSolid(props: TokenInputProps) {
                         <span class="text-gray-600">Source:</span>
                         <span class="font-medium capitalize">
                           {verificationData.isWhitelisted 
-                            ? verificationData.whitelistSource === 'manual' ? 'Admin Whitelist' : 'PumpFun Auto'
-                            : 'PumpFun'
+                            ? verificationData.whitelistSource === 'manual' ? 'Admin Whitelist' : `${getDexDisplayName(verificationData.dexId)} Auto`
+                            : getDexDisplayName(verificationData.dexId)
                           }
                         </span>
                       </div>

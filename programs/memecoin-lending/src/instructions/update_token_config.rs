@@ -26,6 +26,8 @@ pub fn update_token_config_handler(
     ctx: Context<UpdateTokenConfig>,
     enabled: Option<bool>,
     ltv_bps: Option<u16>,
+    pool_address: Option<Pubkey>,
+    pool_type: Option<PoolType>,
 ) -> Result<()> {
     let token_config = &mut ctx.accounts.token_config;
     
@@ -40,6 +42,16 @@ pub fn update_token_config_handler(
             return Err(LendingError::LtvTooHigh.into());
         }
         token_config.ltv_bps = ltv_value;
+    }
+
+    // Update pool address
+    if let Some(pool) = pool_address {
+        token_config.pool_address = pool;
+    }
+    
+    // Update pool type
+    if let Some(ptype) = pool_type {
+        token_config.pool_type = ptype;
     }
 
     

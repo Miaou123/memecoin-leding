@@ -187,14 +187,22 @@ export function createTokenVerification(mint: () => string): UseTokenVerificatio
     const currentMint = mint();
     console.log('[TokenVerificationSolid] Effect triggered, mint:', currentMint?.slice(0, 8) + '...');
     
+    // Always clear previous data immediately when mint changes
+    setData(null);
+    setError(null);
+    
     if (currentMint && currentMint.trim()) {
+      // Check if we have valid cached data for this specific mint - show immediately
+      const cachedEntry = verificationCache[currentMint.trim()];
+      if (cachedEntry && isCacheValid(cachedEntry)) {
+        setData(cachedEntry.data);
+      } else {
+        setIsLoading(true);
+      }
+      
       console.log('[TokenVerificationSolid] Starting verification for:', currentMint.slice(0, 8) + '...');
       debouncedVerify(currentMint.trim());
     } else {
-      // Clear state for empty mint
-      console.log('[TokenVerificationSolid] Clearing state for empty mint');
-      setData(null);
-      setError(null);
       setIsLoading(false);
       setIsValidating(false);
     }

@@ -28,13 +28,23 @@ function formatLiquidity(liquidity: number): string {
 function getLTVForTier(tier: TokenTier): string {
   switch (tier) {
     case TokenTier.Gold:
-      return '70%';
+      return '50%';
     case TokenTier.Silver:
-      return '60%';
+      return '35%';
     case TokenTier.Bronze:
-      return '50%';
+      return '25%';
     default:
-      return '50%';
+      return '25%';
+  }
+}
+
+function getDexDisplayName(dexId?: string): string {
+  switch (dexId?.toLowerCase()) {
+    case 'raydium': return 'Raydium';
+    case 'pumpswap': return 'PumpSwap';
+    case 'pumpfun': return 'PumpFun';
+    case 'orca': return 'Orca';
+    default: return 'Verified';
   }
 }
 
@@ -99,8 +109,8 @@ export function TokenVerificationBadgeSolid(props: TokenVerificationBadgeProps) 
                     {props.verification!.isWhitelisted 
                       ? props.verification!.whitelistSource === 'manual' 
                         ? 'ADMIN_WHITELISTED' 
-                        : 'PUMPFUN_VERIFIED'
-                      : 'PUMPFUN_VERIFIED'
+                        : `${getDexDisplayName(props.verification!.dexId).toUpperCase()}_VERIFIED`
+                      : `${getDexDisplayName(props.verification!.dexId).toUpperCase()}_VERIFIED`
                     }
                   </span>
                   
@@ -156,8 +166,8 @@ export function TokenVerificationBadgeSolid(props: TokenVerificationBadgeProps) 
                       <span class="text-text-dim">SOURCE:</span>
                       <span>
                         {props.verification!.isWhitelisted 
-                          ? props.verification!.whitelistSource === 'manual' ? 'ADMIN_WHITELIST' : 'PUMPFUN_AUTO'
-                          : 'PUMPFUN'
+                          ? props.verification!.whitelistSource === 'manual' ? 'ADMIN_WHITELIST' : `${getDexDisplayName(props.verification!.dexId).toUpperCase()}_AUTO`
+                          : getDexDisplayName(props.verification!.dexId).toUpperCase()
                         }
                       </span>
                     </div>
