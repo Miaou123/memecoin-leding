@@ -10,8 +10,10 @@ const __dirname = path.dirname(__filename);
 // Single source of truth - relative to project root
 // From apps/server/src/config, go up 4 levels to reach project root
 const ADMIN_KEYPAIR_PATH = path.resolve(__dirname, '../../../../keys/admin.json');
+const LIQUIDATOR_KEYPAIR_PATH = path.resolve(__dirname, '../../../../keys/liquidator.json');
 
 let adminKeypair: Keypair | null = null;
+let liquidatorKeypair: Keypair | null = null;
 
 /**
  * Load admin keypair from /keys/admin.json
@@ -51,8 +53,40 @@ export function getAdminPublicKey(): string {
   return getAdminKeypair().publicKey.toString();
 }
 
-// Aliases - all use the same admin keypair
+/**
+ * Load liquidator keypair from /keys/liquidator.json with fallback to admin.json
+ * This keypair is used for liquidation operations
+ */
+export function getLiquidatorKeypair(): Keypair {
+  if (liquidatorKeypair) {
+    return liquidatorKeypair;
+  }
+
+  // Try to load liquidator keypair first
+  if (fs.existsSync(LIQUIDATOR_KEYPAIR_PATH)) {
+    try {
+      const keypairData = JSON.parse(fs.readFileSync(LIQUIDATOR_KEYPAIR_PATH, 'utf8'));
+      liquidatorKeypair = Keypair.fromSecretKey(Uint8Array.from(keypairData));
+      console.log(`[Keys] Liquidator keypair loaded: ${liquidatorKeypair.publicKey.toString()}`);
+      return liquidatorKeypair;
+    } catch (error: any) {
+      console.warn(`[Keys] Failed to load liquidator keypair, falling back to admin: ${error.message}`);
+    }
+  }
+
+  // Fallback to admin keypair
+  console.log(`[Keys] Using admin keypair as liquidator (no liquidator.json found)`);
+  liquidatorKeypair = getAdminKeypair();
+  return liquidatorKeypair;
+}
+
+/**
+ * Get liquidator public key as string
+ */
+export function getLiquidatorPublicKey(): string {
+  return getLiquidatorKeypair().publicKey.toString();
+}
+
+// Aliases - price authority still uses admin keypair
 export const getPriceAuthorityKeypair = getAdminKeypair;
 export const getPriceAuthorityPublicKey = getAdminPublicKey;
-export const getLiquidatorKeypair = getAdminKeypair;
-export const getLiquidatorPublicKey = getAdminPublicKey;

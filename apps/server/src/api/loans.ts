@@ -366,4 +366,36 @@ loansRouter.post(
   }
 );
 
+// Sync loans from blockchain
+const syncLoansSchema = z.object({
+  borrower: solanaAddressSchema,
+});
+
+loansRouter.post(
+  '/sync',
+  zValidator('json', syncLoansSchema),
+  async (c) => {
+    const { borrower } = c.req.valid('json');
+    
+    try {
+      const result = await loanService.syncLoansFromChain(borrower);
+      
+      return c.json<ApiResponse<{ onChainCount: number; synced: number; errors?: string[] }>>({
+        success: true,
+        data: result,
+      });
+    } catch (error: any) {
+      logger.error('Failed to sync loans from chain:', {
+        borrower: sanitizeForLogging(borrower),
+        error: error.message,
+      });
+      
+      return c.json<ApiResponse<null>>({
+        success: false,
+        error: error.message,
+      }, 400);
+    }
+  }
+);
+
 export { loansRouter };

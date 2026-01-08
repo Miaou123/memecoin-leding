@@ -5,6 +5,7 @@ import { securityMonitor } from '../services/security-monitor.service.js';
 import { liquidatorMetrics } from '../services/liquidator-metrics.service.js';
 import { tryWithLock, getLoanLockResource, getBorrowerLockResource } from '../utils/redlock.js';
 import { SECURITY_EVENT_TYPES } from '@memecoin-lending/types';
+import { getLiquidatorKeypair, getLiquidatorPublicKey } from '../config/keys.js';
 
 export async function liquidationJob(job: Job) {
   console.log('🔍 Checking for liquidatable loans...');
@@ -89,20 +90,24 @@ export async function liquidationJob(job: Job) {
               return { success: false, reason: 'already-liquidated' };
             }
             
-            // In production, this would use a liquidator bot wallet
-            const liquidatorWallet = process.env.LIQUIDATOR_WALLET || process.env.ADMIN_WALLET;
-            
-            if (!liquidatorWallet) {
-              console.error('No liquidator wallet configured');
+            // Get liquidator keypair from file (not env var)
+            let liquidatorKeypair;
+            let liquidatorWallet;
+            try {
+              liquidatorKeypair = getLiquidatorKeypair();
+              liquidatorWallet = liquidatorKeypair.publicKey.toString();
+              console.log(`Using liquidator: ${liquidatorWallet}`);
+            } catch (error: any) {
+              console.error('❌ Failed to load liquidator keypair:', error.message);
               
-              // SECURITY: Alert when no liquidator wallet is configured
+              // SECURITY: Alert when no liquidator keypair is available
               await securityMonitor.log({
                 severity: 'CRITICAL',
                 category: 'Liquidation',
                 eventType: SECURITY_EVENT_TYPES.LIQUIDATION_NO_WALLET,
-                message: 'No liquidator wallet configured - liquidations cannot proceed!',
+                message: 'Failed to load liquidator keypair - liquidations cannot proceed!',
                 details: {
-                  envVars: ['LIQUIDATOR_WALLET', 'ADMIN_WALLET'],
+                  error: error.message,
                   liquidatableCount: liquidatableLoans.length,
                   currentLoan: loanPubkey,
                   jobId: job.id,

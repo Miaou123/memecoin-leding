@@ -11,6 +11,9 @@ import { securityMonitor } from './security-monitor.service.js';
 import { SECURITY_EVENT_TYPES } from '@memecoin-lending/types';
 import { jupiterClient } from './jupiter-client.js';
 
+// Price scaling constant - matches on-chain storage format
+const PRICE_SCALE_DIVISOR = 1_000_000; // 1e6
+
 const JUPITER_PRICE_API = 'https://api.jup.ag/price/v3';
 const DEXSCREENER_API = 'https://api.dexscreener.com/latest/dex/tokens';
 const POLL_INTERVAL_MS = parseInt(process.env.PRICE_POLL_INTERVAL_MS || '5000'); // 5 seconds default
@@ -393,7 +396,7 @@ class FastPriceMonitor extends EventEmitter {
           continue;
         }
         
-        const data = await response.json();
+        const data: any = await response.json();
         
         if (data.pairs && data.pairs.length > 0) {
           // Get the pair with highest liquidity
@@ -426,7 +429,26 @@ class FastPriceMonitor extends EventEmitter {
     if (!monitor || monitor.thresholds.length === 0) return;
     
     for (const threshold of monitor.thresholds) {
-      if (currentPrice <= threshold.liquidationPrice) {
+      // CRITICAL BUG FIX: Prices must be in same units!
+      // threshold.liquidationPrice is in scaled format (e.g., 4305 = 0.004305 SOL)
+      // currentPrice is in human-readable format (e.g., 0.000763 SOL)
+      
+      // First, add sanity check for on-chain bug
+      if (threshold.liquidationPrice > threshold.entryPrice) {
+        console.warn(`⚠️ BUG DETECTED: Loan ${threshold.loanId.slice(0, 8)}... has invalid liquidation config`);
+        console.warn(`   entry_price: ${threshold.entryPrice} (scaled), liquidation_price: ${threshold.liquidationPrice} (scaled)`);
+        console.warn(`   liquidation_price should be < entry_price`);
+        console.warn(`   Skipping this loan until on-chain bug is fixed`);
+        continue; // Skip this loan - don't trigger false liquidation
+      }
+      
+      // Convert currentPrice to scaled format for comparison
+      const currentPriceScaled = Math.round(currentPrice * PRICE_SCALE_DIVISOR);
+      
+      if (currentPriceScaled <= threshold.liquidationPrice) {
+        console.log(`💸 Price comparison (scaled units):`);
+        console.log(`   Current: ${currentPriceScaled} (${currentPrice.toFixed(8)} SOL)`);
+        console.log(`   Liquidation: ${threshold.liquidationPrice} (${(threshold.liquidationPrice / PRICE_SCALE_DIVISOR).toFixed(8)} SOL)`);
         this.triggerLiquidation(mint, threshold, currentPrice);
       }
     }
@@ -440,7 +462,11 @@ class FastPriceMonitor extends EventEmitter {
     threshold: LiquidationThreshold,
     currentPrice: number
   ): Promise<void> {
-    const priceDropPercent = ((threshold.entryPrice - currentPrice) / threshold.entryPrice) * 100;
+    // Fix price drop calculation - convert to same units
+    const entryPriceHuman = threshold.entryPrice / PRICE_SCALE_DIVISOR;
+    const currentPriceHuman = currentPrice; // already human readable
+    const liquidationPriceHuman = threshold.liquidationPrice / PRICE_SCALE_DIVISOR;
+    const priceDropPercent = ((entryPriceHuman - currentPriceHuman) / entryPriceHuman) * 100;
     
     const alert: LiquidationAlert = {
       loanId: threshold.loanId,
@@ -455,9 +481,9 @@ class FastPriceMonitor extends EventEmitter {
     console.log(`🚨 LIQUIDATION TRIGGERED!`);
     console.log(`🚨 Loan: ${threshold.loanId}`);
     console.log(`🚨 Token: ${mint.slice(0, 8)}...`);
-    console.log(`🚨 Current Price: ${currentPrice.toExponential(4)} SOL`);
-    console.log(`🚨 Liquidation Price: ${threshold.liquidationPrice.toExponential(4)} SOL`);
-    console.log(`🚨 Entry Price: ${threshold.entryPrice.toExponential(4)} SOL`);
+    console.log(`🚨 Current Price: ${currentPrice.toFixed(8)} SOL (scaled: ${Math.round(currentPrice * PRICE_SCALE_DIVISOR)})`);
+    console.log(`🚨 Liquidation Price: ${liquidationPriceHuman.toFixed(8)} SOL (scaled: ${threshold.liquidationPrice})`);
+    console.log(`🚨 Entry Price: ${entryPriceHuman.toFixed(8)} SOL (scaled: ${threshold.entryPrice})`);
     console.log(`🚨 Drop from entry: ${priceDropPercent.toFixed(2)}%`);
     console.log(`🚨 ════════════════════════════════════════════`);
     
@@ -487,9 +513,13 @@ class FastPriceMonitor extends EventEmitter {
     try {
       const { loanService } = await import('./loan.service.js');
       
-      const liquidatorWallet = process.env.LIQUIDATOR_WALLET || process.env.ADMIN_WALLET;
-      if (!liquidatorWallet) {
-        console.error('❌ No liquidator wallet configured!');
+      // Load liquidator keypair from file
+      let liquidatorWallet: string;
+      try {
+        const { getLiquidatorPublicKey } = await import('../config/keys.js');
+        liquidatorWallet = getLiquidatorPublicKey();
+      } catch (error: any) {
+        console.error('❌ Failed to load liquidator keypair:', error.message);
         return;
       }
       
@@ -575,19 +605,31 @@ class FastPriceMonitor extends EventEmitter {
       entryPrice,
     });
     
+    // Add sanity check
+    if (liquidationPrice > entryPrice) {
+      console.warn(`⚠️ WARNING: Invalid liquidation configuration detected!`);
+      console.warn(`   Loan: ${loanId.slice(0, 8)}...`);
+      console.warn(`   Entry Price: ${entryPrice} (scaled) = ${(entryPrice / PRICE_SCALE_DIVISOR).toFixed(8)} SOL`);
+      console.warn(`   Liquidation Price: ${liquidationPrice} (scaled) = ${(liquidationPrice / PRICE_SCALE_DIVISOR).toFixed(8)} SOL`);
+      console.warn(`   liquidation_price should be < entry_price`);
+      console.warn(`   This loan will be skipped to prevent false liquidations`);
+    }
+    
     console.log(`🎯 Registered liquidation threshold:`);
     console.log(`   Loan: ${loanId.slice(0, 8)}...`);
     console.log(`   Token: ${mint.slice(0, 8)}...`);
-    console.log(`   Entry Price: ${entryPrice.toExponential(4)} SOL`);
-    console.log(`   Liquidation Price: ${liquidationPrice.toExponential(4)} SOL`);
-    console.log(`   Current Price: ${monitor.lastPrice > 0 ? monitor.lastPrice.toExponential(4) : 'pending...'} SOL`);
+    console.log(`   Entry Price: ${(entryPrice / PRICE_SCALE_DIVISOR).toFixed(8)} SOL (scaled: ${entryPrice})`);
+    console.log(`   Liquidation Price: ${(liquidationPrice / PRICE_SCALE_DIVISOR).toFixed(8)} SOL (scaled: ${liquidationPrice})`);
+    console.log(`   Current Price: ${monitor.lastPrice > 0 ? `${monitor.lastPrice.toFixed(8)} SOL` : 'pending...'}`);
     
     if (monitor.lastPrice > 0) {
-      const buffer = ((monitor.lastPrice - liquidationPrice) / liquidationPrice) * 100;
+      // Convert to same units for comparison
+      const currentPriceScaled = Math.round(monitor.lastPrice * PRICE_SCALE_DIVISOR);
+      const buffer = ((currentPriceScaled - liquidationPrice) / liquidationPrice) * 100;
       console.log(`   Buffer: ${buffer.toFixed(2)}% above liquidation`);
       
       // Check immediately if already below threshold
-      if (monitor.lastPrice <= liquidationPrice) {
+      if (currentPriceScaled <= liquidationPrice) {
         console.log(`⚠️ Price already at or below liquidation threshold!`);
         const threshold = monitor.thresholds.find(t => t.loanId === loanId)!;
         this.triggerLiquidation(mint, threshold, monitor.lastPrice);

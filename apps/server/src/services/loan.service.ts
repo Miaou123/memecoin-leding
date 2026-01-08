@@ -12,7 +12,17 @@ import {
   TokenConfig,
   PoolType,
 } from '@memecoin-lending/types';
-import { MemecoinLendingClient, buildCreateLoanTransaction, buildRepayLoanTransaction, liquidateWithPumpfun, liquidateWithJupiter } from '@memecoin-lending/sdk';
+import { 
+  MemecoinLendingClient, 
+  buildCreateLoanTransaction, 
+  buildRepayLoanTransaction, 
+  liquidateWithPumpfun, 
+  liquidateWithJupiter,
+  getPriceWithFallback,
+  isLiquidatableByPrice,
+  convertScaledPriceToSol,
+  PoolType as SdkPoolType,
+} from '@memecoin-lending/sdk';
 import { prisma } from '../db/client.js';
 import { priceService } from './price.service.js';
 import { notificationService } from './notification.service.js';
@@ -306,7 +316,7 @@ class LoanService {
       tx.feePayer = new PublicKey(params.borrower);
       
       // SECURITY: Track token for real-time price monitoring via WebSocket
-      priceService.trackToken(params.tokenMint);
+      fastPriceMonitor.trackToken(params.tokenMint);
       
       // Serialize and return (unsigned)
       const serializedTx = tx.serialize({ 
@@ -1018,7 +1028,8 @@ class LoanService {
   async isLoanLiquidatable(loanPubkey: string): Promise<boolean> {
     try {
       const client = await this.getClient();
-      return await client.isLoanLiquidatable(new PublicKey(loanPubkey));
+      const result = await client.isLoanLiquidatable(new PublicKey(loanPubkey));
+      return result.liquidatable;
     } catch (error: any) {
       console.error(`Error checking if loan ${loanPubkey} is liquidatable:`, error);
       return false;
@@ -1026,41 +1037,96 @@ class LoanService {
   }
 
   async checkLiquidatableLoans(): Promise<string[]> {
-    // Get all active loans
+    const client = await this.getClient();
+    const connection = client.connection;
+    
+    // Get all active loans with token info
     const activeLoans = await prisma.loan.findMany({
       where: { status: LoanStatus.Active },
       include: { token: true },
     });
-    
+
     const liquidatable: string[] = [];
     
+    // Cache prices per token mint to reduce RPC calls
+    const priceCache = new Map<string, { priceScaled: BN; timestamp: number }>();
+    const CACHE_TTL_MS = 5000;
+
     for (const loan of activeLoans) {
-      // Check time-based liquidation
-      if (new Date() > loan.dueAt) {
-        liquidatable.push(loan.id);
-        continue;
-      }
-      
-      // Check price-based liquidation
-      const currentPrice = await priceService.getCurrentPrice(loan.tokenMint);
-      
-      // Log values for debugging
-      console.log(`Checking liquidation for loan ${loan.id}:`, {
-        currentPrice: currentPrice.price,
-        liquidationPrice: loan.liquidationPrice,
-        tokenMint: loan.tokenMint
-      });
-      
-      // Convert decimal prices to comparable numbers
-      // Prices are stored as strings with decimal values
-      const currentPriceNum = parseFloat(currentPrice.price);
-      const liquidationPriceNum = parseFloat(loan.liquidationPrice);
-      
-      if (currentPriceNum <= liquidationPriceNum) {
-        liquidatable.push(loan.id);
+      try {
+        // Time-based liquidation (no RPC needed)
+        if (new Date() > loan.dueAt) {
+          console.log(`[Liquidation] Loan ${loan.id.slice(0, 8)}... liquidatable by TIME`);
+          liquidatable.push(loan.id);
+          continue;
+        }
+
+        // Get pool info from token or on-chain config
+        let poolAddress: string | null = loan.token?.poolAddress || null;
+        let poolType: string | null = null; // poolType not in token model
+        
+        // If not in DB, fetch from on-chain
+        if (!poolAddress || !poolType) {
+          try {
+            const tokenConfig = await client.getTokenConfig(new PublicKey(loan.tokenMint));
+            if (tokenConfig) {
+              poolAddress = tokenConfig.poolAddress;
+              poolType = tokenConfig.poolType;
+            }
+          } catch (e) {
+            console.warn(`[Liquidation] Could not fetch token config for ${loan.tokenMint}`);
+          }
+        }
+
+        // Check price cache
+        const cached = priceCache.get(loan.tokenMint);
+        let currentPriceScaled: BN;
+
+        if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+          currentPriceScaled = cached.priceScaled;
+        } else {
+          try {
+            const priceResult = await getPriceWithFallback(
+              connection,
+              new PublicKey(loan.tokenMint),
+              poolAddress ? new PublicKey(poolAddress) : null,
+              poolType as SdkPoolType | null,
+            );
+            currentPriceScaled = priceResult.priceScaled;
+            priceCache.set(loan.tokenMint, {
+              priceScaled: currentPriceScaled,
+              timestamp: Date.now(),
+            });
+            
+            console.log(`[Liquidation] Price for ${loan.tokenMint.slice(0, 8)}...: ${priceResult.priceInSol} SOL (source: ${priceResult.source})`);
+          } catch (priceError: any) {
+            console.error(`[Liquidation] Failed to get price for ${loan.tokenMint}:`, priceError.message);
+            continue;
+          }
+        }
+
+        const liquidationPriceScaled = new BN(loan.liquidationPrice);
+
+        // Log for debugging
+        console.log(`Checking liquidation for loan ${loan.id}:`, {
+          currentPriceScaled: currentPriceScaled.toString(),
+          liquidationPrice: liquidationPriceScaled.toString(),
+          tokenMint: loan.tokenMint.slice(0, 8) + '...',
+          isLiquidatable: currentPriceScaled.lte(liquidationPriceScaled),
+        });
+
+        // Price-based liquidation check
+        if (isLiquidatableByPrice(currentPriceScaled, liquidationPriceScaled)) {
+          console.log(`[Liquidation] Loan ${loan.id.slice(0, 8)}... liquidatable by PRICE`);
+          console.log(`  Current: ${currentPriceScaled.toString()} <= Liquidation: ${liquidationPriceScaled.toString()}`);
+          liquidatable.push(loan.id);
+        }
+
+      } catch (error: any) {
+        console.error(`[Liquidation] Error checking loan ${loan.id}:`, error.message);
       }
     }
-    
+
     return liquidatable;
   }
   
@@ -1142,6 +1208,96 @@ class LoanService {
       where: { status: 'active' },
       include: { token: true },
     });
+  }
+
+  /**
+   * Sync loans from blockchain for a specific borrower
+   */
+  async syncLoansFromChain(borrower: string): Promise<{ onChainCount: number; synced: number; errors?: string[] }> {
+    console.log('[LoanService] Syncing loans from chain for borrower:', borrower);
+    
+    try {
+      const client = await this.getClient();
+      const borrowerPubkey = new PublicKey(borrower);
+      
+      // Account offsets (after 8-byte discriminator)
+      const BORROWER_OFFSET = 8;
+      
+      // Fetch all loan accounts for this borrower
+      const accounts = await client.connection.getProgramAccounts(PROGRAM_ID, {
+        filters: [
+          {
+            memcmp: {
+              offset: BORROWER_OFFSET,
+              bytes: borrowerPubkey.toBase58(),
+            },
+          },
+        ],
+      });
+      
+      console.log(`[LoanService] Found ${accounts.length} loan accounts on-chain`);
+      
+      // Get existing loans from DB
+      const existingLoans = await prisma.loan.findMany({
+        where: { borrower },
+        select: { id: true },
+      });
+      const existingIds = new Set(existingLoans.map(l => l.id));
+      
+      let synced = 0;
+      const errors: string[] = [];
+      
+      // Process each on-chain loan
+      for (const { pubkey, account } of accounts) {
+        const loanPubkey = pubkey.toString();
+        
+        // Skip if already in database
+        if (existingIds.has(loanPubkey)) {
+          continue;
+        }
+        
+        try {
+          // Fetch full loan data
+          const loanData = await client.getLoan(pubkey);
+          
+          if (!loanData) {
+            console.warn(`[LoanService] Could not fetch loan data for ${loanPubkey}`);
+            continue;
+          }
+          
+          // Only sync active loans
+          if (loanData.status !== LoanStatus.Active) {
+            continue;
+          }
+          
+          console.log('[LoanService] Syncing missing loan:', loanPubkey);
+          
+          // Track the loan using existing method
+          await this.trackCreatedLoan({
+            loanPubkey,
+            txSignature: '', // No signature available for historical sync
+            borrower,
+            tokenMint: loanData.tokenMint.toString(),
+          });
+          
+          synced++;
+        } catch (error: any) {
+          console.error(`[LoanService] Failed to sync loan ${loanPubkey}:`, error.message);
+          errors.push(`Loan ${loanPubkey}: ${error.message}`);
+        }
+      }
+      
+      console.log(`[LoanService] Sync complete. Synced ${synced} loans, ${errors.length} errors`);
+      
+      return {
+        onChainCount: accounts.length,
+        synced,
+        errors: errors.length > 0 ? errors : undefined,
+      };
+    } catch (error: any) {
+      console.error('[LoanService] Failed to sync loans from chain:', error);
+      throw new Error(`Failed to sync loans: ${error.message}`);
+    }
   }
 }
 
