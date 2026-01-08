@@ -26,11 +26,32 @@ import * as accounts from './accounts';
 import * as pda from './pda';
 import { calculateLoanTerms } from './utils';
 import { PriceClient, PriceData } from './price';
+import { 
+  getPriceFromPool,
+  getPriceWithFallback,
+  isLiquidatableByPrice,
+  convertScaledPriceToSol,
+  PoolType,
+  PoolPriceResult,
+  PRICE_TO_SOL_DIVISOR,
+} from './pool-price';
 
 export interface AnchorWallet {
   publicKey: PublicKey;
   signTransaction: any;
   signAllTransactions: any;
+}
+
+export interface LiquidationCheckResult {
+  liquidatable: boolean;
+  reason?: 'time' | 'price';
+  currentPriceScaled?: string;
+  liquidationPriceScaled?: string;
+  currentPriceInSol?: number;
+  liquidationPriceInSol?: number;
+  timeRemaining?: number;
+  priceSource?: 'pool' | 'jupiter-fallback';
+  error?: string;
 }
 
 export class MemecoinLendingClient {
@@ -314,61 +335,94 @@ export class MemecoinLendingClient {
     });
   }
 
-  // Helper to check if a loan is liquidatable
-  async isLoanLiquidatable(loanPubkey: PublicKey): Promise<{
-    liquidatable: boolean;
-    reason?: 'time' | 'price';
-    currentPrice?: number;
-    liquidationPrice?: number;
-    timeRemaining?: number;
-  }> {
+  /**
+   * Check if a loan is liquidatable
+   * 
+   * Uses pool price reading (matching on-chain) with Jupiter fallback.
+   */
+  async isLoanLiquidatable(loanPubkey: PublicKey): Promise<LiquidationCheckResult> {
+    // 1. Fetch loan data
     const loan = await this.getLoan(loanPubkey);
     if (!loan || loan.status !== LoanStatus.Active) {
       return { liquidatable: false };
     }
 
-    // Check time-based liquidation
+    // 2. Check time-based liquidation
     const currentTime = Math.floor(Date.now() / 1000);
+    const timeRemaining = loan.dueAt - currentTime;
+    
     if (currentTime > loan.dueAt) {
-      return { 
-        liquidatable: true, 
+      return {
+        liquidatable: true,
         reason: 'time',
-        timeRemaining: 0
+        timeRemaining: 0,
       };
     }
 
-    // Check price-based liquidation
+    // 3. Check price-based liquidation
     try {
-      const priceData = await this.getTokenPrice(new PublicKey(loan.tokenMint));
-      if (priceData?.solPrice) {
-        const currentPriceLamports = priceData.solPrice * 1e9; // Convert to lamports
-        const liquidationPriceLamports = parseFloat(loan.liquidationPrice);
-        
-        if (currentPriceLamports <= liquidationPriceLamports) {
-          return { 
-            liquidatable: true, 
-            reason: 'price',
-            currentPrice: currentPriceLamports,
-            liquidationPrice: liquidationPriceLamports,
-            timeRemaining: loan.dueAt - currentTime
-          };
-        }
+      // Get token config for pool info
+      const tokenConfig = await this.getTokenConfig(new PublicKey(loan.tokenMint));
+      
+      // Get price (pool primary, Jupiter fallback)
+      const priceResult = await getPriceWithFallback(
+        this.connection,
+        new PublicKey(loan.tokenMint),
+        tokenConfig ? new PublicKey(tokenConfig.poolAddress) : null,
+        tokenConfig?.poolType || null,
+      );
 
-        return { 
-          liquidatable: false,
-          currentPrice: currentPriceLamports,
-          liquidationPrice: liquidationPriceLamports,
-          timeRemaining: loan.dueAt - currentTime
+      const currentPriceScaled = priceResult.priceScaled;
+      const liquidationPriceScaled = new BN(loan.liquidationPrice);
+
+      // Check liquidation condition
+      const liquidatableByPrice = isLiquidatableByPrice(
+        currentPriceScaled,
+        liquidationPriceScaled
+      );
+
+      const currentPriceInSol = convertScaledPriceToSol(currentPriceScaled);
+      const liquidationPriceInSol = convertScaledPriceToSol(liquidationPriceScaled);
+
+      if (liquidatableByPrice) {
+        return {
+          liquidatable: true,
+          reason: 'price',
+          currentPriceScaled: currentPriceScaled.toString(),
+          liquidationPriceScaled: liquidationPriceScaled.toString(),
+          currentPriceInSol,
+          liquidationPriceInSol,
+          timeRemaining,
+          priceSource: priceResult.source,
         };
       }
-    } catch (error) {
-      console.error('Error checking price liquidation:', error);
-    }
 
-    return { 
-      liquidatable: false,
-      timeRemaining: loan.dueAt - currentTime
-    };
+      return {
+        liquidatable: false,
+        currentPriceScaled: currentPriceScaled.toString(),
+        liquidationPriceScaled: liquidationPriceScaled.toString(),
+        currentPriceInSol,
+        liquidationPriceInSol,
+        timeRemaining,
+        priceSource: priceResult.source,
+      };
+
+    } catch (error: any) {
+      console.error('Error checking price liquidation:', error);
+      return {
+        liquidatable: false,
+        timeRemaining,
+        error: error.message,
+      };
+    }
+  }
+
+  /**
+   * Simple boolean check for backward compatibility
+   */
+  async isLoanLiquidatableSimple(loanPubkey: PublicKey): Promise<boolean> {
+    const result = await this.isLoanLiquidatable(loanPubkey);
+    return result.liquidatable;
   }
 
   // Enhanced liquidation risk analysis

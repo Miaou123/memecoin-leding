@@ -51,12 +51,12 @@ export default function Repay() {
       const signedTransaction = await wallet.signTransaction(transaction);
       const signature = await connection.sendRawTransaction(signedTransaction.serialize());
       
-      // Wait for confirmation
-      await connection.confirmTransaction({
-        signature,
-        blockhash,
-        lastValidBlockHeight,
-      });
+      // Wait for confirmation using the simple pattern
+      const confirmation = await connection.confirmTransaction(signature, 'confirmed');
+      
+      if (confirmation.value.err) {
+        throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
+      }
       
       // Confirm repayment in database
       const updatedLoan = await api.confirmRepayment(params.id, signature);

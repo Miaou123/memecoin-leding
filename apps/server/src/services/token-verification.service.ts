@@ -298,6 +298,7 @@ export class TokenVerificationService {
                   decimals: 6,
                   tier: 'bronze',
                   poolAddress: bondingCurve?.toString() || '', // Use bonding curve from detectLaunchpad
+                  poolType: 'PumpSwap',  // ADD THIS
                   enabled: true,
                 },
               });
@@ -323,6 +324,7 @@ export class TokenVerificationService {
               decimals: 6,
               tier: 'bronze',
               poolAddress: bondingCurve?.toString() || '', // Use bonding curve from detectLaunchpad
+              poolType: 'PumpSwap',  // ADD THIS
               enabled: true,
             },
           });
@@ -616,6 +618,7 @@ export class TokenVerificationService {
           update: {
             enabled: true,
             tier: tokenData.tier?.toLowerCase() || 'bronze',
+            poolType: 'PumpSwap',  // ADD THIS
             updatedAt: new Date(),
           },
           create: {
@@ -625,6 +628,7 @@ export class TokenVerificationService {
             decimals: 6, // PumpFun tokens use 6 decimals
             tier: tokenData.tier?.toLowerCase() || 'bronze',
             poolAddress: bondingCurve.toString(), // Store bonding curve PDA
+            poolType: 'PumpSwap',  // ADD THIS - migrated pump tokens use PumpSwap
             enabled: true,
           },
         });

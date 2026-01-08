@@ -1,7 +1,9 @@
 import { PublicKey, AccountMeta } from '@solana/web3.js';
 import BN from 'bn.js';
 
-const JUPITER_API_URL = 'https://quote-api.jup.ag/v6';
+// NEW API endpoints (January 2025)
+const JUPITER_QUOTE_API = 'https://api.jup.ag/swap/v1/quote';
+const JUPITER_SWAP_INSTRUCTIONS_API = 'https://api.jup.ag/swap/v1/swap-instructions';
 const NATIVE_SOL_MINT = 'So11111111111111111111111111111111111111112';
 
 export interface JupiterQuote {
@@ -12,15 +14,20 @@ export interface JupiterQuote {
   otherAmountThreshold: string;
   swapMode: string;
   slippageBps: number;
+  priceImpactPct: string;
   routePlan: any[];
 }
 
-export interface JupiterSwapResponse {
+export interface JupiterSwapInstructionResponse {
+  tokenLedgerInstruction?: any;
+  computeBudgetInstructions: any[];
+  setupInstructions: any[];
   swapInstruction: {
     programId: string;
     accounts: Array<{ pubkey: string; isSigner: boolean; isWritable: boolean }>;
     data: string;
   };
+  cleanupInstruction?: any;
   addressLookupTableAddresses: string[];
 }
 
@@ -30,7 +37,8 @@ export interface JupiterSwapResponse {
 export async function getJupiterQuote(
   inputMint: PublicKey,
   amount: BN,
-  slippageBps: number = 150
+  slippageBps: number = 150,
+  apiKey?: string
 ): Promise<JupiterQuote> {
   const params = new URLSearchParams({
     inputMint: inputMint.toString(),
@@ -40,39 +48,61 @@ export async function getJupiterQuote(
     swapMode: 'ExactIn',
   });
 
-  const response = await fetch(`${JUPITER_API_URL}/quote?${params}`);
+  const headers: Record<string, string> = {
+    'Accept': 'application/json',
+  };
+  if (apiKey) {
+    headers['x-api-key'] = apiKey;
+  }
+
+  const response = await fetch(`${JUPITER_QUOTE_API}?${params}`, { headers });
   
   if (!response.ok) {
-    throw new Error(`Jupiter quote failed: ${response.statusText}`);
+    const errorText = await response.text();
+    throw new Error(`Jupiter quote failed: ${response.status} - ${errorText}`);
   }
   
   return response.json() as Promise<JupiterQuote>;
 }
 
 /**
- * Get swap instruction from Jupiter
+ * Get swap instruction for CPI
  */
 export async function getJupiterSwapInstruction(
   quote: JupiterQuote,
-  userPublicKey: PublicKey
-): Promise<JupiterSwapResponse> {
-  const response = await fetch(`${JUPITER_API_URL}/swap-instructions`, {
+  userPublicKey: PublicKey,
+  apiKey?: string
+): Promise<JupiterSwapInstructionResponse> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+  if (apiKey) {
+    headers['x-api-key'] = apiKey;
+  }
+
+  const response = await fetch(JUPITER_SWAP_INSTRUCTIONS_API, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify({
       quoteResponse: quote,
       userPublicKey: userPublicKey.toString(),
       wrapAndUnwrapSol: true,
       useSharedAccounts: true,
-      asLegacyTransaction: false,
     }),
   });
 
   if (!response.ok) {
-    throw new Error(`Jupiter swap failed: ${response.statusText}`);
+    const errorText = await response.text();
+    throw new Error(`Jupiter swap instructions failed: ${response.status} - ${errorText}`);
   }
 
-  return response.json() as Promise<JupiterSwapResponse>;
+  const result = await response.json() as any;
+  
+  if (result.error) {
+    throw new Error(`Jupiter swap instructions error: ${result.error}`);
+  }
+
+  return result as JupiterSwapInstructionResponse;
 }
 
 /**
@@ -88,25 +118,26 @@ export const SLIPPAGE_ESCALATION_BPS = [
 ];
 
 /**
- * Prepare Jupiter liquidation data
+ * Prepare Jupiter liquidation data for CPI
  */
 export async function prepareJupiterLiquidation(
   tokenMint: PublicKey,
   amount: BN,
   vaultAuthority: PublicKey,
-  slippageBps: number = 300 // SECURITY: Default to 3% for first attempt
+  slippageBps: number = 300,
+  apiKey?: string
 ): Promise<{
   minSolOutput: BN;
   swapData: Buffer;
   routeAccounts: AccountMeta[];
 }> {
   // Get quote
-  const quote = await getJupiterQuote(tokenMint, amount, slippageBps);
+  const quote = await getJupiterQuote(tokenMint, amount, slippageBps, apiKey);
   
-  // Get swap instruction
-  const swapResponse = await getJupiterSwapInstruction(quote, vaultAuthority);
+  // Get swap instruction for CPI
+  const swapResponse = await getJupiterSwapInstruction(quote, vaultAuthority, apiKey);
   
-  // Extract route accounts
+  // Extract route accounts from swap instruction
   const routeAccounts: AccountMeta[] = swapResponse.swapInstruction.accounts.map(acc => ({
     pubkey: new PublicKey(acc.pubkey),
     isSigner: acc.isSigner,
@@ -124,13 +155,14 @@ export async function prepareJupiterLiquidation(
 }
 
 /**
- * SECURITY: Prepare Jupiter liquidation with retry mechanism and slippage escalation
+ * Prepare Jupiter liquidation with retry mechanism and slippage escalation
  */
 export async function prepareJupiterLiquidationWithRetry(
   tokenMint: PublicKey,
   amount: BN,
   vaultAuthority: PublicKey,
-  retryAttempt: number = 0
+  retryAttempt: number = 0,
+  apiKey?: string
 ): Promise<{
   minSolOutput: BN;
   swapData: Buffer;
@@ -148,7 +180,7 @@ export async function prepareJupiterLiquidationWithRetry(
   
   console.log(`🔄 Jupiter liquidation attempt ${retryAttempt + 1}/${maxRetries} with ${slippageBps/100}% slippage`);
   
-  const result = await prepareJupiterLiquidation(tokenMint, amount, vaultAuthority, slippageBps);
+  const result = await prepareJupiterLiquidation(tokenMint, amount, vaultAuthority, slippageBps, apiKey);
   
   return {
     ...result,

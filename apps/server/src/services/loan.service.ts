@@ -34,7 +34,7 @@ import { recordLoanExposure, recordRepayment } from './exposure-monitor.service.
 import { recordLiquidationResult } from './liquidation-tracker.service.js';
 import { PROGRAM_ID, getNetworkConfig, getCurrentNetwork } from '@memecoin-lending/config';
 import { getAdminKeypair } from '../config/keys.js';
-import { executeSwap } from './jupiter-swap.service.js';
+// import { executeSwap } from './jupiter-swap.service.js'; // Removed - liquidation swaps happen on-chain via CPI
 import { lpLimitsService } from './lp-limits.service.js';
 import { programMonitor } from './program-monitor.service.js';
 import { recordSuccessfulLoan } from './wallet-rate-limit.service.js';
@@ -708,76 +708,18 @@ class LoanService {
     // Remove from monitoring
     fastPriceMonitor.removeLiquidationThreshold(dbLoan.tokenMint, loanPubkey);
 
-    // Track liquidation result - execute Jupiter swap to convert collateral to SOL
+    // The on-chain liquidation already:
+    // 1. Verifies loan is liquidatable
+    // 2. Swaps collateral to SOL via Jupiter CPI
+    // 3. Distributes SOL to treasury/operations
+    // 4. Marks loan as liquidated
+    // 
+    // NO NEED for duplicate executeSwap() call here!
+    
+    // Track liquidation result
     try {
       const expectedRecovery = BigInt(dbLoan.solBorrowed);
-      let actualRecovery = expectedRecovery; // Default fallback
-      
-      // Execute Jupiter swap to convert seized collateral to SOL
-      console.log(`[LoanService] Executing Jupiter swap for liquidated collateral...`);
-      
-      await securityMonitor.log({
-        severity: 'MEDIUM',
-        category: 'Liquidation',
-        eventType: SECURITY_EVENT_TYPES.LIQUIDATION_SWAP_STARTED,
-        message: `Starting collateral swap for liquidated loan ${loanPubkey}`,
-        details: {
-          loanId: loanPubkey,
-          tokenMint: dbLoan.tokenMint,
-          collateralAmount: dbLoan.collateralAmount,
-          expectedRecovery: expectedRecovery.toString(),
-        },
-        source: 'loan-service',
-        txSignature,
-      });
-      
-      const swapResult = await executeSwap(
-        dbLoan.tokenMint,
-        BigInt(dbLoan.collateralAmount),
-        'liquidation', // vault address placeholder - Jupiter handles routing
-        500 // 5% slippage for liquidation
-      );
-      
-      if (swapResult.success && swapResult.outputAmount > 0n) {
-        actualRecovery = swapResult.outputAmount;
-        console.log(`[LoanService] Jupiter swap successful: ${actualRecovery} lamports recovered`);
-        
-        await securityMonitor.log({
-          severity: 'LOW',
-          category: 'Liquidation',
-          eventType: SECURITY_EVENT_TYPES.LIQUIDATION_SWAP_SUCCESS,
-          message: `Collateral swap completed for loan ${loanPubkey}`,
-          details: {
-            loanId: loanPubkey,
-            swapTxSignature: swapResult.txSignature,
-            expectedRecovery: expectedRecovery.toString(),
-            actualRecovery: actualRecovery.toString(),
-            priceImpactPct: swapResult.priceImpactPct,
-          },
-          source: 'loan-service',
-          txSignature: swapResult.txSignature,
-        });
-      } else {
-        console.warn(`[LoanService] Jupiter swap failed: ${swapResult.error}`);
-        
-        await securityMonitor.log({
-          severity: 'HIGH',
-          category: 'Liquidation',
-          eventType: SECURITY_EVENT_TYPES.LIQUIDATION_SWAP_FAILED,
-          message: `Collateral swap failed for loan ${loanPubkey}: ${swapResult.error}`,
-          details: {
-            loanId: loanPubkey,
-            tokenMint: dbLoan.tokenMint,
-            collateralAmount: dbLoan.collateralAmount,
-            error: swapResult.error,
-          },
-          source: 'loan-service',
-          txSignature,
-        });
-        
-        // Use expected recovery as fallback when swap fails
-        console.log(`[LoanService] Using expected recovery as fallback: ${expectedRecovery} lamports`);
-      }
+      const actualRecovery = expectedRecovery; // The on-chain program handles the actual swap
       
       await recordLiquidationResult(
         dbLoan.id,
@@ -793,7 +735,7 @@ class LoanService {
       recordRepayment(
         dbLoan.tokenMint,
         BigInt(dbLoan.collateralAmount),
-        actualRecovery // Use actual recovery amount
+        actualRecovery
       );
     } catch (error: any) {
       console.error('[LoanService] Failed to record liquidation result:', error.message);

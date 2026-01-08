@@ -75,7 +75,9 @@ export interface DeploymentConfig {
  */
 function getDeploymentPath(network: string): string {
   const deploymentsDir = path.join(ROOT_DIR, 'deployments');
-  return path.join(deploymentsDir, `${network}-latest.json`);
+  // Map mainnet-beta to mainnet for file naming
+  const fileName = network === 'mainnet-beta' ? 'mainnet' : network;
+  return path.join(deploymentsDir, `${fileName}-latest.json`);
 }
 
 /**

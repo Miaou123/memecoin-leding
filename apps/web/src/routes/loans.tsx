@@ -7,11 +7,20 @@ import { LoanCard } from '@/components/loans/LoanCard';
 import { formatSOL } from '@/lib/utils';
 import { api } from '@/lib/api';
 import { LoanStatus } from '@memecoin-lending/types';
+import { useOnChainLoans } from '@/hooks/useOnChainLoansSolid';
+import { createConnection } from '@/utils/rpc';
 
 export default function Loans() {
   const wallet = useWallet();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = createSignal<'active' | 'history'>('active');
+  const [hasSynced, setHasSynced] = createSignal(false);
+  
+  // Create connection instance
+  const connection = createConnection();
+  
+  // Use on-chain loans hook
+  const { fetchAndSync, syncResult, isLoading: isSyncingChain } = useOnChainLoans(connection);
   
   const userLoans = createQuery(() => ({
     queryKey: ['user-loans', wallet.publicKey()?.toString()],
@@ -46,6 +55,38 @@ export default function Loans() {
       loan.status === LoanStatus.LiquidatedTime || 
       loan.status === LoanStatus.LiquidatedPrice
     );
+  });
+  
+  // Sync on-chain loans when wallet connects or backend loans are fetched
+  createEffect(() => {
+    const publicKey = wallet.publicKey();
+    const backendLoans = userLoans.data;
+    const alreadySynced = hasSynced();
+    const isBackendLoading = userLoans.isLoading;
+    
+    // Only sync if:
+    // 1. Wallet is connected
+    // 2. Backend loans have loaded
+    // 3. We haven't synced yet this session
+    // 4. Not currently syncing
+    if (publicKey && backendLoans && !alreadySynced && !isBackendLoading && !isSyncingChain()) {
+      console.log('[Loans] Starting one-time sync...');
+      setHasSynced(true); // Mark BEFORE calling to prevent duplicates
+      
+      fetchAndSync(backendLoans).then((result) => {
+        if (result?.synced && result.synced > 0) {
+          console.log(`[Loans] Synced ${result.synced} loans from chain`);
+          userLoans.refetch();
+        }
+      });
+    }
+  });
+  
+  // Reset sync flag when wallet disconnects
+  createEffect(() => {
+    if (!wallet.connected()) {
+      setHasSynced(false);
+    }
   });
   
   // Auto-refresh every 30 seconds
@@ -95,6 +136,15 @@ export default function Loans() {
       </Show>
       
       <Show when={wallet.connected()}>
+        {/* Sync Notification */}
+        <Show when={syncResult() && syncResult()!.synced > 0}>
+          <div class="bg-accent-green/20 border border-accent-green p-4 mb-4">
+            <div class="text-accent-green font-mono">
+              ✅ [LOANS_SYNCED]: Found and synced {syncResult()!.synced} loan(s) from blockchain
+            </div>
+          </div>
+        </Show>
+        
         {/* Stats Bar */}
         <Show when={userStats.data}>
           <div class="grid grid-cols-1 md:grid-cols-4 gap-4">

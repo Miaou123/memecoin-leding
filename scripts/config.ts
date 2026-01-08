@@ -23,8 +23,11 @@ import { loadDeployment } from './deployment-store.js';
  * Priority: 1. deployments/{network}-latest.json 2. Anchor.toml 3. Error
  */
 export function getProgramId(network: string): string {
+  // Map mainnet-beta to mainnet for consistency
+  const normalizedNetwork = network === 'mainnet-beta' ? 'mainnet' : network;
+  
   // First check: deployment artifacts
-  const deployment = loadDeployment(network);
+  const deployment = loadDeployment(normalizedNetwork);
   if (deployment?.programId) {
     return deployment.programId;
   }
@@ -34,7 +37,9 @@ export function getProgramId(network: string): string {
   if (fs.existsSync(anchorTomlPath)) {
     try {
       const anchorConfig = toml.parse(fs.readFileSync(anchorTomlPath, 'utf8'));
-      const programId = anchorConfig.programs?.[network]?.memecoin_lending;
+      // Try both original network and normalized
+      const programId = anchorConfig.programs?.[network]?.memecoin_lending || 
+                        anchorConfig.programs?.[normalizedNetwork]?.memecoin_lending;
       if (programId) {
         return programId;
       }
@@ -67,6 +72,7 @@ export function getRpcUrl(network: string): string {
   // Fallback: default URLs
   const defaultUrls: Record<string, string> = {
     mainnet: 'https://api.mainnet-beta.solana.com',
+    'mainnet-beta': 'https://api.mainnet-beta.solana.com',
     devnet: 'https://api.devnet.solana.com',
     localnet: 'http://127.0.0.1:8899',
     localhost: 'http://127.0.0.1:8899',
@@ -119,7 +125,7 @@ export function getNetworkConfig(network: string) {
  * Validate network parameter
  */
 export function validateNetwork(network: string): void {
-  const validNetworks = ['mainnet', 'devnet', 'localnet', 'localhost'];
+  const validNetworks = ['mainnet', 'mainnet-beta', 'devnet', 'localnet', 'localhost'];
   if (!validNetworks.includes(network)) {
     throw new Error(
       `❌ Invalid network: ${network}\n` +
