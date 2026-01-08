@@ -27,7 +27,7 @@ pub const MAX_PRICE_DEVIATION_BPS: u64 = 500; // 5%
 
 // === PRICE CONSTANTS ===
 /// Price scaling factor (10^9 for lamport precision)
-pub const PRICE_SCALE: u128 = 1_000_000_000;
+pub const PRICE_SCALE: u128 = 1_000_000;
 
 /// Price scaling for calculations (10^6)
 pub const PRICE_PRECISION: u64 = 1_000_000;
@@ -202,6 +202,7 @@ impl LoanCalculator {
         let loan_amount = collateral_u128
             .checked_mul(price_u128).ok_or(LendingError::MathOverflow)?
             .checked_mul(ltv_u128).ok_or(LendingError::MathOverflow)?
+            .checked_mul(1000).ok_or(LendingError::MathOverflow)?
             .checked_div(PRICE_SCALE).ok_or(LendingError::DivisionByZero)?
             .checked_div(bps_divisor_u128).ok_or(LendingError::DivisionByZero)?;
         

@@ -207,10 +207,11 @@ pub fn create_loan_handler(
     
     // FIX 6: Validate minimum collateral value
     let collateral_value = SafeMath::mul_div(
-        collateral_amount,
+        collateral_amount * 1000,
         current_price,
         PRICE_SCALE as u64,
     )?;
+
     require!(
         collateral_value >= MIN_COLLATERAL_VALUE_LAMPORTS,
         LendingError::CollateralValueTooLow
