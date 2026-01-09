@@ -2,6 +2,7 @@ use anchor_lang::prelude::*;
 use anchor_spl::token_interface::Mint;
 use crate::state::*;
 use crate::error::LendingError;
+use crate::utils::PumpSwapPoolValidator;
 
 #[derive(Accounts)]
 #[instruction(tier: u8)]
@@ -24,6 +25,10 @@ pub struct WhitelistToken<'info> {
     pub token_config: Account<'info, TokenConfig>,
 
     pub token_mint: InterfaceAccount<'info, Mint>,
+
+    /// Pool account - optional, only validated if pool_type is PumpSwap
+    /// CHECK: Validated in handler if present and pool_type is PumpSwap
+    pub pool_account: Option<UncheckedAccount<'info>>,
 
     #[account(mut)]
     pub admin: Signer<'info>,
@@ -70,6 +75,37 @@ pub fn whitelist_token_handler(
     // Validate pool address
     if pool_address == Pubkey::default() {
         return Err(LendingError::InvalidPoolAddress.into());
+    }
+
+    // Optional: Validate PumpSwap pool if pool_type is PumpSwap and pool_account is provided
+    if pool_type == PoolType::PumpSwap {
+        if let Some(pool_account_info) = &ctx.accounts.pool_account {
+            // Validate pool account matches the provided address
+            require!(
+                pool_account_info.key == &pool_address,
+                LendingError::InvalidPoolAddress
+            );
+            
+            // Perform full validation
+            match PumpSwapPoolValidator::validate_full(
+                pool_account_info,
+                &ctx.accounts.token_mint.key(),
+            ) {
+                Ok((base_vault, quote_vault)) => {
+                    msg!("PumpSwap pool validated during whitelisting");
+                    msg!("Base vault: {}", base_vault);
+                    msg!("Quote vault: {}", quote_vault);
+                },
+                Err(e) => {
+                    msg!("WARNING: PumpSwap pool validation failed: {:?}", e);
+                    msg!("Pool may have invalid structure or incorrect token mint");
+                    return Err(e);
+                }
+            }
+        } else {
+            msg!("WARNING: PumpSwap pool account not provided for validation");
+            msg!("Pool will be validated during loan creation");
+        }
     }
 
     // Validate loan amounts

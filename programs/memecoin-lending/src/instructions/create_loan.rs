@@ -1,7 +1,6 @@
 use anchor_lang::prelude::*;
 use anchor_lang::system_program;
-use anchor_spl::token::{self, Transfer};
-use anchor_spl::token_interface::{TokenAccount, Mint, TokenInterface};
+use anchor_spl::token_interface::{self, TransferChecked, TokenAccount, Mint, TokenInterface};
 use crate::state::*;
 use crate::error::LendingError;
 use crate::utils::*;
@@ -128,6 +127,33 @@ pub fn create_loan_handler(
         token_config.pool_type != PoolType::Pumpfun,
         LendingError::PumpfunNotMigrated
     );
+
+    // Validate PumpSwap pool if pool_type is PumpSwap
+    if token_config.pool_type == PoolType::PumpSwap {
+        let (validated_base_vault, validated_quote_vault) = PumpSwapPoolValidator::validate_full(
+            &ctx.accounts.pool_account,
+            &ctx.accounts.token_mint.key(),
+        )?;
+        
+        // Verify the vault accounts passed match the ones in the pool
+        let base_vault_info = ctx.accounts.pumpswap_base_vault
+            .as_ref()
+            .ok_or(LendingError::MissingPumpSwapVaults)?;
+        let quote_vault_info = ctx.accounts.pumpswap_quote_vault
+            .as_ref()
+            .ok_or(LendingError::MissingPumpSwapVaults)?;
+        
+        require!(
+            base_vault_info.key == &validated_base_vault,
+            LendingError::InvalidPumpSwapVault
+        );
+        require!(
+            quote_vault_info.key == &validated_quote_vault,
+            LendingError::InvalidPumpSwapVault
+        );
+        
+        msg!("PumpSwap pool validated: base_mint and quote_mint verified");
+    }
 
     // ============================================================
     // SECURITY: Verify backend-approved price
@@ -303,13 +329,14 @@ pub fn create_loan_handler(
     // Use transfer for both SPL Token and Token-2022
     let transfer_ctx = CpiContext::new(
         ctx.accounts.token_program.to_account_info(),
-        Transfer {
+        TransferChecked {
             from: ctx.accounts.borrower_token_account.to_account_info(),
             to: ctx.accounts.vault.to_account_info(),
             authority: ctx.accounts.borrower.to_account_info(),
+            mint: ctx.accounts.token_mint.to_account_info(),
         },
     );
-    token::transfer(transfer_ctx, collateral_amount)?;
+    token_interface::transfer_checked(transfer_ctx, collateral_amount, ctx.accounts.token_mint.decimals)?;
 
     // Transfer SOL from treasury to borrower using CPI with PDA signer
     let treasury_bump = ctx.bumps.treasury;

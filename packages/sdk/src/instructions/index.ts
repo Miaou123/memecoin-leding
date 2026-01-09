@@ -10,6 +10,7 @@ import {
 } from '@solana/web3.js';
 import {
   TOKEN_PROGRAM_ID,
+  TOKEN_2022_PROGRAM_ID,
   ASSOCIATED_TOKEN_PROGRAM_ID,
   getAssociatedTokenAddress,
 } from '@solana/spl-token';
@@ -24,6 +25,19 @@ import {
 } from '../pumpfun';
 
 const JUPITER_V6_PROGRAM_ID = new PublicKey('JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4');
+
+async function getTokenProgramForMint(
+  connection: Connection,
+  mint: PublicKey
+): Promise<PublicKey> {
+  const mintInfo = await connection.getAccountInfo(mint);
+  if (!mintInfo) {
+    throw new Error('Mint account not found');
+  }
+  return mintInfo.owner.equals(TOKEN_2022_PROGRAM_ID) 
+    ? TOKEN_2022_PROGRAM_ID 
+    : TOKEN_PROGRAM_ID;
+}
 
 export async function initializeProtocol(
   program: Program,
@@ -200,9 +214,17 @@ export async function buildRepayLoanTransaction(
     program.programId
   );
   
+  // Get token program for the mint
+  const tokenProgramId = await getTokenProgramForMint(
+    program.provider.connection,
+    tokenMint
+  );
+  
   const borrowerTokenAccount = await getAssociatedTokenAddress(
     tokenMint,
-    borrower
+    borrower,
+    false,
+    tokenProgramId
   );
 
   // Fetch protocol state to get operations wallet
@@ -225,7 +247,7 @@ export async function buildRepayLoanTransaction(
       borrowerTokenAccount,
       vaultTokenAccount,
       tokenMint,
-      tokenProgram: TOKEN_PROGRAM_ID,
+      tokenProgram: tokenProgramId,
       systemProgram: SystemProgram.programId,
     })
     .transaction();
@@ -333,9 +355,17 @@ export async function repayLoan(
     program.programId
   );
   
+  // Get token program for the mint
+  const tokenProgramId = await getTokenProgramForMint(
+    program.provider.connection,
+    tokenMint
+  );
+  
   const borrowerTokenAccount = await getAssociatedTokenAddress(
     tokenMint,
-    borrower
+    borrower,
+    false,
+    tokenProgramId
   );
 
   // Fetch protocol state to get operations wallet
@@ -358,7 +388,7 @@ export async function repayLoan(
       borrowerTokenAccount,
       vaultTokenAccount,
       tokenMint,
-      tokenProgram: TOKEN_PROGRAM_ID,
+      tokenProgram: tokenProgramId,
       systemProgram: SystemProgram.programId,
     })
     .rpc();
@@ -400,6 +430,12 @@ export async function liquidate(
     program.programId
   );
 
+  // Get token program for the mint
+  const tokenProgramId = await getTokenProgramForMint(
+    program.provider.connection,
+    tokenMint
+  );
+
   return program.methods
     .liquidate(minSolOutput, null) // Legacy parameters
     .accounts({
@@ -413,7 +449,7 @@ export async function liquidate(
       tokenMint,
       poolAccount,
       payer: program.provider.publicKey!,
-      tokenProgram: TOKEN_PROGRAM_ID,
+      tokenProgram: tokenProgramId,
       associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
       systemProgram: SystemProgram.programId,
     })

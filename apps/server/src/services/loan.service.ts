@@ -795,6 +795,18 @@ class LoanService {
       where: { id: params.tokenMint },
     });
     
+    // Check if loan already exists in database
+    const existingLoan = await prisma.loan.findUnique({
+      where: { id: loanPubkey },
+      include: { token: true },
+    });
+    
+    if (existingLoan) {
+      // Loan already tracked, return existing record
+      console.log(`[LoanService] Loan ${loanPubkey} already tracked, returning existing record`);
+      return existingLoan;
+    }
+    
     // Create database record
     const dbLoan = await prisma.loan.create({
       data: {

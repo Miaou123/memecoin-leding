@@ -94,13 +94,16 @@ export function useWalletPumpTokens(): UseWalletPumpTokensResult {
         // Debug individual tokens
         console.log(`Token: ${mint.slice(0,8)}... | Balance: ${balance} | isPump: ${isPump} | decimals: ${tokenAmount.decimals} | uiAmount: ${tokenAmount.uiAmountString || tokenAmount.uiAmount}`);
 
-        // Check if this is a PumpFun token (include all, even with 0 balance)
+        // Check if this is a PumpFun token (filter out dust amounts)
         if (isPump) {
           const decimals = tokenAmount.decimals;
           const uiAmount = tokenAmount.uiAmountString || tokenAmount.uiAmount?.toString() || '0';
           
-          if (balance === '0') {
-            console.log(`Including PumpFun token with 0 balance: ${mint}`);
+          // Filter out tokens with less than 1 whole token (dust amounts)
+          const uiBalance = parseFloat(uiAmount);
+          if (uiBalance < 1) {
+            console.log(`Skipping PumpFun token with dust balance: ${mint} (${uiAmount})`);
+            continue;
           }
           
           pumpTokens.push({

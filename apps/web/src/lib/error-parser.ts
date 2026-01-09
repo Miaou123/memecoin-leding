@@ -757,7 +757,31 @@ export function parseError(error: Error | string): ParsedError {
     };
   }
   
-  if (errorString.includes('insufficient funds') || errorString.includes('Insufficient')) {
+  // Check for insufficient token balance (from our validation)
+  if (errorString.includes('Insufficient token balance')) {
+    // Extract the balance info from our custom error message
+    const match = errorString.match(/You have ([\d.]+) tokens but are trying to use ([\d.]+)/);
+    if (match) {
+      return {
+        code: 'INSUFFICIENT_TOKENS',
+        name: 'InsufficientTokens',
+        title: 'INSUFFICIENT_TOKENS',
+        description: `You have ${match[1]} tokens but are trying to use ${match[2]} as collateral.`,
+        suggestion: 'Reduce the collateral amount or add more tokens to your wallet.',
+        severity: 'warning',
+      };
+    }
+    return {
+      code: 'INSUFFICIENT_TOKENS',
+      name: 'InsufficientTokens', 
+      title: 'INSUFFICIENT_TOKENS',
+      description: 'You don\'t have enough tokens for this transaction.',
+      suggestion: 'Check your token balance and reduce the collateral amount.',
+      severity: 'warning',
+    };
+  }
+  
+  if (errorString.includes('insufficient funds') || (errorString.includes('Insufficient') && !errorString.includes('token'))) {
     return {
       code: 'INSUFFICIENT_SOL',
       name: 'InsufficientSOL',

@@ -168,7 +168,7 @@ export async function prepareLoanTransaction(
     }
     throw error;
   }
-  const poolAddress = tokenConfig.poolAddress;
+  let poolAddress = tokenConfig.poolAddress;
 
   // Detect token program (SPL Token vs Token-2022)
   const tokenProgramId = await getTokenProgramForMint(connection, tokenMint);

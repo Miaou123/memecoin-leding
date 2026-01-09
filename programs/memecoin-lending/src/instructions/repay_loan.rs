@@ -1,7 +1,6 @@
 use anchor_lang::prelude::*;
 use anchor_lang::system_program;
-use anchor_spl::token::{self, Transfer};
-use anchor_spl::token_interface::{TokenAccount, Mint, TokenInterface};
+use anchor_spl::token_interface::{self, TransferChecked, TokenAccount, Mint, TokenInterface};
 use crate::state::*;
 use crate::error::LendingError;
 use crate::utils::*;
@@ -211,14 +210,15 @@ pub fn repay_loan_handler(ctx: Context<RepayLoan>) -> Result<()> {
 
     let transfer_ctx = CpiContext::new_with_signer(
         ctx.accounts.token_program.to_account_info(),
-        Transfer {
+        TransferChecked {
             from: ctx.accounts.vault_token_account.to_account_info(),
             to: ctx.accounts.borrower_token_account.to_account_info(),
             authority: ctx.accounts.loan.to_account_info(),
+            mint: ctx.accounts.token_mint.to_account_info(),
         },
         loan_signer_seeds,
     );
-    token::transfer(transfer_ctx, collateral_amount)?;
+    token_interface::transfer_checked(transfer_ctx, collateral_amount, ctx.accounts.token_mint.decimals)?;
 
     // Update protocol state
     protocol_state.total_sol_borrowed = SafeMath::sub(

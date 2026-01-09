@@ -171,8 +171,8 @@ pub enum LendingError {
     #[msg("Invalid split")]
     InvalidFeeSplit = 6055,
 
-    #[msg("Invalid data")]
-    InvalidPoolData = 6056,
+    #[msg("Invalid exchange data")]
+    InvalidExchangeData = 6056,
 
     #[msg("Disabled")]
     FeatureTemporarilyDisabled = 6057,
@@ -269,4 +269,16 @@ pub enum LendingError {
 
     #[msg("Invalid PumpSwap vault address")]
     InvalidPumpSwapVault = 6096,
+
+    #[msg("Invalid pool owner - must be PumpSwap program")]
+    InvalidPoolOwner = 6097,
+
+    #[msg("Pool token mismatch - base_mint doesn't match expected token")]
+    PoolTokenMismatch = 6098,
+
+    #[msg("Invalid quote mint - must be WSOL")]
+    InvalidQuoteMint = 6099,
+
+    #[msg("Invalid pool data structure")]
+    InvalidPoolData = 6100,
 }

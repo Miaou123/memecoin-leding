@@ -116,6 +116,14 @@ export default function Borrow() {
       const tokenDecimals = 6; // PumpFun tokens use 6 decimals
       const rawCollateralAmount = (parseFloat(collateralAmount() || '0') * Math.pow(10, tokenDecimals)).toString();
       
+      // Check if user has sufficient balance
+      const userBalance = tokenBalance.balance();
+      if (!userBalance || BigInt(userBalance) < BigInt(rawCollateralAmount)) {
+        const userBalanceUI = userBalance ? (parseInt(userBalance) / Math.pow(10, tokenDecimals)).toFixed(2) : '0';
+        const requestedUI = collateralAmount();
+        throw new Error(`Insufficient token balance. You have ${userBalanceUI} tokens but are trying to use ${requestedUI} as collateral.`);
+      }
+      
       const connection = createConnection();
       
       // Use the new backend-signed transaction flow

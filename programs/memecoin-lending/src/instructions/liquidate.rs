@@ -1,11 +1,11 @@
 use anchor_lang::prelude::*;
-use anchor_spl::token::{self, CloseAccount};
-use anchor_spl::token_interface::{TokenAccount, Mint, TokenInterface};
+use anchor_spl::token_interface::{self, CloseAccount, TokenAccount, Mint, TokenInterface};
 use anchor_spl::associated_token::AssociatedToken;
 use crate::state::*;
 use crate::error::LendingError;
 use crate::utils::*;
 use crate::swap::jupiter::execute_jupiter_swap;
+use anchor_lang::solana_program::pubkey;
 
 /// Fee split constants
 const OPERATIONS_SPLIT_BPS: u64 = 500; // 5%
@@ -127,6 +127,33 @@ pub fn liquidate_handler<'info>(
     let token_mint_key = ctx.accounts.loan.token_mint;
     
     let loan = &mut ctx.accounts.loan;
+
+    // Validate PumpSwap pool if pool_type is PumpSwap
+    if token_config.pool_type == PoolType::PumpSwap {
+        let (validated_base_vault, validated_quote_vault) = PumpSwapPoolValidator::validate_full(
+            &ctx.accounts.pool_account,
+            &token_mint_key,
+        )?;
+        
+        // Verify the vault accounts passed match the ones in the pool
+        let base_vault_info = ctx.accounts.pumpswap_base_vault
+            .as_ref()
+            .ok_or(LendingError::MissingPumpSwapVaults)?;
+        let quote_vault_info = ctx.accounts.pumpswap_quote_vault
+            .as_ref()
+            .ok_or(LendingError::MissingPumpSwapVaults)?;
+        
+        require!(
+            base_vault_info.key == &validated_base_vault,
+            LendingError::InvalidPumpSwapVault
+        );
+        require!(
+            quote_vault_info.key == &validated_quote_vault,
+            LendingError::InvalidPumpSwapVault
+        );
+        
+        msg!("PumpSwap pool validated: base_mint and quote_mint verified");
+    }
 
     // === Step 1: Verify loan is liquidatable ===
     
@@ -305,7 +332,7 @@ pub fn liquidate_handler<'info>(
         },
         vault_signer,
     );
-    token::close_account(close_ctx)?;
+    token_interface::close_account(close_ctx)?;
 
     // === Step 6: Update protocol state ===
     

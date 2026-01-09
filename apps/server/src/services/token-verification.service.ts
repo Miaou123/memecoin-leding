@@ -249,6 +249,9 @@ export class TokenVerificationService {
       }
 
       console.log(`[TokenVerification] Pool validated: ${poolValidation.poolBalance?.baseTokenPercent.toFixed(1)}% token / ${poolValidation.poolBalance?.quoteTokenPercent.toFixed(1)}% ${poolValidation.poolBalance?.quoteToken}`);
+      if (poolValidation.symbol || poolValidation.name) {
+        console.log(`[TokenVerification] DexScreener metadata: ${poolValidation.symbol} - ${poolValidation.name}`);
+      }
 
       // 6. Check if already on-chain
       const isOnChain = await this.isTokenOnChain(mint);
@@ -269,6 +272,8 @@ export class TokenVerificationService {
             verifiedAt: Date.now(),
             isWhitelisted: false,
             poolBalance: poolValidation.poolBalance,
+            symbol: poolValidation.symbol,
+            name: poolValidation.name,
           });
           console.log(`[TokenVerification] Auto-whitelisted ${mint.substring(0, 8)}...`);
         } catch (error: any) {
@@ -288,14 +293,14 @@ export class TokenVerificationService {
                 where: { id: mint },
                 update: { 
                   enabled: true,
-                  symbol: metadata?.symbol || 'PUMP',
-                  name: metadata?.name || 'PumpFun Token',
+                  symbol: metadata?.symbol || poolValidation.symbol || 'PUMP',
+                  name: metadata?.name || poolValidation.name || 'PumpFun Token',
                   imageUrl: metadata?.image,
                 },
                 create: {
                   id: mint,
-                  symbol: metadata?.symbol || 'PUMP',
-                  name: metadata?.name || 'PumpFun Token',
+                  symbol: metadata?.symbol || poolValidation.symbol || 'PUMP',
+                  name: metadata?.name || poolValidation.name || 'PumpFun Token',
                   decimals: 6,
                   tier: 'bronze',
                   poolAddress: bondingCurve?.toString() || '', // Use bonding curve from detectLaunchpad
@@ -322,14 +327,14 @@ export class TokenVerificationService {
             where: { id: mint },
             update: { 
               enabled: true,
-              symbol: metadata?.symbol || 'PUMP',
-              name: metadata?.name || 'PumpFun Token',
+              symbol: metadata?.symbol || poolValidation.symbol || 'PUMP',
+              name: metadata?.name || poolValidation.name || 'PumpFun Token',
               imageUrl: metadata?.image,
             },
             create: {
               id: mint,
-              symbol: metadata?.symbol || 'PUMP',
-              name: metadata?.name || 'PumpFun Token',
+              symbol: metadata?.symbol || poolValidation.symbol || 'PUMP',
+              name: metadata?.name || poolValidation.name || 'PumpFun Token',
               decimals: 6,
               tier: 'bronze',
               poolAddress: bondingCurve?.toString() || '', // Use bonding curve from detectLaunchpad
@@ -625,6 +630,7 @@ export class TokenVerificationService {
           protocolState,
           tokenConfig,
           tokenMint: mintPubkey,
+          poolAccount: poolAddress,  // Add the pool account for validation
           admin: this.adminKeypair.publicKey,
           systemProgram: SystemProgram.programId,
           rent: SYSVAR_RENT_PUBKEY,
@@ -648,8 +654,8 @@ export class TokenVerificationService {
           },
           create: {
             id: mint,
-            symbol: tokenData.symbol || 'PUMP',
-            name: tokenData.name || 'PumpFun Token',
+            symbol: tokenData.symbol || metadata?.symbol || 'PUMP',
+            name: tokenData.name || metadata?.name || 'PumpFun Token',
             decimals: 6, // PumpFun tokens use 6 decimals
             tier: tokenData.tier?.toLowerCase() || 'bronze',
             poolAddress: poolAddress.toString(), // Store actual pool address
@@ -689,38 +695,18 @@ export class TokenVerificationService {
    * Check if a PumpFun token has graduated (completed bonding curve)
    */
   private async checkPumpFunGraduation(mint: string): Promise<{ isGraduated: boolean; dexType: 'pumpfun' | 'pumpswap' | 'raydium' }> {
-    try {
-      if (!this.pumpSdk) {
-        console.warn('[TokenVerification] PumpFun SDK not initialized, falling back to DexScreener');
-        const dexType = await this.detectMigratedDex(mint);
-        return { isGraduated: dexType !== 'pumpfun', dexType };
-      }
-
-      const mintPubkey = new PublicKey(mint);
-      
-      // Check bonding curve account
-      try {
-        const bondingCurveAccount = await this.pumpSdk.getBondingCurveAccount(mintPubkey);
-        
-        if (bondingCurveAccount && bondingCurveAccount.complete === true) {
-          console.log(`[TokenVerification] Token ${mint.substring(0, 8)}... has graduated from bonding curve`);
-          // Check which DEX it migrated to
-          const dexType = await this.detectMigratedDex(mint);
-          return { isGraduated: true, dexType };
-        } else {
-          console.log(`[TokenVerification] Token ${mint.substring(0, 8)}... still on bonding curve`);
-          return { isGraduated: false, dexType: 'pumpfun' };
-        }
-      } catch (error: any) {
-        console.warn(`[TokenVerification] Failed to get bonding curve for ${mint.substring(0, 8)}...:`, error.message);
-        // Fall back to DexScreener check
-        const dexType = await this.detectMigratedDex(mint);
-        return { isGraduated: dexType !== 'pumpfun', dexType };
-      }
-    } catch (error) {
-      console.error(`[TokenVerification] Error checking graduation for ${mint.substring(0, 8)}...:`, error);
-      return { isGraduated: false, dexType: 'pumpfun' };
+    // Just use DexScreener to detect graduation
+    // The SDK method getBondingCurveAccount is unreliable/doesn't exist
+    const dexType = await this.detectMigratedDex(mint);
+    const isGraduated = dexType !== 'pumpfun';
+    
+    if (isGraduated) {
+      console.log(`[TokenVerification] Token ${mint.substring(0, 8)}... has graduated to ${dexType}`);
+    } else {
+      console.log(`[TokenVerification] Token ${mint.substring(0, 8)}... still on PumpFun bonding curve`);
     }
+    
+    return { isGraduated, dexType };
   }
 
   /**
@@ -741,22 +727,22 @@ export class TokenVerificationService {
       const data = await response.json() as DexScreenerResponse;
       
       if (data.pairs && data.pairs.length > 0) {
-        // Check for Raydium pools
-        const hasRaydium = data.pairs.some(pair => 
-          pair.dexId === 'raydium' && pair.liquidity?.usd && pair.liquidity.usd > 100
-        );
-        if (hasRaydium) {
-          console.log(`[TokenVerification] Found Raydium pool for ${mint.substring(0, 8)}...`);
-          return 'raydium';
-        }
-
-        // Check for PumpSwap pools
+        // Check for PumpSwap pools FIRST (preferred for graduated PumpFun tokens)
         const hasPumpSwap = data.pairs.some(pair => 
           pair.dexId === 'pumpswap' && pair.liquidity?.usd && pair.liquidity.usd > 100
         );
         if (hasPumpSwap) {
           console.log(`[TokenVerification] Found PumpSwap pool for ${mint.substring(0, 8)}...`);
           return 'pumpswap';
+        }
+
+        // Check for Raydium pools second
+        const hasRaydium = data.pairs.some(pair => 
+          pair.dexId === 'raydium' && pair.liquidity?.usd && pair.liquidity.usd > 100
+        );
+        if (hasRaydium) {
+          console.log(`[TokenVerification] Found Raydium pool for ${mint.substring(0, 8)}...`);
+          return 'raydium';
         }
       }
 

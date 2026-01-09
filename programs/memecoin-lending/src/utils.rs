@@ -2,6 +2,7 @@ use anchor_lang::prelude::*;
 use anchor_spl::token::TokenAccount;
 use crate::error::LendingError;
 use crate::state::*;
+use anchor_lang::solana_program::pubkey;
 
 /// Reentrancy guard utilities
 pub struct ReentrancyGuard;
@@ -95,6 +96,15 @@ pub const PUMPFUN_MIN_DATA_LEN: usize = 24;
 // pool_base_token_account: Pubkey (offset 139)
 // pool_quote_token_account: Pubkey (offset 171)
 // lp_supply: u64 (offset 203)
+
+// Add PumpSwap program constants
+pub const PUMPSWAP_PROGRAM_ID: Pubkey = pubkey!("pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA");
+pub const WSOL_MINT: Pubkey = pubkey!("So11111111111111111111111111111111111111112");
+
+// Pool layout offsets (verified from actual on-chain data)
+pub const PUMPSWAP_POOL_DISCRIMINATOR: [u8; 8] = [241, 154, 109, 4, 17, 177, 109, 188];
+pub const PUMPSWAP_POOL_BASE_MINT_OFFSET: usize = 43;
+pub const PUMPSWAP_POOL_QUOTE_MINT_OFFSET: usize = 75;
 pub const PUMPSWAP_POOL_BASE_VAULT_OFFSET: usize = 139;
 pub const PUMPSWAP_POOL_QUOTE_VAULT_OFFSET: usize = 171;
 pub const PUMPSWAP_POOL_MIN_LEN: usize = 211;
@@ -714,5 +724,110 @@ impl ExposureCalculator {
             return Ok(0);
         }
         SafeMath::sub(max_exposure, current_exposure)
+    }
+}
+
+/// Validate a PumpSwap pool account
+pub struct PumpSwapPoolValidator;
+
+impl PumpSwapPoolValidator {
+    /// Validate pool owner is PumpSwap program
+    pub fn validate_owner(pool_account: &AccountInfo) -> Result<()> {
+        require!(
+            pool_account.owner == &PUMPSWAP_PROGRAM_ID,
+            LendingError::InvalidPoolOwner
+        );
+        Ok(())
+    }
+
+    /// Validate pool discriminator
+    pub fn validate_discriminator(pool_data: &[u8]) -> Result<()> {
+        require!(
+            pool_data.len() >= 8,
+            LendingError::InvalidPoolData
+        );
+        require!(
+            pool_data[0..8] == PUMPSWAP_POOL_DISCRIMINATOR,
+            LendingError::InvalidPoolData
+        );
+        Ok(())
+    }
+
+    /// Validate pool's base_mint matches expected token
+    pub fn validate_base_mint(pool_data: &[u8], expected_mint: &Pubkey) -> Result<()> {
+        require!(
+            pool_data.len() >= PUMPSWAP_POOL_BASE_MINT_OFFSET + 32,
+            LendingError::InvalidPoolData
+        );
+        
+        let pool_base_mint = Pubkey::try_from(
+            &pool_data[PUMPSWAP_POOL_BASE_MINT_OFFSET..PUMPSWAP_POOL_BASE_MINT_OFFSET + 32]
+        ).map_err(|_| LendingError::InvalidPoolData)?;
+        
+        require!(
+            pool_base_mint == *expected_mint,
+            LendingError::PoolTokenMismatch
+        );
+        Ok(())
+    }
+
+    /// Validate pool's quote_mint is WSOL
+    pub fn validate_quote_mint(pool_data: &[u8]) -> Result<()> {
+        require!(
+            pool_data.len() >= PUMPSWAP_POOL_QUOTE_MINT_OFFSET + 32,
+            LendingError::InvalidQuoteMint
+        );
+        
+        let pool_quote_mint = Pubkey::try_from(
+            &pool_data[PUMPSWAP_POOL_QUOTE_MINT_OFFSET..PUMPSWAP_POOL_QUOTE_MINT_OFFSET + 32]
+        ).map_err(|_| LendingError::InvalidPoolData)?;
+        
+        require!(
+            pool_quote_mint == WSOL_MINT,
+            LendingError::InvalidQuoteMint
+        );
+        Ok(())
+    }
+
+    /// Extract vault addresses from pool data
+    pub fn extract_vaults(pool_data: &[u8]) -> Result<(Pubkey, Pubkey)> {
+        require!(
+            pool_data.len() >= PUMPSWAP_POOL_QUOTE_VAULT_OFFSET + 32,
+            LendingError::InvalidPoolData
+        );
+        
+        let base_vault = Pubkey::try_from(
+            &pool_data[PUMPSWAP_POOL_BASE_VAULT_OFFSET..PUMPSWAP_POOL_BASE_VAULT_OFFSET + 32]
+        ).map_err(|_| LendingError::InvalidPoolData)?;
+        
+        let quote_vault = Pubkey::try_from(
+            &pool_data[PUMPSWAP_POOL_QUOTE_VAULT_OFFSET..PUMPSWAP_POOL_QUOTE_VAULT_OFFSET + 32]
+        ).map_err(|_| LendingError::InvalidPoolData)?;
+        
+        Ok((base_vault, quote_vault))
+    }
+
+    /// Full validation for PumpSwap pools
+    pub fn validate_full(
+        pool_account: &AccountInfo,
+        expected_token_mint: &Pubkey,
+    ) -> Result<(Pubkey, Pubkey)> {
+        // 1. Validate owner
+        Self::validate_owner(pool_account)?;
+        
+        // 2. Borrow and validate data
+        let pool_data = pool_account.try_borrow_data()?;
+        
+        // 3. Validate discriminator
+        Self::validate_discriminator(&pool_data)?;
+        
+        // 4. Validate base_mint matches token
+        Self::validate_base_mint(&pool_data, expected_token_mint)?;
+        
+        // 5. Validate quote_mint is WSOL
+        Self::validate_quote_mint(&pool_data)?;
+        
+        // 6. Extract and return vault addresses
+        Self::extract_vaults(&pool_data)
     }
 }
