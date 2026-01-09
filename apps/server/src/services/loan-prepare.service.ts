@@ -235,14 +235,11 @@ export async function prepareLoanTransaction(
     systemProgram: SystemProgram.programId,
   };
 
-  // For PumpSwap, we need to pass vault accounts as remainingAccounts
-  let remainingAccounts: any[] = [];
+  // For PumpSwap, add vault accounts as named optional accounts
   if (pumpswapBaseVault && pumpswapQuoteVault) {
-    remainingAccounts = [
-      { pubkey: pumpswapBaseVault, isSigner: false, isWritable: false },
-      { pubkey: pumpswapQuoteVault, isSigner: false, isWritable: false },
-    ];
-    console.log('[PrepareLoan] Adding PumpSwap vaults as remaining accounts');
+    accounts.pumpswapBaseVault = pumpswapBaseVault;
+    accounts.pumpswapQuoteVault = pumpswapQuoteVault;
+    console.log('[PrepareLoan] Added PumpSwap vaults to accounts');
   }
 
   const tx = await program.methods
@@ -253,7 +250,6 @@ export async function prepareLoanTransaction(
       new BN(priceTimestamp)
     )
     .accounts(accounts)
-    .remainingAccounts(remainingAccounts)
     .transaction();
 
   // Get recent blockhash
