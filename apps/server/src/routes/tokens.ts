@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { validator } from 'hono/validator';
 import { tokenVerificationService } from '../services/token-verification.service';
 import { logger } from '../utils/logger';
+import { prisma } from '../db/client';
 
 const app = new Hono();
 
@@ -23,6 +24,12 @@ const batchVerifySchema = z.object({
   mints: z.array(z.string().min(32).max(44).regex(/^[1-9A-HJ-NP-Za-km-z]+$/))
     .min(1, 'At least one mint required')
     .max(10, 'Maximum 10 mints allowed'),
+});
+
+const checkWhitelistedSchema = z.object({
+  mints: z.array(z.string().min(32).max(44).regex(/^[1-9A-HJ-NP-Za-km-z]+$/))
+    .min(1, 'At least one mint required')
+    .max(100, 'Maximum 100 mints allowed'),
 });
 
 /**
@@ -188,6 +195,71 @@ app.post(
       });
     } catch (error) {
       logger.error('Batch verification error:', { error: error instanceof Error ? error.message : String(error) });
+      return c.json({
+        success: false,
+        error: 'Internal server error',
+        message: error instanceof Error ? error.message : 'Unknown error',
+      }, 500);
+    }
+  }
+);
+
+/**
+ * POST /tokens/check-whitelisted - Check which tokens are whitelisted in database
+ */
+app.post(
+  '/check-whitelisted',
+  validator('json', (value, c) => {
+    const result = checkWhitelistedSchema.safeParse(value);
+    if (!result.success) {
+      return c.json({ 
+        success: false,
+        error: 'Invalid request', 
+        details: result.error.issues 
+      }, 400);
+    }
+    return result.data;
+  }),
+  async (c) => {
+    try {
+      const { mints } = c.req.valid('json');
+
+      logger.info(`Check whitelisted request for ${mints.length} tokens`);
+
+      // Query database for enabled tokens
+      const whitelistedTokens = await prisma.token.findMany({
+        where: {
+          id: {
+            in: mints
+          },
+          enabled: true
+        },
+        select: {
+          id: true,
+          symbol: true,
+          name: true,
+          tier: true,
+        }
+      });
+
+      // Create a set of whitelisted mint addresses for fast lookup
+      const whitelistedMints = new Set(whitelistedTokens.map(t => t.id));
+
+      // Return array of mints that are whitelisted
+      const result = mints.filter(mint => whitelistedMints.has(mint));
+
+      logger.info(`Found ${result.length} whitelisted tokens out of ${mints.length}`);
+
+      return c.json({
+        success: true,
+        data: {
+          whitelistedMints: result,
+          tokens: whitelistedTokens,
+          total: result.length
+        },
+      });
+    } catch (error) {
+      logger.error('Check whitelisted error:', { error: error instanceof Error ? error.message : String(error) });
       return c.json({
         success: false,
         error: 'Internal server error',

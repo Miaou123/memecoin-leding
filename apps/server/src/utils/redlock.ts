@@ -1,4 +1,4 @@
-import Redlock from 'redlock';
+import Redlock, { Lock } from 'redlock';
 import Redis from 'ioredis';
 
 // Redlock configuration for distributed locking
@@ -65,7 +65,7 @@ export function getRedlock(): Redlock {
  * @param ttl Lock duration in milliseconds
  * @returns Lock instance that must be unlocked when done
  */
-export async function acquireLock(resource: string, ttl: number = 10000): Promise<Redlock.Lock> {
+export async function acquireLock(resource: string, ttl: number = 10000): Promise<Lock> {
   const redlock = getRedlock();
   return redlock.acquire([resource], ttl);
 }
@@ -76,7 +76,7 @@ export async function acquireLock(resource: string, ttl: number = 10000): Promis
  * @param ttl Lock duration in milliseconds
  * @returns Lock instance or null if lock couldn't be acquired
  */
-export async function tryAcquireLock(resource: string, ttl: number = 10000): Promise<Redlock.Lock | null> {
+export async function tryAcquireLock(resource: string, ttl: number = 10000): Promise<Lock | null> {
   const redlock = getRedlock();
   try {
     // Try once without retries
@@ -150,6 +150,6 @@ export function getBorrowerLockResource(borrowerWallet: string): string {
 /**
  * Extend a lock's duration
  */
-export async function extendLock(lock: Redlock.Lock, ttl: number): Promise<Redlock.Lock> {
+export async function extendLock(lock: Lock, ttl: number): Promise<Lock> {
   return lock.extend(ttl);
 }

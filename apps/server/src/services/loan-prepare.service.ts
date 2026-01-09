@@ -29,9 +29,9 @@ const LOAN_SEED = Buffer.from('loan');
 const VAULT_SEED = Buffer.from('vault');
 
 // PumpSwap Pool Layout offsets
-const PUMPSWAP_POOL_BASE_VAULT_OFFSET = 139;
-const PUMPSWAP_POOL_QUOTE_VAULT_OFFSET = 171;
-const PUMPSWAP_POOL_MIN_LEN = 211;
+const PUMPSWAP_POOL_BASE_VAULT_OFFSET = 64;
+const PUMPSWAP_POOL_QUOTE_VAULT_OFFSET = 96;
+const PUMPSWAP_POOL_MIN_LEN = 128;
 
 // Price signature validity (30 seconds)
 const PRICE_VALIDITY_SECONDS = 30;
@@ -162,7 +162,15 @@ export async function prepareLoanTransaction(
   );
 
   // Fetch token config to get pool address
-  const tokenConfig = await (program.account as any).tokenConfig.fetch(tokenConfigPda);
+  let tokenConfig;
+  try {
+    tokenConfig = await (program.account as any).tokenConfig.fetch(tokenConfigPda);
+  } catch (error: any) {
+    if (error.message?.includes('Account does not exist')) {
+      throw new Error(`Token ${request.tokenMint} is not whitelisted or not configured for lending`);
+    }
+    throw error;
+  }
   const poolAddress = tokenConfig.poolAddress;
 
   // Detect token program (SPL Token vs Token-2022)
@@ -195,18 +203,48 @@ export async function prepareLoanTransaction(
   let pumpswapQuoteVault: PublicKey | null = null;
 
   if (isPumpSwap) {
+    console.log('[PrepareLoan] PumpSwap pool address:', poolAddress.toString());
     const vaults = await getPumpSwapVaults(connection, poolAddress);
     if (!vaults) {
-      throw new Error('Failed to fetch PumpSwap vault accounts - required for PumpSwap tokens');
+      // For PumpSwap, we might not need the vault accounts if the on-chain program handles it
+      console.warn('[PrepareLoan] Could not fetch PumpSwap vaults, proceeding without them');
+      // Don't throw error, let the transaction builder handle it
+    } else {
+      pumpswapBaseVault = vaults.baseVault;
+      pumpswapQuoteVault = vaults.quoteVault;
+      console.log('[PrepareLoan] PumpSwap token detected, vaults fetched successfully');
     }
-    pumpswapBaseVault = vaults.baseVault;
-    pumpswapQuoteVault = vaults.quoteVault;
-    console.log('[PrepareLoan] PumpSwap token detected, vaults fetched');
   }
 
   // 3. Build the transaction
   console.log(`[PrepareLoan] Building transaction...`);
   
+  // Build accounts object
+  const accounts: any = {
+    protocolState: protocolStatePda,
+    tokenConfig: tokenConfigPda,
+    loan: loanPda,
+    treasury: treasuryPda,
+    borrower: borrower,
+    borrowerTokenAccount: borrowerTokenAccount,
+    vault: vaultPda,
+    poolAccount: poolAddress,
+    tokenMint: tokenMint,
+    priceAuthority: priceAuthority.publicKey,
+    tokenProgram: tokenProgramId,  // Use detected program (Token or Token-2022)
+    systemProgram: SystemProgram.programId,
+  };
+
+  // For PumpSwap, we need to pass vault accounts as remainingAccounts
+  let remainingAccounts: any[] = [];
+  if (pumpswapBaseVault && pumpswapQuoteVault) {
+    remainingAccounts = [
+      { pubkey: pumpswapBaseVault, isSigner: false, isWritable: false },
+      { pubkey: pumpswapQuoteVault, isSigner: false, isWritable: false },
+    ];
+    console.log('[PrepareLoan] Adding PumpSwap vaults as remaining accounts');
+  }
+
   const tx = await program.methods
     .createLoan(
       collateralAmount,
@@ -214,22 +252,8 @@ export async function prepareLoanTransaction(
       new BN(approvedPrice.toString()),
       new BN(priceTimestamp)
     )
-    .accounts({
-      protocolState: protocolStatePda,
-      tokenConfig: tokenConfigPda,
-      loan: loanPda,
-      treasury: treasuryPda,
-      borrower: borrower,
-      borrowerTokenAccount: borrowerTokenAccount,
-      vault: vaultPda,
-      poolAccount: poolAddress,
-      pumpswapBaseVault: pumpswapBaseVault,  // null if not PumpSwap
-      pumpswapQuoteVault: pumpswapQuoteVault, // null if not PumpSwap
-      tokenMint: tokenMint,
-      priceAuthority: priceAuthority.publicKey,
-      tokenProgram: tokenProgramId,  // Use detected program (Token or Token-2022)
-      systemProgram: SystemProgram.programId,
-    })
+    .accounts(accounts)
+    .remainingAccounts(remainingAccounts)
     .transaction();
 
   // Get recent blockhash

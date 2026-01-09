@@ -737,7 +737,7 @@ export class TokenVerificationService {
         return 'pumpfun';
       }
 
-      const data: DexScreenerResponse = await response.json();
+      const data = await response.json() as DexScreenerResponse;
       
       if (data.pairs && data.pairs.length > 0) {
         // Check for Raydium pools

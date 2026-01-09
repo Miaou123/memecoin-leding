@@ -164,7 +164,7 @@ rpcProxyRouter.post('/rpc', async (c) => {
           },
           id: body.id || null
         },
-        response.status
+        response.status as 400 | 500 | 502 | 503 | 504
       );
     }
     

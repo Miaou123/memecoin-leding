@@ -66,7 +66,12 @@ function parseMetaplexMetadata(data: Buffer): { name: string; symbol: string; ur
  */
 function toHttpUrl(uri: string): string {
   if (uri.startsWith('ipfs://')) {
-    return uri.replace('ipfs://', 'https://ipfs.io/ipfs/');
+    // Use cloudflare-ipfs instead of ipfs.io (much faster/reliable)
+    return uri.replace('ipfs://', 'https://dweb.link/ipfs/');
+  }
+  // Also handle existing ipfs.io URLs in the image field
+  if (uri.startsWith('https://ipfs.io/ipfs/')) {
+    return uri.replace('https://ipfs.io/ipfs/', 'https://dweb.link/ipfs/');
   }
   if (uri.startsWith('ar://')) {
     return uri.replace('ar://', 'https://arweave.net/');

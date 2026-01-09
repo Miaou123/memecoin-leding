@@ -279,7 +279,7 @@ class LiquidatorMetricsService {
     await securityMonitor.log({
       severity: 'HIGH',
       category: 'Liquidation',
-      eventType: SECURITY_EVENT_TYPES.LIQUIDATION_FAILURE,
+      eventType: SECURITY_EVENT_TYPES.LIQUIDATION_FAILED,
       message: `Liquidator instance ${this.instanceId} has failed ${consecutiveFailures} consecutive times`,
       details: {
         instanceId: this.instanceId,
@@ -303,7 +303,7 @@ class LiquidatorMetricsService {
     await securityMonitor.log({
       severity: 'HIGH',
       category: 'Liquidation',
-      eventType: SECURITY_EVENT_TYPES.LIQUIDATION_FAILURE,
+      eventType: SECURITY_EVENT_TYPES.LIQUIDATION_FAILED,
       message: `Liquidator instance ${this.instanceId} hasn't had a successful run in ${minutesSinceRun} minutes`,
       details: {
         instanceId: this.instanceId,
