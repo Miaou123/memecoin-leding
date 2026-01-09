@@ -9,6 +9,7 @@ import { RecentLoanItem } from '@/components/dashboard/RecentLoanItem';
 import { ProtocolHealth } from '@/components/dashboard/ProtocolHealth';
 import { RecentLoanResponse } from '@memecoin-lending/types';
 import { getProtocolTokenMint } from '@/config/tokens';
+import { TokenImage } from '@/components/tokens/TokenImage';
 
 export default function Home() {
   // Protocol stats
@@ -139,9 +140,11 @@ export default function Home() {
                       id: loan.id || 'unknown',
                       tokenSymbol: loan.tokenSymbol || 'UNKNOWN',
                       tokenName: loan.tokenName || 'Unknown Token',
+                      tokenImageUrl: loan.tokenImageUrl,
                       amount: loan.solBorrowed?.toString() || '0',
-                      status: loan.status === 'active' ? 'Active' : 
-                              loan.healthScore && loan.healthScore < 50 ? 'AtRisk' : 'Active',
+                      status: loan.status === 'active' ? 
+                                (loan.healthScore && loan.healthScore < 50 ? 'AtRisk' : 'Active') :
+                              loan.status === 'repaid' ? 'Repaid' : 'Active',
                       createdAt: loan.createdAt || Math.floor(Date.now() / 1000)
                     }}
                   />
@@ -168,11 +171,12 @@ export default function Home() {
                 <div class="flex items-center justify-between mb-4">
                   <div class="flex items-center gap-3">
                     {/* Token Avatar */}
-                    <div class="w-14 h-14 bg-accent-green/20 border border-accent-green flex items-center justify-center">
-                      <span class="text-xl font-bold text-accent-green">
-                        {topToken.data?.symbol?.slice(0, 2) || '??'}
-                      </span>
-                    </div>
+                    <TokenImage
+                      src={topToken.data?.imageUrl}
+                      symbol={topToken.data?.symbol || 'UNKNOWN'}
+                      size="lg"
+                      class="border-accent-green"
+                    />
                     
                     {/* Token Info */}
                     <div>

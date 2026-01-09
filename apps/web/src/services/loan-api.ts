@@ -29,7 +29,15 @@ export async function prepareLoan(request: PrepareLoanRequest): Promise<PrepareL
   const data = await response.json();
 
   if (!data.success) {
-    throw new Error(data.error || 'Failed to prepare loan');
+    // Include detailed error message for better debugging
+    const errorMessage = data.details 
+      ? `${data.error}: ${data.details}`
+      : data.error || 'Failed to prepare loan';
+    
+    console.error('[PrepareLoan API] Error:', errorMessage);
+    console.error('[PrepareLoan API] Full response:', data);
+    
+    throw new Error(errorMessage);
   }
 
   return data.data;

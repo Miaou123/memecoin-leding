@@ -1,5 +1,6 @@
 import { Connection, Transaction, VersionedTransaction } from '@solana/web3.js';
 import { prepareLoan, PrepareLoanRequest } from '../services/loan-api';
+import { fastConfirmTransaction } from './transaction-utils';
 
 export interface CreateLoanParams {
   tokenMint: string;
@@ -102,52 +103,25 @@ export async function createLoan(
 
   console.log(`[CreateLoan] Transaction sent: ${signature}`);
 
-  // 6. Confirm transaction
+  // 6. Confirm transaction using fast polling
   let confirmed = false;
   let txError: Error | null = null;
   
-  try {
-    const confirmation = await connection.confirmTransaction(
-      {
-        signature,
-        blockhash,
-        lastValidBlockHeight,
-      },
-      'confirmed'
-    );
-    
-    if (confirmation.value.err) {
-      txError = new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
-    } else {
-      confirmed = true;
-      console.log('[CreateLoan] Transaction confirmed!');
+  const confirmationResult = await fastConfirmTransaction(connection, signature, {
+    timeoutMs: 30000,
+    pollIntervalMs: 500,
+    commitment: 'confirmed',
+    onStatusChange: (status) => {
+      console.log(`[CreateLoan] Status: ${status}`);
     }
-  } catch (error: any) {
-    // If confirmation times out, check if TX actually succeeded
-    if (error.message?.includes('was not confirmed') || 
-        error.message?.includes('block height exceeded') ||
-        error.message?.includes('30.00 seconds')) {
-      console.log('[CreateLoan] Confirmation timeout, checking transaction status...');
-      
-      // Wait a bit and check status
-      await new Promise(resolve => setTimeout(resolve, 3000));
-      
-      const status = await connection.getSignatureStatus(signature);
-      
-      if (status.value?.confirmationStatus === 'confirmed' || 
-          status.value?.confirmationStatus === 'finalized') {
-        confirmed = true;
-        console.log('[CreateLoan] Transaction confirmed (verified via getSignatureStatus)!');
-      } else if (status.value?.err) {
-        txError = new Error(`Transaction failed: ${JSON.stringify(status.value.err)}`);
-      } else {
-        // Transaction might still be processing - assume success if sent
-        console.log('[CreateLoan] Transaction status pending, assuming success...');
-        confirmed = true; // Optimistically assume success - we sent it and no error
-      }
-    } else {
-      txError = error;
-    }
+  });
+  
+  if (confirmationResult.confirmed) {
+    confirmed = true;
+    console.log(`[CreateLoan] Transaction confirmed in ${confirmationResult.confirmationTime}ms!`);
+  } else {
+    txError = confirmationResult.error || new Error('Transaction confirmation failed');
+    console.error('[CreateLoan] Transaction failed:', txError.message);
   }
 
   // 7. ALWAYS try to track the loan if we got a signature (even on timeout)

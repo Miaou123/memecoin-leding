@@ -1,7 +1,7 @@
 import { createSignal, createMemo, createEffect, Accessor } from 'solid-js';
 import { useWallet } from '@/components/wallet/WalletProvider';
 import { PublicKey } from '@solana/web3.js';
-import { getAssociatedTokenAddress, getAccount } from '@solana/spl-token';
+import { getAssociatedTokenAddress, getAccount, TOKEN_PROGRAM_ID } from '@solana/spl-token';
 import { createConnection } from '../utils/rpc';
 
 interface UseTokenBalanceResult {
@@ -50,17 +50,32 @@ export function useTokenBalance(tokenMint: Accessor<string | null>): UseTokenBal
       const mintPublicKey = new PublicKey(mint);
       const walletPublicKey = new PublicKey(publicKey);
 
-      // Get the associated token address
+      // PumpFun tokens use Token-2022 program
+      const TOKEN_2022_PROGRAM_ID = new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb');
+      const isPumpToken = mint.toLowerCase().endsWith('pump');
+      const tokenProgramId = isPumpToken ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID;
+
+      // Get the associated token address with the correct program
       const tokenAddress = await getAssociatedTokenAddress(
         mintPublicKey,
-        walletPublicKey
+        walletPublicKey,
+        false, // allowOwnerOffCurve
+        tokenProgramId
       );
 
       // Try to get the token account
       try {
-        const tokenAccount = await getAccount(connection, tokenAddress);
+        const tokenAccount = await getAccount(connection, tokenAddress, 'confirmed', tokenProgramId);
         setBalance(tokenAccount.amount.toString());
-        setDecimals(tokenAccount.mint.toString() === mint ? 6 : 9); // PumpFun tokens typically use 6 decimals
+        
+        // Get actual decimals from the token account or mint info
+        const mintInfo = await connection.getParsedAccountInfo(mintPublicKey);
+        const parsedData = mintInfo.value?.data;
+        if (parsedData && 'parsed' in parsedData) {
+          setDecimals(parsedData.parsed.info.decimals || 6);
+        } else {
+          setDecimals(6); // Default to 6 for PumpFun tokens
+        }
       } catch (accountError: any) {
         // Token account doesn't exist, balance is 0
         if (accountError.name === 'TokenAccountNotFoundError' || 

@@ -18,6 +18,7 @@ import { getAdminKeypair } from '../config/keys.js';
 // @ts-ignore
 import PumpSDK from '@pump-fun/pump-sdk';
 import { fetchTokenMetadata } from './token-metadata.service.js';
+import { getPumpSwapPoolAddress } from './pumpswap-pool.service.js';
 
 // Token-2022 program ID for detection
 const TOKEN_2022_PROGRAM_ID = new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb');
@@ -36,14 +37,6 @@ const VALID_QUOTE_TOKENS = {
   USD1: process.env.USD1_MINT || 'USD1ttGY1N17NEEHLmELoaybftRBUSErhqYiQzvEmuB',
 };
 
-// Helper function to get PumpFun bonding curve PDA
-function getPumpFunBondingCurve(mint: PublicKey): PublicKey {
-  const [bondingCurve] = PublicKey.findProgramAddressSync(
-    [Buffer.from('bonding-curve'), mint.toBuffer()],
-    PUMPFUN_PROGRAM_ID
-  );
-  return bondingCurve;
-}
 
 // NodeWallet wrapper for Keypair
 class NodeWallet {
@@ -602,9 +595,17 @@ export class TokenVerificationService {
     // Note: Pool type 2 (pumpfun) is blocked - tokens must migrate first
     const poolType = 3;
 
-    // Derive the correct bonding curve PDA for PumpFun
-    const bondingCurve = getPumpFunBondingCurve(mintPubkey);
-    console.log(`  - Bonding Curve PDA: ${bondingCurve.toString()}`);
+    // Find the actual PumpSwap pool address
+    if (!this.connection) {
+      throw new Error('Connection not initialized');
+    }
+    
+    const poolAddress = await getPumpSwapPoolAddress(this.connection, mintPubkey);
+    if (!poolAddress) {
+      throw new Error('Could not find PumpSwap pool for graduated token');
+    }
+    
+    console.log(`  - Pool Address: ${poolAddress.toString()}`);
     console.log(`  - Admin: ${this.adminKeypair.publicKey.toString()}`);
 
     try {
@@ -614,7 +615,7 @@ export class TokenVerificationService {
       const tx = await (this.program.methods as any)
         .whitelistToken(
           tier,
-          bondingCurve, // Use bonding curve PDA, not mint address
+          poolAddress, // Use actual pool address
           poolType,
           new BN(1000000),       // min loan: 0.001 SOL
           new BN(100000000000),  // max loan: 100 SOL
@@ -651,8 +652,8 @@ export class TokenVerificationService {
             name: tokenData.name || 'PumpFun Token',
             decimals: 6, // PumpFun tokens use 6 decimals
             tier: tokenData.tier?.toLowerCase() || 'bronze',
-            poolAddress: bondingCurve.toString(), // Store bonding curve PDA
-            poolType: 'PumpSwap',  // ADD THIS - migrated pump tokens use PumpSwap
+            poolAddress: poolAddress.toString(), // Store actual pool address
+            poolType: 'PumpSwap',  // migrated pump tokens use PumpSwap
             enabled: true,
             imageUrl: tokenData.imageUrl,
           },

@@ -11,6 +11,7 @@ import { useWallet } from '@/components/wallet/WalletProvider';
 import { buildStakeTransaction, buildUnstakeTransaction, simulateTransaction } from '@/lib/staking-transactions';
 import { getStakingConfig, type Network } from '@memecoin-lending/config';
 import { EpochCountdown } from '@/components/EpochCountdown';
+import { fastConfirmTransaction } from '@/lib/transaction-utils';
 
 // Helper functions for formatting
 const formatSol = (lamports: string | number) => {
@@ -119,9 +120,22 @@ export default function Staking() {
       // Sign and send
       const signed = await wallet.signTransaction(transaction);
       const signature = await connection.sendRawTransaction(signed.serialize());
-      await connection.confirmTransaction(signature, 'confirmed');
       
-      console.log('Stake transaction:', signature);
+      // Fast confirmation
+      const confirmationResult = await fastConfirmTransaction(connection, signature, {
+        timeoutMs: 30000,
+        pollIntervalMs: 500,
+        commitment: 'confirmed',
+        onStatusChange: (status) => {
+          console.log(`[Stake] Status: ${status}`);
+        }
+      });
+      
+      if (!confirmationResult.confirmed) {
+        throw confirmationResult.error || new Error('Transaction confirmation failed');
+      }
+      
+      console.log(`[Stake] Transaction confirmed in ${confirmationResult.confirmationTime}ms:`, signature);
       return { amount, signature };
     },
     onSuccess: (data) => {
@@ -173,9 +187,22 @@ export default function Staking() {
       // Sign and send
       const signed = await wallet.signTransaction(transaction);
       const signature = await connection.sendRawTransaction(signed.serialize());
-      await connection.confirmTransaction(signature, 'confirmed');
       
-      console.log('Unstake transaction:', signature);
+      // Fast confirmation
+      const confirmationResult = await fastConfirmTransaction(connection, signature, {
+        timeoutMs: 30000,
+        pollIntervalMs: 500,
+        commitment: 'confirmed',
+        onStatusChange: (status) => {
+          console.log(`[Unstake] Status: ${status}`);
+        }
+      });
+      
+      if (!confirmationResult.confirmed) {
+        throw confirmationResult.error || new Error('Transaction confirmation failed');
+      }
+      
+      console.log(`[Unstake] Transaction confirmed in ${confirmationResult.confirmationTime}ms:`, signature);
       return { amount, signature };
     },
     onSuccess: (data) => {

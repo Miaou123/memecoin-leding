@@ -13,6 +13,8 @@ import { Transaction, PublicKey } from '@solana/web3.js';
 import { createConnection } from '../utils/rpc';
 import BN from 'bn.js';
 import { SuccessModal } from '@/components/ui/SuccessModal';
+import { ErrorModal } from '@/components/ui/ErrorModal';
+import { useErrorModal } from '@/hooks/useErrorModal';
 import { createLoan } from '@/lib/loan-transactions';
 import { LoanEstimate } from '@/components/borrow/LoanEstimate';
 // Simple debounce utility
@@ -34,9 +36,10 @@ export default function Borrow() {
   const [collateralAmount, setCollateralAmount] = createSignal('');
   const [duration, setDuration] = createSignal(48 * 60 * 60); // 48 hours default (base LTV)
   
-  // Success modal state
+  // Modal states
   const [showSuccessModal, setShowSuccessModal] = createSignal(false);
   const [loanResult, setLoanResult] = createSignal<any>(null);
+  const errorModal = useErrorModal();
   
   // Cached loan estimate signal
   const [cachedLoanEstimate, setCachedLoanEstimate] = createSignal<typeof loanEstimate.data>(null);
@@ -140,6 +143,10 @@ export default function Borrow() {
     onSuccess: (result) => {
       setLoanResult(result);
       setShowSuccessModal(true);
+    },
+    onError: (error) => {
+      console.error('Loan creation failed:', error);
+      errorModal.showError(error, () => createLoanMutation.mutate());
     },
   }));
   
@@ -451,15 +458,6 @@ export default function Borrow() {
             Connect Wallet to Continue
           </Show>
         </Button>
-        
-        <Show when={createLoanMutation.error}>
-          <div class="text-center p-4 bg-red-50 border border-red-200 rounded-lg">
-            <div class="text-red-800 font-medium">Error Creating Loan</div>
-            <div class="text-red-600 text-sm mt-1">
-              {createLoanMutation.error?.message}
-            </div>
-          </div>
-        </Show>
       </div>
       
       {/* Success Modal */}
@@ -492,6 +490,14 @@ export default function Borrow() {
             setLoanResult(null);
           }
         }}
+      />
+      
+      {/* Error Modal */}
+      <ErrorModal
+        isOpen={errorModal.isOpen()}
+        onClose={errorModal.hideError}
+        error={errorModal.error()}
+        onRetry={errorModal.retryFn()}
       />
     </div>
   );

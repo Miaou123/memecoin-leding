@@ -1,24 +1,10 @@
 import { PublicKey } from '@solana/web3.js';
-import * as fs from 'fs';
-import * as path from 'path';
+import { getProgramIdFromDeployment, type Network } from './deployment';
 import { config as dotenvConfig } from 'dotenv';
 
-// Load environment variables from root .env file
+// Load environment variables - dotenv will auto-find .env files
 try {
-  // Try to load from various possible locations
-  const rootPaths = [
-    path.join(process.cwd(), '.env'),
-    path.join(__dirname, '../../../.env'),
-    path.join(__dirname, '../../.env'),
-    path.join(__dirname, '../.env'),
-  ];
-  
-  for (const envPath of rootPaths) {
-    if (fs.existsSync(envPath)) {
-      dotenvConfig({ path: envPath });
-      break;
-    }
-  }
+  dotenvConfig();
 } catch (e) {
   // Silently fail if dotenv can't be loaded
 }
@@ -31,44 +17,16 @@ const PROTOCOL_SEED = Buffer.from('protocol_state');
 const TREASURY_SEED = Buffer.from('treasury');
 const FEE_RECEIVER_SEED = Buffer.from('fee_receiver');
 
-// Try to load deployment config from JSON
+// Load deployment config using proper import system
 function loadDeploymentConfig(network: string = 'devnet'): { programId: string } | null {
-  // In browser, can't read files - use env vars
-  if (typeof globalThis !== 'undefined' && (globalThis as any).window !== 'undefined') {
-    const programId = (globalThis as any).VITE_PROGRAM_ID || 
-                     (typeof process !== 'undefined' && process.env?.VITE_PROGRAM_ID);
-    return programId ? { programId } : null;
-  }
-  
-  // In Node.js, try to read the deployment file
   try {
-    const possiblePaths = [
-      path.join(process.cwd(), 'deployments', `${network}-latest.json`),
-      path.join(process.cwd(), '..', 'deployments', `${network}-latest.json`),
-      path.join(process.cwd(), '..', '..', 'deployments', `${network}-latest.json`),
-      path.join(__dirname, '..', '..', '..', 'deployments', `${network}-latest.json`),
-      path.join(__dirname, '..', '..', '..', '..', 'deployments', `${network}-latest.json`),
-      // Handle when run from scripts directory
-      path.join(process.cwd(), '..', '..', '..', 'deployments', `${network}-latest.json`),
-    ];
-    
-    for (const p of possiblePaths) {
-      if (fs.existsSync(p)) {
-        const content = fs.readFileSync(p, 'utf8');
-        const parsed = JSON.parse(content);
-        if (parsed.programId) {
-          return parsed;
-        }
-      }
-    }
+    // Use the proper deployment import system
+    const programId = getProgramIdFromDeployment(network as Network);
+    return { programId };
   } catch (e) {
-    // Silently fail in production, debug in development
-    if (process.env.NODE_ENV === 'development') {
-      console.debug('Could not load deployment file:', e);
-    }
+    console.debug('Could not load deployment config:', e);
+    return null;
   }
-  
-  return null;
 }
 
 // Get program ID from deployment or env
@@ -83,7 +41,7 @@ function getProgramIdForNetwork(network: string = 'devnet'): string {
   if (process.env.PROGRAM_ID) return process.env.PROGRAM_ID;
   if (process.env.VITE_PROGRAM_ID) return process.env.VITE_PROGRAM_ID;
   
-  // No fallback - deployment must be properly configured
+  // No deployment found - this should not happen if deployments are properly imported
   throw new Error(`Program ID not found for network: ${network}. Check deployments/${network}-latest.json`);
 }
 

@@ -50,6 +50,10 @@ class ApiClient {
     return this.fetch('/protocol/stats');
   }
   
+  async getProtocolStatus(): Promise<{ paused: boolean; pauseReason?: string; version: string; treasury: string }> {
+    return this.fetch('/protocol/status');
+  }
+  
   async getTokens(): Promise<TokenStats[]> {
     return this.fetch('/tokens');
   }
@@ -172,6 +176,16 @@ class ApiClient {
       body: JSON.stringify({ txSignature }),
     });
   }
+
+  /**
+   * Sync loan status from on-chain state.
+   * Used when we detect LoanAlreadyRepaid error to fix DB inconsistency.
+   */
+  async syncLoanStatus(loanPubkey: string): Promise<Loan> {
+    return this.fetch(`/loans/${loanPubkey}/sync-status`, {
+      method: 'POST',
+    });
+  }
   
   async getUserStats(wallet: string): Promise<UserStats> {
     return this.fetch(`/user/${wallet}/stats`);
@@ -208,6 +222,22 @@ class ApiClient {
 
   async canCreateLoan(mint: string): Promise<{ allowed: boolean; reason?: string; tier?: string }> {
     return this.fetch(`/tokens/${mint}/can-loan`);
+  }
+
+  async checkWhitelisted(mints: string[]): Promise<{
+    whitelistedMints: string[];
+    tokens: Array<{
+      id: string;
+      symbol: string;
+      name: string;
+      tier: string;
+    }>;
+    total: number;
+  }> {
+    return this.fetch('/tokens/check-whitelisted', {
+      method: 'POST',
+      body: JSON.stringify({ mints }),
+    });
   }
 
   // Staking Methods

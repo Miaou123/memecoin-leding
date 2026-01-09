@@ -84,6 +84,7 @@ loansRouter.get('/recent', zValidator('query', getRecentLoansSchema), async (c) 
       id: loan.id,
       tokenSymbol: loan.token?.symbol || 'UNKNOWN',
       tokenName: loan.token?.name || 'Unknown Token',
+      tokenImageUrl: loan.token?.imageUrl || null,
       solBorrowed: loan.solBorrowed,
       status: loan.status,
       createdAt: Math.floor(loan.createdAt.getTime() / 1000),

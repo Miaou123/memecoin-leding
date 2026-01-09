@@ -9,15 +9,19 @@ import { LoanStatus } from '@memecoin-lending/types';
 import { Transaction } from '@solana/web3.js';
 import { createConnection } from '../../utils/rpc';
 import { SuccessModal } from '@/components/ui/SuccessModal';
+import { ErrorModal } from '@/components/ui/ErrorModal';
+import { useErrorModal } from '@/hooks/useErrorModal';
+import { fastConfirmTransaction } from '@/lib/transaction-utils';
 
 export default function Repay() {
   const params = useParams();
   const navigate = useNavigate();
   const wallet = useWallet();
   
-  // Success modal state
+  // Modal states
   const [showSuccessModal, setShowSuccessModal] = createSignal(false);
   const [repayResult, setRepayResult] = createSignal<any>(null);
+  const errorModal = useErrorModal();
   
   const loan = createQuery(() => ({
     queryKey: ['loan', params.id],
@@ -27,53 +31,101 @@ export default function Repay() {
   
   const repayMutation = createMutation(() => ({
     mutationFn: async () => {
-      if (!wallet.connected()) {
+      if (!wallet.connected() || !wallet.publicKey()) {
         throw new Error('Wallet not connected');
       }
       
-      // Get unsigned transaction from API
-      const { transaction: encodedTransaction } = await api.repayLoanUnsigned(
+      // Get unsigned transaction from backend
+      const { transaction: txBase64 } = await api.repayLoanUnsigned(
         params.id,
         wallet.publicKey()!.toString()
       );
       
-      // Deserialize the transaction
-      const transactionBuffer = Buffer.from(encodedTransaction, 'base64');
-      const transaction = Transaction.from(transactionBuffer);
-      
-      // Get a fresh blockhash
-      const connection = createConnection();
-      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
-      transaction.recentBlockhash = blockhash;
-      transaction.feePayer = wallet.publicKey()!;
+      // Deserialize and sign
+      const txBuffer = Buffer.from(txBase64, 'base64');
+      const transaction = Transaction.from(txBuffer);
       
       // Sign and send the transaction
       const signedTransaction = await wallet.signTransaction(transaction);
-      const signature = await connection.sendRawTransaction(signedTransaction.serialize());
       
-      // Wait for confirmation using the simple pattern
-      const confirmation = await connection.confirmTransaction(signature, 'confirmed');
-      
-      if (confirmation.value.err) {
-        throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
+      try {
+        const connection = createConnection();
+        const signature = await connection.sendRawTransaction(signedTransaction.serialize());
+        
+        // Wait for confirmation using fast polling
+        const confirmationResult = await fastConfirmTransaction(connection, signature, {
+          timeoutMs: 30000,
+          pollIntervalMs: 500,
+          commitment: 'confirmed',
+          onStatusChange: (status) => {
+            console.log(`[Repay] Status: ${status}`);
+          }
+        });
+        
+        if (!confirmationResult.confirmed) {
+          throw confirmationResult.error || new Error('Transaction confirmation failed');
+        }
+        
+        console.log(`[Repay] Transaction confirmed in ${confirmationResult.confirmationTime}ms`);
+        
+        // Confirm repayment in database
+        const updatedLoan = await api.confirmRepayment(params.id, signature);
+        
+        return { 
+          signature, 
+          loan: loan.data!,
+          updatedLoan 
+        };
+      } catch (error: any) {
+        // Check if this is "LoanAlreadyRepaid" error from the program
+        const errorMessage = error.message || '';
+        const isAlreadyRepaidError = 
+          errorMessage.includes('0x2ee8') ||           // Hex error code
+          errorMessage.includes('12008') ||            // Decimal error code
+          errorMessage.includes('LoanAlreadyRepaid') || // Error name
+          errorMessage.includes('Already repaid');      // Error message
+        
+        if (isAlreadyRepaidError) {
+          console.log('[Repay] Loan already repaid on-chain, syncing database...');
+          
+          // Sync the loan status from chain
+          try {
+            const syncedLoan = await api.syncLoanStatus(params.id);
+            console.log('[Repay] Loan status synced:', syncedLoan.status);
+            
+            // Return success - the loan was already repaid
+            return {
+              signature: 'already-repaid',
+              loan: loan.data!,
+              updatedLoan: syncedLoan,
+              wasAlreadyRepaid: true,
+            };
+          } catch (syncError: any) {
+            console.error('[Repay] Failed to sync loan status:', syncError);
+            // Still throw the original error if sync fails
+            throw new Error('This loan was already repaid. Please refresh the page.');
+          }
+        }
+        
+        // Re-throw other errors
+        throw error;
       }
-      
-      // Confirm repayment in database
-      const updatedLoan = await api.confirmRepayment(params.id, signature);
-      
-      return { 
-        signature, 
-        loan: loan.data!,
-        updatedLoan 
-      };
     },
     onSuccess: (result) => {
+      // Handle the "already repaid" case with a different message
+      if (result.wasAlreadyRepaid) {
+        // Show a different success modal or redirect
+        // The loan status has been synced, so we can just navigate
+        navigate('/loans');
+        return;
+      }
+      
       setRepayResult(result);
       setShowSuccessModal(true);
     },
     onError: (error) => {
       console.error('Repayment failed:', error);
-      // Error is already shown by the existing error display in the UI
+      errorModal.showError(error, () => repayMutation.mutate());
     },
   }));
   
@@ -242,14 +294,6 @@ export default function Repay() {
             </div>
           </Show>
           
-          <Show when={repayMutation.error}>
-            <div class="bg-red-50 border border-red-200 p-4 rounded-lg">
-              <div class="text-red-800 font-medium">Repayment Failed</div>
-              <div class="text-red-600 text-sm mt-1">
-                {repayMutation.error?.message}
-              </div>
-            </div>
-          </Show>
         </div>
       </Show>
       
@@ -281,6 +325,14 @@ export default function Repay() {
           label: "Close",
           onClick: () => {}
         }}
+      />
+      
+      {/* Error Modal */}
+      <ErrorModal
+        isOpen={errorModal.isOpen()}
+        onClose={errorModal.hideError}
+        error={errorModal.error()}
+        onRetry={errorModal.retryFn()}
       />
     </div>
   );

@@ -104,8 +104,11 @@ async function main() {
         console.log('Pool data length:', poolAccount.data.length);
         
         // Extract vault addresses from pool
-        const PUMPSWAP_POOL_BASE_VAULT_OFFSET = 64;
-        const PUMPSWAP_POOL_QUOTE_VAULT_OFFSET = 96;
+        // PumpSwap Pool Layout - MUST match programs/memecoin-lending/src/utils.rs
+        // See IDL layout comment in utils.rs for full structure
+        const PUMPSWAP_POOL_BASE_VAULT_OFFSET = 139;  // pool_base_token_account
+        const PUMPSWAP_POOL_QUOTE_VAULT_OFFSET = 171; // pool_quote_token_account
+        const PUMPSWAP_POOL_MIN_LEN = 211;
         
         const baseVault = new PublicKey(poolAccount.data.slice(PUMPSWAP_POOL_BASE_VAULT_OFFSET, PUMPSWAP_POOL_BASE_VAULT_OFFSET + 32));
         const quoteVault = new PublicKey(poolAccount.data.slice(PUMPSWAP_POOL_QUOTE_VAULT_OFFSET, PUMPSWAP_POOL_QUOTE_VAULT_OFFSET + 32));

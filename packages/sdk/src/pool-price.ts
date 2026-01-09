@@ -21,9 +21,12 @@ export const DECIMAL_ADJUSTMENT = new BN(1000);
 /** The divisor to convert scaled price to human-readable SOL */
 export const PRICE_TO_SOL_DIVISOR = 1_000_000; // 1e6
 
-/** PumpSwap pool data offsets */
-const PUMPSWAP_POOL_BASE_VAULT_OFFSET = 64;
-const PUMPSWAP_POOL_QUOTE_VAULT_OFFSET = 96;
+// PumpSwap Pool Layout - MUST match programs/memecoin-lending/src/utils.rs
+// See IDL layout comment in utils.rs for full structure
+const PUMPSWAP_POOL_SIZE = 301; // Full pool account size
+const PUMPSWAP_POOL_BASE_VAULT_OFFSET = 139;  // pool_base_token_account
+const PUMPSWAP_POOL_QUOTE_VAULT_OFFSET = 171; // pool_quote_token_account
+const PUMPSWAP_POOL_MIN_LEN = 211;
 
 /** Token account amount offset */
 const TOKEN_ACCOUNT_AMOUNT_OFFSET = 64;

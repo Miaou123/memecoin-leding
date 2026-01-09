@@ -37,6 +37,7 @@ export interface TokenVerificationResult {
   mint: string;
   symbol?: string;
   name?: string;
+  imageUrl?: string;
   liquidity: number;
   dexId?: 'pumpfun' | 'pumpswap' | 'raydium' | 'orca' | string;
   pairAddress?: string;

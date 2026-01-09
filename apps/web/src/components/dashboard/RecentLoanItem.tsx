@@ -1,10 +1,12 @@
 import { formatSOL, formatTimeAgo } from '@/lib/utils';
+import { TokenImage } from '@/components/tokens/TokenImage';
 
 export interface RecentLoanItemProps {
   loan: {
     id: string;
     tokenSymbol: string;
     tokenName: string;
+    tokenImageUrl?: string | null;
     amount: string;
     status: 'Active' | 'AtRisk' | 'Repaid';
     createdAt: number;
@@ -57,11 +59,11 @@ export function RecentLoanItem(props: RecentLoanItemProps) {
     <div class={getItemClasses()}>
       <div class="flex items-center gap-3">
         {/* Token Avatar */}
-        <div class="w-8 h-8 bg-bg-tertiary border border-border flex items-center justify-center">
-          <span class="text-xs font-bold text-text-primary">
-            {props.loan.tokenSymbol.slice(0, 2).toUpperCase()}
-          </span>
-        </div>
+        <TokenImage
+          src={props.loan.tokenImageUrl}
+          symbol={props.loan.tokenSymbol}
+          size="sm"
+        />
         
         {/* Token Info */}
         <div>

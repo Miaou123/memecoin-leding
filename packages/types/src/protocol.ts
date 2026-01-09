@@ -63,6 +63,13 @@ export interface Loan {
   dueAt: number;
   status: LoanStatus;
   index: number;
+  token?: {
+    symbol: string;
+    name: string;
+    imageUrl?: string | null;
+    decimals: number;
+    tier: string;
+  };
 }
 
 export interface LoanAccount {

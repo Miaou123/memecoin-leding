@@ -210,7 +210,7 @@ export const TokenSelectionUnified: Component<TokenSelectionUnifiedProps> = (pro
             onFocus={handleInputFocus}
             onBlur={handleInputBlur}
             onPaste={handlePaste}
-            placeholder="Enter PumpFun token mint address..."
+            placeholder="Enter token mint address..."
             class="w-full p-3 border rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent pr-10"
           />
           <div class="absolute right-3 top-1/2 -translate-y-1/2">
@@ -250,7 +250,7 @@ export const TokenSelectionUnified: Component<TokenSelectionUnifiedProps> = (pro
             {/* Wallet Tokens Section */}
             <Show when={props.walletConnected && tokensWithPrices().length > 0}>
               <div class="p-2 border-b border-border">
-                <div class="text-xs font-medium text-muted-foreground mb-2">Your PumpFun Tokens</div>
+                <div class="text-xs font-medium text-muted-foreground mb-2">Your Whitelisted Tokens</div>
               </div>
               <For each={tokensWithPrices()}>
                 {(token) => (
@@ -307,7 +307,7 @@ export const TokenSelectionUnified: Component<TokenSelectionUnifiedProps> = (pro
             {/* Empty State */}
             <Show when={props.walletConnected && !isLoadingPrices() && !props.isLoadingWalletTokens && tokensWithPrices().length === 0 && !props.manualValue.trim()}>
               <div class="p-4 text-center text-muted-foreground">
-                <div class="text-sm">No PumpFun tokens found in your wallet</div>
+                <div class="text-sm">No whitelisted tokens found in your wallet</div>
                 <div class="text-xs mt-1">Enter a token address above to continue</div>
               </div>
             </Show>
@@ -322,6 +322,11 @@ export const TokenSelectionUnified: Component<TokenSelectionUnifiedProps> = (pro
           </div>
         </Show>
       </div>
+      
+      {/* Helper text */}
+      <p class="text-xs text-muted-foreground">
+        Enter a token address to check its eligibility
+      </p>
     </div>
   );
 };

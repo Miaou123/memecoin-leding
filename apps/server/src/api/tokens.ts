@@ -100,6 +100,7 @@ tokensRouter.get('/top-collateral', async (c) => {
       mint: topMint,
       symbol: token?.symbol || 'UNKNOWN',
       name: token?.name || 'Unknown Token',
+      imageUrl: token?.imageUrl || null,
       totalCollateralAmount: maxCollateral.toString(),
       activeLoansCount: maxCount,
     };

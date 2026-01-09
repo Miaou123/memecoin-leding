@@ -3,6 +3,7 @@ import { useWallet } from '@/components/wallet/WalletProvider';
 import { PublicKey } from '@solana/web3.js';
 import { TOKEN_PROGRAM_ID } from '@solana/spl-token';
 import { createConnection } from '../utils/rpc';
+import { api } from '@/lib/api';
 
 export interface WalletToken {
   mint: string;
@@ -43,15 +44,42 @@ export function useWalletPumpTokens(): UseWalletPumpTokensResult {
       const walletPublicKey = new PublicKey(publicKey);
 
       // Get all token accounts for the wallet
-      const tokenAccounts = await connection.getParsedTokenAccountsByOwner(walletPublicKey, {
-        programId: TOKEN_PROGRAM_ID,
-      });
+      let tokenAccounts;
+      try {
+        console.log('Fetching token accounts for wallet:', publicKey);
+        
+        // Also check Token-2022 accounts since PumpFun uses Token-2022
+        const TOKEN_2022_PROGRAM_ID = new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb');
+        
+        // Fetch both regular SPL tokens and Token-2022 tokens
+        const [regularTokens, token2022Accounts] = await Promise.all([
+          connection.getParsedTokenAccountsByOwner(walletPublicKey, {
+            programId: TOKEN_PROGRAM_ID,
+          }),
+          connection.getParsedTokenAccountsByOwner(walletPublicKey, {
+            programId: TOKEN_2022_PROGRAM_ID,
+          })
+        ]);
+        
+        console.log('Regular SPL token accounts:', regularTokens.value.length);
+        console.log('Token-2022 accounts:', token2022Accounts.value.length);
+        
+        // Combine both token types
+        tokenAccounts = {
+          value: [...regularTokens.value, ...token2022Accounts.value]
+        };
+        
+        console.log('Total token accounts fetched:', tokenAccounts.value.length);
+      } catch (rpcError: any) {
+        console.error('RPC Error fetching token accounts:', rpcError);
+        throw new Error(`Failed to fetch token accounts: ${rpcError.message || 'Unknown RPC error'}`);
+      }
 
-      // Debug logging (uncomment when debugging)
-      // console.log('=== Wallet Token Debug ===');
-      // console.log('Total token accounts:', tokenAccounts.value.length);
+      // Debug logging
+      console.log('=== Wallet Token Debug ===');
+      console.log('Total token accounts:', tokenAccounts.value.length);
 
-      // Filter for PumpFun tokens (mint ends with "pump")
+      // Filter for PumpFun tokens first (mint ends with "pump")
       const pumpTokens: WalletToken[] = [];
       
       for (const account of tokenAccounts.value) {
@@ -63,28 +91,29 @@ export function useWalletPumpTokens(): UseWalletPumpTokensResult {
         const balance = tokenAmount.amount;
         const isPump = mint.toLowerCase().endsWith('pump');
 
-        // Debug individual tokens (uncomment when debugging)
-        // console.log(`Token: ${mint.slice(0,8)}... | Balance: ${balance} | isPump: ${isPump} | decimals: ${tokenAmount.decimals} | uiAmount: ${tokenAmount.uiAmountString || tokenAmount.uiAmount}`);
+        // Debug individual tokens
+        console.log(`Token: ${mint.slice(0,8)}... | Balance: ${balance} | isPump: ${isPump} | decimals: ${tokenAmount.decimals} | uiAmount: ${tokenAmount.uiAmountString || tokenAmount.uiAmount}`);
 
-        // Check if this is a PumpFun token
+        // Check if this is a PumpFun token (include all, even with 0 balance)
         if (isPump) {
           const decimals = tokenAmount.decimals;
           const uiAmount = tokenAmount.uiAmountString || tokenAmount.uiAmount?.toString() || '0';
-
-          // Only include tokens with non-zero balance
-          if (balance !== '0') {
-            pumpTokens.push({
-              mint,
-              balance,
-              uiBalance: uiAmount,
-              decimals,
-            });
+          
+          if (balance === '0') {
+            console.log(`Including PumpFun token with 0 balance: ${mint}`);
           }
+          
+          pumpTokens.push({
+            mint,
+            balance,
+            uiBalance: uiAmount,
+            decimals,
+          });
         }
       }
 
       // Debug results (uncomment when debugging)
-      // console.log('PumpFun tokens found:', pumpTokens.length);
+      console.log('PumpFun tokens found:', pumpTokens.length);
       // console.log('PumpFun tokens:', pumpTokens.map(t => ({
       //   mint: t.mint.slice(0, 8) + '...',
       //   balance: t.balance,
@@ -92,7 +121,33 @@ export function useWalletPumpTokens(): UseWalletPumpTokensResult {
       //   decimals: t.decimals
       // })));
       
-      setTokens(pumpTokens);
+      // Filter PumpFun tokens against whitelist
+      if (pumpTokens.length > 0) {
+        try {
+          const mints = pumpTokens.map(t => t.mint);
+          console.log('Checking whitelist for mints:', mints);
+          
+          const whitelistResponse = await api.checkWhitelisted(mints);
+          console.log('Whitelist response:', whitelistResponse);
+          
+          // Create a set of whitelisted mints for fast lookup
+          const whitelistedSet = new Set(whitelistResponse.whitelistedMints);
+          
+          // Filter tokens to only include whitelisted ones
+          const whitelistedTokens = pumpTokens.filter(token => whitelistedSet.has(token.mint));
+          
+          console.log(`Found ${whitelistedTokens.length} whitelisted PumpFun tokens out of ${pumpTokens.length} PumpFun tokens`);
+          
+          setTokens(whitelistedTokens);
+        } catch (err) {
+          console.error('Error checking whitelist:', err);
+          // If whitelist check fails, return all PumpFun tokens (fallback to old behavior)
+          console.log('Falling back to showing all PumpFun tokens due to whitelist error');
+          setTokens(pumpTokens);
+        }
+      } else {
+        setTokens([]);
+      }
     } catch (err: any) {
       console.error('Error fetching wallet tokens:', err);
       setError(err.message || 'Failed to fetch wallet tokens');

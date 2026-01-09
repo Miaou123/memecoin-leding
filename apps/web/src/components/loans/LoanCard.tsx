@@ -7,7 +7,7 @@ import { Loan, LoanStatus } from '@memecoin-lending/types';
 interface TokenMetadata {
   symbol: string;
   name: string;
-  logoUri?: string;
+  imageUrl?: string;
 }
 
 interface LoanCardProps {
@@ -88,7 +88,7 @@ export function LoanCard(props: LoanCardProps) {
       <div class="bg-bg-tertiary border-b border-border p-4 flex items-center justify-between">
         <div class="flex items-center gap-3">
           <TokenImage
-            src={props.loan.token?.logoUri}
+            src={props.loan.token?.imageUrl}
             symbol={props.loan.token?.symbol || 'UNK'}
             size="md"
           />

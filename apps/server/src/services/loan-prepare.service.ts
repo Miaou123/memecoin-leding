@@ -17,6 +17,14 @@ import { getJupiterPrice } from './jupiter-price.service.js';
 import { getConnection, getProgram } from './solana.service.js';
 import { assertCircuitBreakerOk } from './circuit-breaker.service.js';
 import { checkWalletRateLimit } from './wallet-rate-limit.service.js';
+import { 
+  getPumpSwapPoolAddress, 
+  extractPoolVaults,
+  POOL_SIZE as PUMPSWAP_POOL_SIZE,
+  POOL_BASE_VAULT_OFFSET as PUMPSWAP_POOL_BASE_VAULT_OFFSET,
+  POOL_QUOTE_VAULT_OFFSET as PUMPSWAP_POOL_QUOTE_VAULT_OFFSET,
+  POOL_MIN_LEN as PUMPSWAP_POOL_MIN_LEN
+} from './pumpswap-pool.service.js';
 
 // Token-2022 Program ID
 const TOKEN_2022_PROGRAM_ID = new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb');
@@ -27,11 +35,6 @@ const TREASURY_SEED = Buffer.from('treasury');
 const TOKEN_CONFIG_SEED = Buffer.from('token_config');
 const LOAN_SEED = Buffer.from('loan');
 const VAULT_SEED = Buffer.from('vault');
-
-// PumpSwap Pool Layout offsets
-const PUMPSWAP_POOL_BASE_VAULT_OFFSET = 64;
-const PUMPSWAP_POOL_QUOTE_VAULT_OFFSET = 96;
-const PUMPSWAP_POOL_MIN_LEN = 128;
 
 // Price signature validity (30 seconds)
 const PRICE_VALIDITY_SECONDS = 30;
@@ -83,16 +86,10 @@ async function getPumpSwapVaults(
       return null;
     }
     
-    const baseVault = new PublicKey(
-      poolAccount.data.slice(PUMPSWAP_POOL_BASE_VAULT_OFFSET, PUMPSWAP_POOL_BASE_VAULT_OFFSET + 32)
-    );
-    const quoteVault = new PublicKey(
-      poolAccount.data.slice(PUMPSWAP_POOL_QUOTE_VAULT_OFFSET, PUMPSWAP_POOL_QUOTE_VAULT_OFFSET + 32)
-    );
+    const vaults = extractPoolVaults(poolAccount.data);
+    console.log(`[PrepareLoan] PumpSwap vaults - base: ${vaults.baseVault.toString().slice(0,8)}..., quote: ${vaults.quoteVault.toString().slice(0,8)}...`);
     
-    console.log(`[PrepareLoan] PumpSwap vaults - base: ${baseVault.toString().slice(0,8)}..., quote: ${quoteVault.toString().slice(0,8)}...`);
-    
-    return { baseVault, quoteVault };
+    return vaults;
   } catch (error) {
     console.error('[PrepareLoan] Failed to fetch PumpSwap vaults:', error);
     return null;
@@ -204,7 +201,25 @@ export async function prepareLoanTransaction(
 
   if (isPumpSwap) {
     console.log('[PrepareLoan] PumpSwap pool address:', poolAddress.toString());
-    const vaults = await getPumpSwapVaults(connection, poolAddress);
+    let vaults = await getPumpSwapVaults(connection, poolAddress);
+    
+    // If vaults fetch failed, try discovering the pool
+    if (!vaults) {
+      console.warn('[PrepareLoan] Could not fetch vaults from stored pool, trying pool discovery');
+      const discoveredPool = await getPumpSwapPoolAddress(connection, tokenMint);
+      
+      if (discoveredPool && !discoveredPool.equals(poolAddress)) {
+        console.log('[PrepareLoan] Found different pool via discovery:', discoveredPool.toString());
+        vaults = await getPumpSwapVaults(connection, discoveredPool);
+        
+        if (vaults) {
+          // Update the pool address for the transaction
+          poolAddress = discoveredPool;
+          console.log('[PrepareLoan] Using discovered pool address');
+        }
+      }
+    }
+    
     if (!vaults) {
       // For PumpSwap, we might not need the vault accounts if the on-chain program handles it
       console.warn('[PrepareLoan] Could not fetch PumpSwap vaults, proceeding without them');

@@ -35,6 +35,7 @@ export interface RecentLoanResponse {
   id: string;
   tokenSymbol: string;
   tokenName: string;
+  tokenImageUrl?: string | null;
   solBorrowed: string;
   status: string;
   createdAt: number;

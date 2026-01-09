@@ -14,7 +14,7 @@ interface WhitelistFormData {
   reason?: string;
   notes?: string;
   externalUrl?: string;
-  logoUrl?: string;
+  imageUrl?: string;
   tags?: string[];
 }
 
